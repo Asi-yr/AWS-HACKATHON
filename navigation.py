@@ -20,6 +20,7 @@ def get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, f
     """
     Fetches routes from OSRM, calculates safety scores, and generates Turn-By-Turn navigation steps.
     """
+    
     # Set a timeout and a specific User-Agent to prevent the server from dropping the connection
     headers = {
         'User-Agent': 'SafeRouteAI_Final_Year_Project_v1',
