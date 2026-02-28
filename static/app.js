@@ -16,8 +16,6 @@ setTimeout(() => {
 
 let currentRouteLines =[]; // To store active colored lines :: CHECK TO SEE IF THIS IS NOT NEEDED
 
-// --- AUTOCOMPLETE LOGIC ---
-
 // Helper to handle the API calls for suggestions
 async function fetchSuggestions(query, dropdownId, inputId) {
     const dropdown = document.getElementById(dropdownId);
@@ -170,6 +168,17 @@ function displayRoutes(routes) {
         resultsDiv.appendChild(card);
     });
 
+    if (routes.length > 0) {
+        const startPoint = routes[0].coords[0];
+        const endPoint = routes[0].coords[routes[0].coords.length - 1];
+
+        if (originMarker) map.removeLayer(originMarker);
+        if (destinationMarker) map.removeLayer(destinationMarker);
+
+        originMarker = L.marker(startPoint, {icon: greenIcon}).addTo(map).bindPopup("Starting Location");
+        destinationMarker = L.marker(endPoint, {icon: redIcon}).addTo(map).bindPopup("Destination");
+    }
+
     // Automatically zoom the map to fit all the new lines
     if (currentRouteLines.length > 0) {
         const group = new L.featureGroup(currentRouteLines);
@@ -213,3 +222,94 @@ async function fetchSuggestions(query, dropdownId, inputId) {
         console.error("Autocomplete error:", err);
     }
 }
+
+let isPicking = false;
+let pickStep = 'origin'; // 'origin' or 'destination'
+let originMarker = null;
+let destinationMarker = null;
+
+const pickBtn = document.getElementById('map-pick-btn');
+const pickStatus = document.getElementById('pick-status');
+
+// Toggle Picking Mode
+pickBtn.addEventListener('click', () => {
+    isPicking = !isPicking;
+    if (isPicking) {
+        pickBtn.classList.add('active');
+        pickStatus.style.display = 'block';
+        pickStep = 'origin';
+        pickStatus.innerText = "Click map to set Origin";
+        document.getElementById('map').style.cursor = 'crosshair';
+    } else {
+        resetPickingMode();
+    }
+});
+
+function resetPickingMode() {
+    isPicking = false;
+    pickBtn.classList.remove('active');
+    pickStatus.style.display = 'none';
+    document.getElementById('map').style.cursor = '';
+}
+
+const greenIcon = new L.Icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+});
+
+const redIcon = new L.Icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+});
+
+map.on('click', async (e) => {
+    if (!isPicking) return;
+
+    const { lat, lng } = e.latlng;
+    const targetInputId = pickStep === 'origin' ? 'origin' : 'destination';
+    const inputField = document.getElementById(targetInputId);
+    
+    inputField.value = "Fetching address...";
+
+    try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`);
+        const data = await response.json();
+        const address = data.display_name;
+
+        inputField.value = address;
+
+        if (pickStep === 'origin') {
+            // Remove old origin marker if it exists
+            if (originMarker) map.removeLayer(originMarker);
+            
+            // Create GREEN marker for Origin
+            originMarker = L.marker([lat, lng], { icon: greenIcon }).addTo(map)
+                .bindPopup(`<b>Starting Location:</b><br>${address}`)
+                .openPopup();
+            
+            pickStep = 'destination';
+            pickStatus.innerText = "Click map to set Destination";
+        } else {
+            // Remove old destination marker if it exists
+            if (destinationMarker) map.removeLayer(destinationMarker);
+            
+            // Create RED marker for Destination
+            destinationMarker = L.marker([lat, lng], { icon: redIcon }).addTo(map)
+                .bindPopup(`<b>Destination:</b><br>${address}`)
+                .openPopup();
+            
+            resetPickingMode();
+        }
+    } catch (err) {
+        console.error("Reverse geocoding error:", err);
+        inputField.value = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    }
+});

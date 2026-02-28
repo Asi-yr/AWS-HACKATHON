@@ -2,16 +2,20 @@ import requests
 from shapely.geometry import LineString
 
 def geocode_location(address):
-    # Adding countrycodes=ph and featuretype=settlement/street helps narrow results
+    # If the address is just coordinates (fallback), handle that
+    if "," in address and any(char.isdigit() for char in address):
+        # Optional: logic to detect if it's already a coord string
+        pass 
+
     url = f"https://nominatim.openstreetmap.org/search?q={address}&format=json&limit=1&countrycodes=ph"
-    headers = {'User-Agent': 'SafeRouteAI_Final_Version'}
+    headers = {'User-Agent': 'SafeRouteAI_v2'}
     
     try:
-        resp = requests.get(url, headers=headers, timeout=5).json()
+        resp = requests.get(url, headers=headers, timeout=10).json()
         if resp:
             return float(resp[0]['lon']), float(resp[0]['lat'])
     except Exception as e:
-        print(f"Geocoding error: {e}")
+        print(f"Geocoding Error: {e}")
     return None, None
 
 def get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, flood_zones):

@@ -120,3 +120,81 @@ html, body {
     background-color: #f1f1f1;
     color: #2980b9;
 }
+
+/* Ensure the parent container allows absolute positioning inside it */
+.map-area {
+    flex-grow: 1;
+    height: 100vh;
+    position: relative; /* CRITICAL: This keeps buttons inside the map section */
+    overflow: hidden;
+}
+
+#map {
+    width: 100%;
+    height: 100%;
+    z-index: 1; /* Map stays at the bottom layer */
+}
+
+/* Map Overlay Controls */
+.map-overlay-controls {
+    position: absolute;
+    top: 80px; /* Moves it below the + / - zoom buttons */
+    left: 10px;
+    z-index: 1001; /* CRITICAL: Must be higher than 1000 to sit above Leaflet */
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    pointer-events: none; /* Let clicks pass through the container... */
+}
+
+#map-pick-btn {
+    pointer-events: auto; /* ...but allow clicks on the button itself */
+    width: 34px;
+    height: 34px;
+    background: white;
+    border: 2px solid rgba(0,0,0,0.2);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+    transition: all 0.2s;
+}
+
+#map-pick-btn:hover { background: #f4f4f4; }
+#map-pick-btn.active { 
+    background: #2980b9; 
+    color: white; 
+    border-color: #1a5276; 
+}
+
+.pick-status-label {
+    pointer-events: none;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    display: none; 
+    white-space: nowrap;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.input-label {
+    display: block;
+    font-size: 13px;
+    font-weight: bold;
+    color: #34495e;
+    margin-bottom: 5px;
+    margin-top: 10px;
+}
+
+/* Optional: Make the destination input have a slight red focus border */
+#destination:focus {
+    border-color: #e74c3c;
+    outline: none;
+    box-shadow: 0 0 5px rgba(231, 76, 60, 0.2);
+}

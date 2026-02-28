@@ -17,35 +17,45 @@
             </div>
 
             <div class="controls">
-                <div class="controls">
-                    <div class="autocomplete-container">
-                        <input type="text" id="origin" placeholder="Origin (e.g. Manila)" autocomplete="off">
-                        <div id="origin-suggestions" class="suggestions-box"></div>
-                    </div>
-
-                    <div class="autocomplete-container">
-                        <input type="text" id="destination" placeholder="Destination (e.g. Quezon City)" autocomplete="off">
-                        <div id="destination-suggestions" class="suggestions-box"></div>
-                    </div>
-                    
-                    <label for="commuter-type">Commuter Type:</label>
-                    <select id="commuter-type">
-                        <option value="car">Car (Moderate Flood Tolerance)</option>
-                        <option value="jeepney">Jeepney (High Flood Tolerance)</option>
-                        <option value="tricycle">Tricycle (Low Flood Tolerance)</option>
-                    </select>
-
-                    <button id="find-routes-btn" class="btn-primary">Find Safe Routes</button>
+                <!-- Origin Section -->
+                <label class="input-label">Starting Location:</label>
+                <div class="autocomplete-container">
+                    <input type="text" id="origin" placeholder="Type or use pin 📍" autocomplete="off">
+                    <div id="origin-suggestions" class="suggestions-box"></div>
                 </div>
+
+                <!-- Destination Section -->
+                <label class="input-label">Destination:</label>
+                <div class="autocomplete-container">
+                    <input type="text" id="destination" placeholder="Type or use pin 📍" autocomplete="off">
+                    <div id="destination-suggestions" class="suggestions-box"></div>
+                </div>
+                
+                <label class="input-label">Commuter Type:</label>
+                <select id="commuter-type">
+                    <option value="car">Car</option>
+                    <option value="jeepney">Jeepney</option>
+                    <option value="tricycle">Tricycle</option>
+                </select>
+
+                <button id="find-routes-btn" class="btn-primary">Find Safe Routes</button>
             </div>
 
             <div id="route-results" class="route-results">
             <!-- Route Cards will be injected here via JS -->
             </div>
         </div>
-
         <!-- Map Container -->
-        <div id="map" style="height: 100%; width: 100%; background: #ebebeb;"></div>
+        <div class="map-area">
+            <!-- This is your existing map div -->
+            <div id="map" style="height: 100%; width: 100%; background: #ebebeb;"></div>
+
+            <!-- This is the new button container that sits ON TOP of the map -->
+            <div class="map-overlay-controls">
+                <button id="map-pick-btn" title="Pick points on map">📍</button>
+                <div id="pick-status" class="pick-status-label">Click map for Origin</div>
+            </div>
+        </div>
     </div>
 
     <!-- Leaflet JS -->
