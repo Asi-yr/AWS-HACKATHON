@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sign Up - SafeRouteAI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login-body">
+    <div class="login-container">
+        <h1>Create Account</h1>
+        <p>Join SafeRouteAI today.</p>
+
+        <!-- Error/Success Messages -->
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            {% for message in messages %}
+              <div class="flash-message error">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <form action="/register" method="POST">
+            <input type="text" name="username" placeholder="Choose a Username" required>
+            <input type="password" name="password" placeholder="Create a Password" required>
+            <button type="submit" class="btn-primary" style="background: #27ae60;">Register Account</button>
+        </form>
+        
+        <p style="margin-top: 15px; font-size: 14px;">
+            Already have an account? <a href="/login">Login Here</a>
+        </p>
+    </div>
+</body>
+</html>
