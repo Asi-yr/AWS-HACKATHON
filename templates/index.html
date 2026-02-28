@@ -17,21 +17,30 @@
             </div>
 
             <div class="controls">
-                <input type="text" id="origin" placeholder="Origin (e.g. Manila)">
-                <input type="text" id="destination" placeholder="Destination (e.g. Quezon City)">
-                
-                <label for="commuter-type">Commuter Type:</label>
-                <select id="commuter-type">
-                    <option value="car">Car (Moderate Flood Tolerance)</option>
-                    <option value="jeepney">Jeepney (High Flood Tolerance)</option>
-                    <option value="tricycle">Tricycle (Low Flood Tolerance)</option>
-                </select>
+                <div class="controls">
+                    <div class="autocomplete-container">
+                        <input type="text" id="origin" placeholder="Origin (e.g. Manila)" autocomplete="off">
+                        <div id="origin-suggestions" class="suggestions-box"></div>
+                    </div>
 
-                <button id="find-routes-btn" class="btn-primary">Find Safe Routes</button>
+                    <div class="autocomplete-container">
+                        <input type="text" id="destination" placeholder="Destination (e.g. Quezon City)" autocomplete="off">
+                        <div id="destination-suggestions" class="suggestions-box"></div>
+                    </div>
+                    
+                    <label for="commuter-type">Commuter Type:</label>
+                    <select id="commuter-type">
+                        <option value="car">Car (Moderate Flood Tolerance)</option>
+                        <option value="jeepney">Jeepney (High Flood Tolerance)</option>
+                        <option value="tricycle">Tricycle (Low Flood Tolerance)</option>
+                    </select>
+
+                    <button id="find-routes-btn" class="btn-primary">Find Safe Routes</button>
+                </div>
             </div>
 
             <div id="route-results" class="route-results">
-                <!-- Route Cards will be injected here via JS -->
+            <!-- Route Cards will be injected here via JS -->
             </div>
         </div>
 

@@ -16,6 +16,64 @@ setTimeout(() => {
 
 let currentRouteLines =[]; // To store active colored lines :: CHECK TO SEE IF THIS IS NOT NEEDED
 
+// --- AUTOCOMPLETE LOGIC ---
+
+// Helper to handle the API calls for suggestions
+async function fetchSuggestions(query, dropdownId, inputId) {
+    const dropdown = document.getElementById(dropdownId);
+    if (query.length < 3) {
+        dropdown.style.display = 'none';
+        return;
+    }
+
+    try {
+        // Fetch from Nominatim (Filtering for Philippines)
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?q=${query}&format=json&addressdetails=1&limit=5&countrycodes=ph`);
+        const data = await response.json();
+
+        dropdown.innerHTML = '';
+        if (data.length > 0) {
+            dropdown.style.display = 'block';
+            data.forEach(place => {
+                const item = document.createElement('div');
+                item.className = 'suggestion-item';
+                item.innerText = place.display_name;
+                item.onclick = () => {
+                    document.getElementById(inputId).value = place.display_name;
+                    dropdown.style.display = 'none';
+                };
+                dropdown.appendChild(item);
+            });
+        } else {
+            dropdown.style.display = 'none';
+        }
+    } catch (err) {
+        console.error("Autocomplete error:", err);
+    }
+}
+
+// Debounce timer
+let debounceTimer;
+const setupAutocomplete = (inputId, dropdownId) => {
+    document.getElementById(inputId).addEventListener('input', (e) => {
+        clearTimeout(debounceTimer);
+        const query = e.target.value;
+        debounceTimer = setTimeout(() => fetchSuggestions(query, dropdownId, inputId), 300);
+    });
+};
+
+// Initialize listeners
+setupAutocomplete('origin', 'origin-suggestions');
+setupAutocomplete('destination', 'destination-suggestions');
+
+// Close suggestions if user clicks elsewhere
+document.addEventListener('click', (e) => {
+    if (!e.target.matches('.suggestion-item') && !e.target.matches('input')) {
+        document.getElementById('origin-suggestions').style.display = 'none';
+        document.getElementById('destination-suggestions').style.display = 'none';
+    }
+});
+
 // ==========================================
 // 2. BUTTON CLICK EVENT
 // ==========================================
@@ -120,4 +178,38 @@ function displayRoutes(routes) {
 
     // Fix grey map glitch again after drawing
     map.invalidateSize();
+}
+
+// Helper to handle the API calls for suggestions
+async function fetchSuggestions(query, dropdownId, inputId) {
+    const dropdown = document.getElementById(dropdownId);
+    if (query.length < 3) {
+        dropdown.style.display = 'none';
+        return;
+    }
+
+    try {
+        // Fetch from Nominatim (Filtering for Philippines)
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?q=${query}&format=json&addressdetails=1&limit=5&countrycodes=ph`);
+        const data = await response.json();
+
+        dropdown.innerHTML = '';
+        if (data.length > 0) {
+            dropdown.style.display = 'block';
+            data.forEach(place => {
+                const item = document.createElement('div');
+                item.className = 'suggestion-item';
+                item.innerText = place.display_name;
+                item.onclick = () => {
+                    document.getElementById(inputId).value = place.display_name;
+                    dropdown.style.display = 'none';
+                };
+                dropdown.appendChild(item);
+            });
+        } else {
+            dropdown.style.display = 'none';
+        }
+    } catch (err) {
+        console.error("Autocomplete error:", err);
+    }
 }
