@@ -54,3 +54,31 @@ body { background-color: #f4f7f6; color: #333; }
 .login-container p a:hover {
     text-decoration: underline;
 }
+
+/* Ensure the body and html take up the full screen */
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden; /* Prevents double scrollbars */
+}
+
+/* The main container must fill the screen */
+.app-container {
+    display: flex;
+    height: 100vh; 
+    width: 100vw;
+}
+
+/* The map area must explicitly fill its parent */
+.map-area {
+    flex-grow: 1;
+    height: 100%; /* If this doesn't work, try height: 100vh; */
+    background-color: #ddd; /* A placeholder color so you know it's there */
+}
+
+/* Ensure the Leaflet ID itself is full size */
+#map {
+    width: 100%;
+    height: 100%;
+}
