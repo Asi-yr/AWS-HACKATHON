@@ -7,5 +7,4 @@ to begin running the web for testing, please follow these instructions:
 4. run: py -m pip install -r requirements.txt
 5. py main.py
 ---
-once done check if the elements or anything is running just fine.
-**report back to the gc if there's any bugs found, or create an issue in github.**
+once done check if the elements or anything is running just fine. **report back to the gc if there are any bugs found, or create an issue in github.**
