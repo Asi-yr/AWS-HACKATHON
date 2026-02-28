@@ -1,62 +1,96 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from shapely.geometry import LineString, Polygon
-import mysql.connector
 import requests
+import sqlite3
+
+# Try to import MySQL, but don't crash if it's not installed yet
+try:
+    import mysql.connector
+except ImportError:
+    pass
 
 app = Flask(__name__)
 app.secret_key = 'saferoute_super_secret_key'
 
-# --- MYSQL DATABASE CONFIGURATION ---
+# ==========================================
+# ⚙️ DATABASE TOGGLE SWITCH
+# ==========================================
+# Set to True to use MySQL. Set to False to use SQLite.
+USE_MYSQL = False
+
+# MySQL Configuration
 DB_HOST = "localhost"
-DB_USER = "root"      # Default XAMPP/WAMP user
-DB_PASSWORD = ""      # Default XAMPP/WAMP password (leave blank if none)
+DB_USER = "root"
+DB_PASSWORD = ""
 DB_NAME = "saferoute_db"
 
+# SQLite Configuration
+SQLITE_DB = "users.db"
+
+
+# ==========================================
+# 🛠️ DATABASE HELPER FUNCTIONS
+# ==========================================
 def get_db_connection():
-    """Helper function to get a database connection"""
-    return mysql.connector.connect(
-        host=DB_HOST,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        database=DB_NAME
-    )
+    """Returns a connection and a cursor based on the selected database."""
+    if USE_MYSQL:
+        conn = mysql.connector.connect(
+            host=DB_HOST, user=DB_USER, password=DB_PASSWORD, database=DB_NAME
+        )
+        return conn, conn.cursor()
+    else:
+        conn = sqlite3.connect(SQLITE_DB)
+        return conn, conn.cursor()
+
+def execute_query(cursor, query, params=None):
+    """Automatically swaps SQLite '?' with MySQL '%s' depending on the active DB."""
+    if USE_MYSQL:
+        query = query.replace('?', '%s')
+    
+    if params:
+        cursor.execute(query, params)
+    else:
+        cursor.execute(query)
 
 def init_db():
-    """Create the database and table if they do not exist"""
-    try:
-        # 1. Connect without database to create it if it doesn't exist
-        temp_conn = mysql.connector.connect(
-            host=DB_HOST,
-            user=DB_USER,
-            password=DB_PASSWORD
-        )
-        temp_cursor = temp_conn.cursor()
-        temp_cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
-        temp_cursor.close()
-        temp_conn.close()
+    """Initializes the active database and creates the users table."""
+    if USE_MYSQL:
+        try:
+            # Connect to MySQL server to create database if it doesn't exist
+            temp_conn = mysql.connector.connect(host=DB_HOST, user=DB_USER, password=DB_PASSWORD)
+            temp_cursor = temp_conn.cursor()
+            temp_cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
+            temp_cursor.close()
+            temp_conn.close()
 
-        # 2. Connect to the new database and create the users table
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                username VARCHAR(255) PRIMARY KEY, 
-                password VARCHAR(255)
-            )
-        ''')
+            # Connect to the specific database to create the table
+            conn, c = get_db_connection()
+            c.execute('''CREATE TABLE IF NOT EXISTS users 
+                         (username VARCHAR(255) PRIMARY KEY, password VARCHAR(255))''')
+            conn.commit()
+            c.close()
+            conn.close()
+            print("🟢 Using MySQL Database")
+        except Exception as e:
+            print(f"🔴 MySQL Error: {e}")
+    else:
+        # SQLite automatically creates the file if it doesn't exist
+        conn, c = get_db_connection()
+        c.execute('''CREATE TABLE IF NOT EXISTS users 
+                     (username TEXT PRIMARY KEY, password TEXT)''')
         conn.commit()
-        cursor.close()
+        c.close()
         conn.close()
-        print("MySQL Database Initialized Successfully!")
-    except mysql.connector.Error as err:
-        print(f"Error: Could not connect to MySQL. Ensure your MySQL server is running. Details: {err}")
+        print("🟢 Using SQLite Database")
 
-# Initialize the database when the app starts
+# Initialize the database when the server starts
 init_db()
 
 
-# --- FLOOD ZONES ---
+# ==========================================
+# 🌊 FLOOD ZONES (MOCK DATA)
+# ==========================================
 FLOOD_ZONES =[
     {
         "name": "Espana Flood Zone",
@@ -64,7 +98,10 @@ FLOOD_ZONES =[
     }
 ]
 
-# --- ROUTES ---
+
+# ==========================================
+# 🚦 ROUTES & APPLICATION LOGIC
+# ==========================================
 @app.route('/')
 def home():
     if 'user' not in session:
@@ -77,11 +114,10 @@ def register():
         username = request.form.get('username')
         password = request.form.get('password')
         
-        conn = get_db_connection()
-        c = conn.cursor()
+        conn, c = get_db_connection()
         
-        # Check if user already exists (MySQL uses %s instead of ?)
-        c.execute("SELECT * FROM users WHERE username=%s", (username,))
+        # Check if user already exists
+        execute_query(c, "SELECT * FROM users WHERE username=?", (username,))
         if c.fetchone():
             flash("Username already exists. Please choose a different one.")
             c.close()
@@ -90,7 +126,7 @@ def register():
             
         # Hash the password and save the new user
         hashed_pw = generate_password_hash(password)
-        c.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (username, hashed_pw))
+        execute_query(c, "INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_pw))
         conn.commit()
         
         c.close()
@@ -107,16 +143,14 @@ def login():
         username = request.form.get('username')
         password = request.form.get('password')
         
-        conn = get_db_connection()
-        c = conn.cursor()
-        
-        c.execute("SELECT password FROM users WHERE username=%s", (username,))
+        conn, c = get_db_connection()
+        execute_query(c, "SELECT password FROM users WHERE username=?", (username,))
         user = c.fetchone()
         
         c.close()
         conn.close()
         
-        # Check if user exists and password is correct
+        # Check if user exists and password is correct (user[0] is the hashed password)
         if user and check_password_hash(user[0], password):
             session['user'] = username
             return redirect(url_for('home'))
@@ -133,7 +167,6 @@ def logout():
 
 @app.route('/api/routes', methods=['POST'])
 def get_routes():
-    # Application Routing & Safety Logic
     data = request.json
     origin = data.get('origin')
     destination = data.get('destination')
@@ -141,6 +174,7 @@ def get_routes():
 
     headers = {'User-Agent': 'SafeRouteAI/1.0'}
 
+    # 1. Geocoding
     try:
         orig_resp = requests.get(f"https://nominatim.openstreetmap.org/search?q={origin}&format=json&limit=1", headers=headers).json()
         dest_resp = requests.get(f"https://nominatim.openstreetmap.org/search?q={destination}&format=json&limit=1", headers=headers).json()
@@ -153,6 +187,7 @@ def get_routes():
     except Exception as e:
         return jsonify({"error": "Geocoding service unavailable."}), 500
 
+    # 2. Routing via OSRM
     osrm_url = f"https://router.project-osrm.org/route/v1/driving/{orig_coords[0]},{orig_coords[1]};{dest_coords[0]},{dest_coords[1]}?overview=full&geometries=geojson&alternatives=true"
     route_resp = requests.get(osrm_url).json()
 
@@ -164,6 +199,7 @@ def get_routes():
     names =["Fastest Route", "Alternative 1", "Alternative 2"]
     risk_multiplier = {"tricycle": 3.0, "car": 1.5, "jeepney": 1.0}.get(commuter_type, 1.0)
 
+    # 3. Apply Safety Algorithm
     for i, r in enumerate(route_resp.get("routes", [])[:3]):
         coords_lonlat = r["geometry"]["coordinates"]
         coords_latlon = [[pt[1], pt[0]] for pt in coords_lonlat]
