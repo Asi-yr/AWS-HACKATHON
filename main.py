@@ -77,20 +77,35 @@ def logout():
 @app.route('/api/routes', methods=['POST'])
 def get_routes():
     data = request.json
-    origin = data.get('origin')
-    destination = data.get('destination')
+    origin_text = data.get('origin')
+    dest_text = data.get('destination')
+    orig_coords = data.get('originCoords')  # NEW: Get the exact coords if they exist
+    dest_coords = data.get('destCoords')    # NEW: Get the exact coords if they exist
     commuter_type = data.get('commuterType')
 
-    orig_lon, orig_lat = geocode_location(origin)
-    dest_lon, dest_lat = geocode_location(destination)
+    # 1. Handle Origin
+    if orig_coords:
+        # If we clicked the map or used GPS, use exact coordinates!
+        orig_lon, orig_lat = float(orig_coords['lon']), float(orig_coords['lat'])
+    else:
+        # If we only typed text, try to search for it
+        orig_lon, orig_lat = geocode_location(origin_text)
+
+    # 2. Handle Destination
+    if dest_coords:
+        dest_lon, dest_lat = float(dest_coords['lon']), float(dest_coords['lat'])
+    else:
+        dest_lon, dest_lat = geocode_location(dest_text)
 
     if not orig_lon or not dest_lon:
-        return jsonify({"error": "Location not found. Please select from the suggestions."}), 400
+        return jsonify({"error": "Location not found. Please select from the suggestions or use the Map Pin."}), 400
 
-    # Since you removed the flood zones drawing, we pass empty list []
-    nav_response = get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, [])
+    # 3. Call the routing engine (OSRM will automatically snap these coords to the nearest road!)
+    nav_response = get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type,[])
     
-    # Optional: If you want to customize the "Hazards Flagged" text since flood zones are gone:
+    if "error" in nav_response:
+        return jsonify({"error": nav_response["error"]}), 400
+
     for route in nav_response.get("routes", []):
         route["hazards_flagged"] = "Clear Path"
         route["safety_score"] = 100

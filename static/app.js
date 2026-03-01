@@ -3,6 +3,9 @@
 // ==========================================
 const map = L.map('map').setView([14.605, 120.985], 13);
 
+let originCoords = null;
+let destCoords = null;
+
 // Add the OpenStreetMap tiles
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
@@ -39,6 +42,9 @@ async function fetchSuggestions(query, dropdownId, inputId) {
                 item.onclick = () => {
                     document.getElementById(inputId).value = place.display_name;
                     dropdown.style.display = 'none';
+                    // Remember the exact coordinates from the suggestion
+                    if (inputId === 'origin') originCoords = { lat: place.lat, lon: place.lon };
+                    if (inputId === 'destination') destCoords = { lat: place.lat, lon: place.lon };
                 };
                 dropdown.appendChild(item);
             });
@@ -59,6 +65,9 @@ const setupAutocomplete = (inputId, dropdownId) => {
         debounceTimer = setTimeout(() => fetchSuggestions(query, dropdownId, inputId), 300);
     });
 };
+
+document.getElementById('origin').addEventListener('input', () => originCoords = null);
+document.getElementById('destination').addEventListener('input', () => destCoords = null);
 
 // Initialize listeners
 setupAutocomplete('origin', 'origin-suggestions');
@@ -93,7 +102,13 @@ document.getElementById('find-routes-btn').addEventListener('click', async () =>
         const response = await fetch('/api/routes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ origin, destination, commuterType })
+            body: JSON.stringify({ 
+                origin: origin, 
+                destination: destination, 
+                originCoords: originCoords, // Send the exact coordinates!
+                destCoords: destCoords,     // Send the exact coordinates!
+                commuterType: commuterType 
+            })
         });
         
         const data = await response.json();
@@ -274,6 +289,12 @@ map.on('click', async (e) => {
     if (!isPicking) return;
 
     const { lat, lng } = e.latlng;
+    if (pickStep === 'origin') {
+        originCoords = { lat: lat, lon: lng }; // Remember Origin Coordinates
+    } else {
+        destCoords = { lat: lat, lon: lng };   // Remember Destination Coordinates
+    }
+
     const targetInputId = pickStep === 'origin' ? 'origin' : 'destination';
     const inputField = document.getElementById(targetInputId);
     
@@ -313,3 +334,97 @@ map.on('click', async (e) => {
         inputField.value = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
     }
 });
+
+let userMarker = null;
+let isTracking = false;
+let watchId = null;
+
+// --- FEATURE 1: QoL "USE CURRENT LOCATION" FOR STARTING POINT ---
+document.getElementById('locate-me-btn').addEventListener('click', () => {
+    if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser.");
+        return;
+    }
+
+    const originInput = document.getElementById('origin');
+    originInput.value = "Locating you...";
+
+    navigator.geolocation.getCurrentPosition(async (position) => {
+        const { latitude, longitude } = position.coords;
+
+        originCoords = { lat: latitude, lon: longitude };
+        
+        try {
+            // Reverse Geocode to get address
+            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
+            const data = await response.json();
+            
+            originInput.value = data.display_name;
+
+            // Place Green Marker
+            if (originMarker) map.removeLayer(originMarker);
+            originMarker = L.marker([latitude, longitude], { icon: greenIcon }).addTo(map)
+                .bindPopup("<b>Your Current Location</b>")
+                .openPopup();
+            
+            map.setView([latitude, longitude], 15);
+        } catch (err) {
+            originInput.value = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+        }
+    }, () => {
+        alert("Unable to retrieve your location. Please check your browser permissions.");
+        originInput.value = "";
+    });
+});
+
+// --- FEATURE 2: LIVE TRACKING (FOLLOW ME) ---
+const trackBtn = document.getElementById('track-me-btn');
+
+trackBtn.addEventListener('click', () => {
+    if (isTracking) {
+        stopTracking();
+    } else {
+        startTracking();
+    }
+});
+
+function startTracking() {
+    if (!navigator.geolocation) return;
+
+    isTracking = true;
+    trackBtn.classList.add('active');
+    
+    // Create a blue dot for the user
+    const blueDotIcon = L.divIcon({
+        className: 'user-location-dot',
+        iconSize: [15, 15]
+    });
+
+    // watchPosition updates automatically as the user moves
+    watchId = navigator.geolocation.watchPosition((position) => {
+        const { latitude, longitude } = position.coords;
+
+        if (userMarker) {
+            userMarker.setLatLng([latitude, longitude]);
+        } else {
+            userMarker = L.marker([latitude, longitude], { icon: blueDotIcon }).addTo(map);
+        }
+
+        // Center map on user as they move
+        map.panTo([latitude, longitude]);
+        
+    }, (err) => {
+        console.error("Tracking error:", err);
+        stopTracking();
+    }, {
+        enableHighAccuracy: true
+    });
+}
+
+function stopTracking() {
+    isTracking = false;
+    trackBtn.classList.remove('active');
+    if (watchId) navigator.geolocation.clearWatch(watchId);
+    if (userMarker) map.removeLayer(userMarker);
+    userMarker = null;
+}
