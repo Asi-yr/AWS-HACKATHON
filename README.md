@@ -23,3 +23,6 @@ once done check if the elements or anything is running just fine. **report back 
 - ai resolver : gemini 2.5 flash lite (for unlimited use and fast ai response)
 -- ai resolver will be put into another file, since regex will be used. and functions will benefit from regex.
 --  _WHEN IMPLEMENTED:_ safety score and hazard info will benefit from this.
+---
+#### CHANGES NEEDED:
+- convert app.js to a python language instead.
