@@ -16,3 +16,5 @@ numpy
 mysql-connector-python
 briefcase
 folium
+google-genai
+python-dotenv

@@ -6,6 +6,14 @@ to begin running the web for testing, please follow these instructions:
 3. in terminal or powershell, run: .venv\Scripts\Activate.ps1
 4. run: py -m pip install -r requirements.txt
 5. py main.py
+
+using the ai feature or if the program did not run due to missing api key:
+1. visit https://aistudio.google.com using your personal account.
+2. look for 'Get API key' from the navigation menu.
+3. create an api key specific for our project, then create an api key.
+4. after creating, look for the project name and at the end there's a copy button.
+5. paste it into the folder called 'grounding_tool' and create a file '.env'
+6. inside the file insert 'exclusive_gen_ai=API_KEY_HERE', then save.
 ---
 once done check if the elements or anything is running just fine. **report back to the gc if there are any bugs found, or create an issue in github.**
 #### KNOWN ISSUES OR IMPLEMENTATION
