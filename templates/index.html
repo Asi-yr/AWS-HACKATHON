@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <title>SafeRouteAI Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 </head>
 <body>
     <div class="app-container">
@@ -16,56 +14,56 @@
                 <span class="user-info">Hi, {{ user }} | <a href="/logout">Logout</a></span>
             </div>
 
-            <div class="controls">
+            <!-- Flash Messages for Errors -->
+            {% with messages = get_flashed_messages() %}
+              {% if messages %}
+                {% for message in messages %}
+                  <div class="flash-message">{{ message }}</div>
+                {% endfor %}
+              {% endif %}
+            {% endwith %}
+
+            <!-- Pure HTML Form Submission -->
+            <form class="controls" method="POST" action="/">
                 <label class="input-label">Starting Location:</label>
-                <div class="autocomplete-container input-with-icon">
-                    <input type="text" id="origin" placeholder="Enter Location Manually." autocomplete="off">
-                    <button type="button" id="locate-me-btn" title="Use Current Location">🎯</button>
-                    <div id="origin-suggestions" class="suggestions-box"></div>
-                </div>
+                <input type="text" name="origin" id="origin" placeholder="Type address or Lat, Lon" required>
 
                 <label class="input-label">Destination:</label>
-                <div class="autocomplete-container">
-                    <input type="text" id="destination" placeholder="Enter Location Destination." autocomplete="off">
-                    <div id="destination-suggestions" class="suggestions-box"></div>
-                </div>
+                <input type="text" name="destination" id="destination" placeholder="Type address or Lat, Lon" required>
                 
                 <label class="input-label">Commuter Type:</label>
-                <select id="commuter-type">
+                <select name="commuterType" id="commuter-type">
                     <option value="car">Car</option>
                     <option value="jeepney">Jeepney</option>
                     <option value="tricycle">Tricycle</option>
                 </select>
 
-                <button id="find-routes-btn" class="btn-primary">Find Safe Routes</button>
-            </div>
+                <button type="submit" class="btn-primary">Find Safe Routes</button>
+            </form>
 
             <div id="route-results" class="route-results">
-            <!-- Route Cards will be injected here via JS -->
+                <!-- Jinja loops through Python route data and generates the cards -->
+                {% for route in routes %}
+                <div class="route-card" style="border-left-color: {{ route.color }};">
+                    <div class="route-title" style="color: {{ route.color }}">{{ route.name }}</div>
+                    <div class="route-stats">
+                        <span>🕒 {{ route.time }}</span>
+                        <span>📏 {{ route.distance }}</span>
+                    </div>
+                    <div class="route-safety">
+                        Safety Score: {{ route.safety_score }}/100 <br>
+                        Hazard: {{ route.hazards_flagged }}
+                    </div>
+                </div>
+                {% endfor %}
             </div>
         </div>
+        
         <!-- Map Container -->
         <div class="map-area">
-            <!-- This is your existing map div -->
-            <div id="map" style="height: 100%; width: 100%; background: #ebebeb;"></div>
-
-            <div class="map-overlay-controls">
-                <button id="map-pick-btn" title="Pick points on map">📍</button>
-                <!-- NEW: Live Tracking Toggle -->
-                <button id="track-me-btn" title="Toggle Live Tracking">🛰️</button>
-                <div id="pick-status" class="pick-status-label">Click map for Origin</div>
-            </div>
-
-            <!-- This is the new button container that sits ON TOP of the map -->
-            <div class="map-overlay-controls">
-                <button id="map-pick-btn" title="Pick points on map">📍</button>
-                <div id="pick-status" class="pick-status-label">Click map for Origin</div>
-            </div>
+            <!-- We embed the Folium Map safely using an iframe -->
+            <iframe srcdoc="{{ map_html | escape }}" width="100%" height="100%" style="border:none;"></iframe>
         </div>
     </div>
-
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
