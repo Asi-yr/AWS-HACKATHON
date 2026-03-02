@@ -14,7 +14,6 @@
                 <span class="user-info">Hi, {{ user }} | <a href="/logout">Logout</a></span>
             </div>
 
-            <!-- Flash Messages for Errors -->
             {% with messages = get_flashed_messages() %}
               {% if messages %}
                 {% for message in messages %}
@@ -23,13 +22,19 @@
               {% endif %}
             {% endwith %}
 
-            <!-- Pure HTML Form Submission -->
-            <form class="controls" method="POST" action="/">
+            <!-- ADDED ID="route-form" HERE 👇 -->
+            <form class="controls" method="POST" action="/" id="route-form">
                 <label class="input-label">Starting Location:</label>
-                <input type="text" name="origin" id="origin" placeholder="Type address or Lat, Lon" required>
+                <div class="input-with-icon">
+                    <input type="text" name="origin" id="origin" placeholder="Type address or Lat, Lon" required>
+                    <button type="button" id="locate-me-btn" title="Use Current Location" onclick="useCurrentLocation('origin')">🎯</button>
+                </div>
 
                 <label class="input-label">Destination:</label>
-                <input type="text" name="destination" id="destination" placeholder="Type address or Lat, Lon" required>
+                <div class="input-with-icon">
+                    <input type="text" name="destination" id="destination" placeholder="Type address or Lat, Lon" required>
+                    <button type="button" id="locate-me-btn" title="Use Current Location" onclick="useCurrentLocation('destination')">🎯</button>
+                </div>
                 
                 <label class="input-label">Commuter Type:</label>
                 <select name="commuterType" id="commuter-type">
@@ -38,11 +43,10 @@
                     <option value="tricycle">Tricycle</option>
                 </select>
 
-                <button type="submit" class="btn-primary">Find Safe Routes</button>
+                <button type="submit" class="btn-primary" id="submit-btn">Find Safe Routes</button>
             </form>
 
             <div id="route-results" class="route-results">
-                <!-- Jinja loops through Python route data and generates the cards -->
                 {% for route in routes %}
                 <div class="route-card" style="border-left-color: {{ route.color }};">
                     <div class="route-title" style="color: {{ route.color }}">{{ route.name }}</div>
@@ -61,9 +65,131 @@
         
         <!-- Map Container -->
         <div class="map-area">
-            <!-- We embed the Folium Map safely using an iframe -->
-            <iframe srcdoc="{{ map_html | escape }}" width="100%" height="100%" style="border:none;"></iframe>
+            <div class="map-overlay-controls">
+                <button type="button" id="pinpoint-btn" title="Toggle Pinpoint Mode" onclick="togglePinpoint()">📍</button>
+                <div id="pick-status" class="pick-status-label">Pinpoint Mode ON</div>
+            </div>
+
+            <iframe id="map-frame" srcdoc="{{ map_html | escape }}" width="100%" height="100%" style="border:none;"></iframe>
         </div>
     </div>
+
+    <!-- JS for Interactions -->
+    <script>
+        let isPinpointing = false;
+
+        // --- NEW: AUTO-SUBMIT FUNCTION ---
+        function checkAndAutoSubmit() {
+            const originVal = document.getElementById('origin').value;
+            const destVal = document.getElementById('destination').value;
+
+            // Only submit if BOTH fields have data
+            if (originVal && originVal.trim() !== "" && destVal && destVal.trim() !== "") {
+                const btn = document.getElementById('submit-btn');
+                btn.innerText = "Auto-calculating..."; // Visual feedback
+                btn.disabled = true;
+                
+                // Submit the form programmatically
+                document.getElementById('route-form').submit();
+            }
+        }
+
+        function updatePinpointStatus() {
+            const originVal = document.getElementById('origin').value;
+            const destVal = document.getElementById('destination').value;
+            const statusLabel = document.getElementById('pick-status');
+
+            if (!originVal || originVal.trim() === "") {
+                statusLabel.innerText = "📍 Click map to set START (Green)";
+                statusLabel.style.background = "#27ae60"; 
+            } else {
+                statusLabel.innerText = "📍 Click map to set DESTINATION (Red)";
+                statusLabel.style.background = "#c0392b"; 
+            }
+        }
+
+        function togglePinpoint() {
+            isPinpointing = !isPinpointing;
+            const btn = document.getElementById("pinpoint-btn");
+            const status = document.getElementById("pick-status");
+            
+            if (isPinpointing) {
+                btn.classList.add("active");
+                status.style.display = "block";
+                updatePinpointStatus();
+            } else {
+                btn.classList.remove("active");
+                status.style.display = "none";
+            }
+        }
+
+        function sendDrawCommand(lat, lng, kind) {
+            const iframe = document.getElementById('map-frame');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.postMessage({
+                    type: 'draw_marker',
+                    lat: lat,
+                    lng: lng,
+                    kind: kind 
+                }, '*');
+            }
+        }
+
+        window.addEventListener("message", function(event) {
+            if (event.data && event.data.type === 'map_click' && isPinpointing) {
+                const lat = event.data.lat;
+                const lng = event.data.lng;
+                const coordString = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+                
+                const originBox = document.getElementById('origin');
+                const destBox = document.getElementById('destination');
+
+                if (!originBox.value || originBox.value.trim() === "") {
+                    originBox.value = coordString;
+                    sendDrawCommand(lat, lng, 'origin');
+                    updatePinpointStatus(); 
+                    
+                    // Check if Destination was somehow already filled, if so, submit!
+                    checkAndAutoSubmit();
+                } else {
+                    destBox.value = coordString;
+                    sendDrawCommand(lat, lng, 'destination');
+                    togglePinpoint();
+                    
+                    // --- TRIGGER AUTO SUBMIT HERE ---
+                    checkAndAutoSubmit();
+                }
+            }
+        });
+
+        function useCurrentLocation(targetInputId) {
+            if (!navigator.geolocation) return alert("Geolocation not supported.");
+            const box = document.getElementById(targetInputId);
+            box.value = "Locating...";
+            
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+                    box.value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+                    
+                    // If we are in pinpoint mode, update the status text
+                    if (isPinpointing) updatePinpointStatus();
+
+                    // Optional: Draw marker for GPS too
+                    const kind = (targetInputId === 'origin') ? 'origin' : 'destination';
+                    sendDrawCommand(lat, lng, kind);
+
+                    // --- TRIGGER AUTO SUBMIT HERE ---
+                    // If I used GPS for one, and the other is already full, go!
+                    checkAndAutoSubmit();
+                }, 
+                (err) => {
+                    box.value = "";
+                    alert("Could not retrieve location.");
+                }
+            );
+        }
+    </script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from navigation import geocode_location, get_navigation_data
+from branca.element import Element 
 from folium import plugins
 import requests # NEW: Needed to make API calls from Python
 import folium
@@ -20,11 +21,60 @@ app.secret_key = 'saferoute_super_secret_key'
 def get_base_map(center_lat=14.605, center_lon=120.985, zoom=13):
     m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, tiles="OpenStreetMap")
     
-    # Folium Plugin 1: Live Tracking/GPS (Adds a button to the map)
+    # Folium Plugin 1: Live Tracking/GPS
     plugins.LocateControl(auto_start=False, strings={"title": "Use my current location"}).add_to(m)
     
-    # Folium Plugin 2: Click map to see coordinates (Useful for manual entry)
-    m.add_child(folium.LatLngPopup())
+    # --- NEW: Inject Click Listener to communicate with the Parent Window ---
+    click_js = """
+    <script>
+        var originMarker = null;
+        var destMarker = null;
+
+        // Define colored icons
+        var greenIcon = new L.Icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+        });
+
+        var redIcon = new L.Icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+        });
+
+        setTimeout(function() {
+            var map_instance = window['{{MAP_ID}}'];
+            if (map_instance) {
+                // 1. SEND CLICKS TO PARENT
+                map_instance.on('click', function(e) {
+                    window.parent.postMessage({
+                        type: 'map_click',
+                        lat: e.latlng.lat,
+                        lng: e.latlng.lng
+                    }, '*');
+                });
+
+                // 2. RECEIVE DRAW COMMANDS FROM PARENT
+                window.addEventListener("message", function(event) {
+                    if (event.data && event.data.type === 'draw_marker') {
+                        var coords = [event.data.lat, event.data.lng];
+                        
+                        if (event.data.kind === 'origin') {
+                            if (originMarker) map_instance.removeLayer(originMarker);
+                            originMarker = L.marker(coords, {icon: greenIcon, interactive: false}).addTo(map_instance);
+                        } else if (event.data.kind === 'destination') {
+                            if (destMarker) map_instance.removeLayer(destMarker);
+                            destMarker = L.marker(coords, {icon: redIcon, interactive: false}).addTo(map_instance);
+                        }
+                    }
+                });
+            }
+        }, 1000);
+    </script>
+    """.replace('{{MAP_ID}}', m.get_name())
+    
+    m.get_root().html.add_child(Element(click_js))
     
     return m
 
@@ -52,7 +102,6 @@ def home():
         if not orig_lon or not dest_lon:
             flash("Location not found. Please type a more specific address or use coordinates (Lat, Lon).")
         else:
-            # Calculate Routes
             nav_response = get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type,[])
             
             if "error" in nav_response:
@@ -60,26 +109,36 @@ def home():
             else:
                 routes_data = nav_response.get("routes",[])
                 
-                # Draw the routes on the Folium Map
+                # DRAW GREEN & RED MARKERS FIRST (So they are attached to the base map)
+                if routes_data:
+                    best_route = routes_data[0]
+                    start_coord = best_route['coords'][0]  # [Lat, Lon]
+                    end_coord = best_route['coords'][-1]   # [Lat, Lon]
+
+                    # Add markers to a specific feature group so they stay visible
+                    marker_group = folium.FeatureGroup(name="Start & End Points")
+                    folium.Marker(start_coord, popup="Starting Point", icon=folium.Icon(color="green", icon="play")).add_to(marker_group)
+                    folium.Marker(end_coord, popup="Destination", icon=folium.Icon(color="red", icon="stop")).add_to(marker_group)
+                    marker_group.add_to(m)
+
+                # DRAW ROUTES AS TOGGLEABLE LAYERS
                 for route in routes_data:
+                    # Create a layer group for each route so users can toggle them
+                    route_layer = folium.FeatureGroup(name=route['name'])
+                    
                     folium.PolyLine(
                         locations=route['coords'],
                         color=route['color'],
-                        weight=6,
-                        opacity=0.8,
-                        tooltip=route['name']
-                    ).add_to(m)
+                        weight=7 if route['id'] == 0 else 5, # Make fastest route slightly thicker
+                        opacity=0.9,
+                        tooltip=f"{route['name']} ({route['time']})"
+                    ).add_to(route_layer)
+                    
+                    route_layer.add_to(m)
 
-                # Add Green and Red Markers for the best route
+                # Add a Layer Control menu to the top right of the map
                 if routes_data:
-                    best_route = routes_data[0]
-                    start_coord = best_route['coords'][0]
-                    end_coord = best_route['coords'][-1]
-
-                    folium.Marker(start_coord, popup="Starting Point", icon=folium.Icon(color="green")).add_to(m)
-                    folium.Marker(end_coord, popup="Destination", icon=folium.Icon(color="red")).add_to(m)
-
-                    # Automatically zoom the map to fit the route lines
+                    folium.LayerControl().add_to(m)
                     m.fit_bounds([start_coord, end_coord])
 
     # 3. Convert the Folium map to HTML
