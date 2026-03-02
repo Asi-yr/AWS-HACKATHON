@@ -27,7 +27,8 @@ once done check if the elements or anything is running just fine. **report back 
 - the ability to concatenate two points of location, e.g., ue caloocan to ue recto then ue recto to cubao.
 -- _WHEN FIXED:_ ability to put multiple points of wtv.
 #### APIs
-- leafjs (OpenStreetMap)
+- leafjs (OpenStreetMap) [deprecated]
+- python folium (OpenStreetMap)- leafjs (OpenStreetMap)
 - https://open-meteo.com (for accurate weather forecast)
 - traffic forecast : tomtom or here traffic (used by grab)
 
