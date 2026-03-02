@@ -18,7 +18,7 @@ using the ai feature or if the program did not run due to missing api key:
 3. create an api key specific for our project, then create an api key.
 4. after creating, look for the project name and at the end there's a copy button.
 5. paste it into the folder called 'grounding_tool' and create a file '.env'
-6. inside the file insert 'exclusive_gen_ai=API_KEY_HERE', then save.
+6. inside the file insert 'exclusive_genai_key=API_KEY_HERE', then save.
 ---
 once done check if the elements or anything is running just fine. **report back to the gc if there are any bugs found, or create an issue in github.** *also see commits before asking the gc or creating an issue on github.*
 ### Issues & Fixing
