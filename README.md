@@ -54,6 +54,9 @@ once done check if the elements or anything is running just fine. **report back 
 - design issues: (or not)
   - text input box, with current location button must alight perfectly with the text box elements.
 ---
+#### Modules
+1. beautifulsoup4: for web scraping.
+2. ddgs: duckduckgo web and url searching.
 #### APIs
 - leafjs (OpenStreetMap) [deprecated]
 - python folium (OpenStreetMap)- leafjs (OpenStreetMap)
