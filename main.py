@@ -3,7 +3,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from navigation import geocode_location, get_navigation_data
 from branca.element import Element 
 from folium import plugins
-import requests # NEW: Needed to make API calls from Python
+import requests
 import folium
 
 USE_MYSQL = False 
@@ -143,7 +143,6 @@ def home():
 
     # 3. Convert the Folium map to HTML
     map_html = m.get_root().render()
-
     return render_template('index.html', user=session['user'], map_html=map_html, routes=routes_data)
 
 @app.route('/register', methods=['GET', 'POST'])

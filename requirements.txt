@@ -18,3 +18,5 @@ briefcase
 folium
 google-genai
 python-dotenv
+ddgs
+beautifulsoup4
