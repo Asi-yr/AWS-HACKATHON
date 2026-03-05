@@ -9,10 +9,10 @@ import folium
 USE_MYSQL = False 
 
 if USE_MYSQL:
-    from database_handlers import mysqdb as chDB_perf
+    from db_opt import msql as chDB_perf
     chDB_perf.init_db()
 else:
-    from database_handlers import sqdb as chDB_perf
+    from db_opt import nsql as chDB_perf
     chDB_perf.init_db()
 
 app = Flask(__name__)
