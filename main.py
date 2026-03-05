@@ -9,12 +9,13 @@ import folium
 USE_MYSQL = False 
 
 if USE_MYSQL:
-    from db_opt import msql as chDB_perf
-    chDB_perf.init_db()
+    from db_opt import msql 
+    chDB_perf = msql()
 else:
-    from db_opt import nsql as chDB_perf
-    chDB_perf.init_db()
+    from db_opt import nsql
+    chDB_perf = nsql()
 
+chDB_perf.init_db()
 app = Flask(__name__)
 app.secret_key = 'saferoute_super_secret_key'
 
@@ -111,11 +112,10 @@ def home():
                 
                 # DRAW GREEN & RED MARKERS FIRST (So they are attached to the base map)
                 if routes_data:
-                    best_route = routes_data[0]
-                    start_coord = best_route['coords'][0]  # [Lat, Lon]
-                    end_coord = best_route['coords'][-1]   # [Lat, Lon]
+                    start_coord = [orig_lat, orig_lon]
+                    end_coord = [dest_lat, dest_lon]
 
-                    # Add markers to a specific feature group so they stay visible
+                    # Add markers
                     marker_group = folium.FeatureGroup(name="Start & End Points")
                     folium.Marker(start_coord, popup="Starting Point", icon=folium.Icon(color="green", icon="play")).add_to(marker_group)
                     folium.Marker(end_coord, popup="Destination", icon=folium.Icon(color="red", icon="stop")).add_to(marker_group)

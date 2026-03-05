@@ -37,10 +37,17 @@
                 </div>
                 
                 <label class="input-label">Commuter Type:</label>
-                <select name="commuterType" id="commuter-type">
-                    <option value="car">Car</option>
-                    <option value="jeepney">Jeepney</option>
-                    <option value="tricycle">Tricycle</option>
+                <select name="commuterType" id="commuter-type" required>
+                    <optgroup label="Road Transport">
+                        <option value="car">Car</option>
+                        <option value="jeepney">Jeepney</option>
+                        <option value="tricycle">Tricycle</option>
+                    </optgroup>
+                    <optgroup label="Trains (Manual Route)">
+                        <option value="LRT-1">LRT-1 (Green Line)</option>
+                        <option value="LRT-2">LRT-2 (Blue Line)</option>
+                        <option value="MRT-3">MRT-3 (Yellow Line)</option>
+                    </optgroup>
                 </select>
 
                 <button type="submit" class="btn-primary" id="submit-btn">Find Safe Routes</button>

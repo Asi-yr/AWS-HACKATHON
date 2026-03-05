@@ -1,24 +1,30 @@
 class msql:
     def __init__(self):
-        try:
-            import mysql.connector
-        except ImportError:
-            pass # should do something but idk yet.
-
         self.DB_HOST = "localhost"
         self.DB_USER = "root"
         self.DB_PASSWORD = ""
         self.DB_NAME = "saferoute_db"
 
     def get_db_connection(self):
+        try:
+            import mysql.connector
+        except ImportError:
+            pass
+            
+        import mysql.connector # Ensure module is available
         conn = mysql.connector.connect(
             host=self.DB_HOST, user=self.DB_USER, password=self.DB_PASSWORD, database=self.DB_NAME)
-        return conn, conn.cursor(self)
+        return conn, conn.cursor()
 
     def execute_query(self, cursor, query, params=None):
         query = query.replace('?', '%s')
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
 
     def init_db(self):
+        import mysql.connector
         try:
             temp_conn = mysql.connector.connect(host=self.DB_HOST, user=self.DB_USER, password=self.DB_PASSWORD)
             temp_cursor = temp_conn.cursor()
@@ -37,10 +43,10 @@ class msql:
 
 class nsql:
     def __init__(self):
-        import sqlite3
         self.SQLITE_DB = "users.db"
 
     def get_db_connection(self):
+        import sqlite3
         conn = sqlite3.connect(self.SQLITE_DB)
         return conn, conn.cursor()
 

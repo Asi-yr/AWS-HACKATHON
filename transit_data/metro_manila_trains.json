@@ -1,0 +1,68 @@
+[
+    {
+        "line_name": "LRT-1 (Green Line)",
+        "type": "train",
+        "stops": [
+            {"name": "Baclaran", "lat": 14.5342, "lon": 120.9983, "station": true},
+            {"name": "EDSA", "lat": 14.5386, "lon": 121.0006, "station": true},
+            {"name": "Libertad", "lat": 14.5476, "lon": 120.9985, "station": true},
+            {"name": "Gil Puyat", "lat": 14.5543, "lon": 120.9968, "station": true},
+            {"name": "Vito Cruz", "lat": 14.5633, "lon": 120.9947, "station": true},
+            {"name": "Quirino", "lat": 14.5703, "lon": 120.9930, "station": true},
+            {"name": "Pedro Gil", "lat": 14.5768, "lon": 120.9908, "station": true},
+            {"name": "United Nations", "lat": 14.5826, "lon": 120.9855, "station": true},
+            {"name": "Central Terminal", "lat": 14.5928, "lon": 120.9816, "station": true},
+            {"name": "Carriedo", "lat": 14.5995, "lon": 120.9813, "station": true},
+            {"name": "Doroteo Jose", "lat": 14.6053, "lon": 120.9821, "station": true},
+            {"name": "Bambang", "lat": 14.6119, "lon": 120.9824, "station": true},
+            {"name": "Tayuman", "lat": 14.6166, "lon": 120.9827, "station": true},
+            {"name": "Blumentritt", "lat": 14.6226, "lon": 120.9828, "station": true},
+            {"name": "Abad Santos", "lat": 14.6307, "lon": 120.9817, "station": true},
+            {"name": "Curve3", "lat": 14.6334, "lon": 120.9820, "station": false},
+            {"name": "R. Papa", "lat": 14.6363, "lon": 120.9822, "station": true},
+            {"name": "5th Avenue", "lat": 14.6444, "lon": 120.9834, "station": true},
+            {"name": "Monumento", "lat": 14.6542, "lon": 120.9839, "station": true},
+            {"name": "Balintawak", "lat": 14.6575, "lon": 121.0003, "station": true},
+            {"name": "Fernando Poe Jr. (Roosevelt)", "lat": 14.6577, "lon": 121.0205, "station": true}
+        ]
+    },
+    {
+        "line_name": "LRT-2 (Blue Line)",
+        "type": "train",
+        "stops": [
+            {"name": "Recto", "lat": 14.6036, "lon": 120.9836, "station": true},
+            {"lat": 14.6020, "lon": 120.9880, "station": false},
+            {"name": "Legarda", "lat": 14.6008, "lon": 120.9926, "station": true},
+            {"lat": 14.6001, "lon": 120.9980, "station": false},
+            {"lat": 14.6005, "lon": 121.0020, "station": false},
+            {"name": "Pureza", "lat": 14.6015, "lon": 121.0052, "station": true},
+            {"lat": 14.6025, "lon": 121.0110, "station": false},
+            {"lat": 14.6035, "lon": 121.0150, "station": false},
+            {"name": "V. Mapa", "lat": 14.6041, "lon": 121.0173, "station": true},
+            {"lat": 14.6060, "lon": 121.0210, "station": false},
+            {"lat": 14.6085, "lon": 121.0245, "station": false},
+            {"name": "J. Ruiz", "lat": 14.6105, "lon": 121.0264, "station": true},
+            {"lat": 14.6120, "lon": 121.0300, "station": false},
+            {"name": "Gilmore", "lat": 14.6135, "lon": 121.0342, "station": true}
+        ]
+    },
+    {
+        "line_name": "MRT-3 (Yellow Line)",
+        "type": "train",
+        "stops": [
+            {"name": "North Avenue", "lat": 14.6522, "lon": 121.0323, "station": true},
+            {"name": "Quezon Avenue", "lat": 14.6425, "lon": 121.0387, "station": true},
+            {"name": "GMA-Kamuning", "lat": 14.6350, "lon": 121.0433, "station": true},
+            {"name": "Araneta Center-Cubao", "lat": 14.6193, "lon": 121.0519, "station": true},
+            {"name": "Santolan-Annapolis", "lat": 14.6078, "lon": 121.0564, "station": true},
+            {"name": "Ortigas", "lat": 14.5878, "lon": 121.0568, "station": true},
+            {"name": "Shaw Boulevard", "lat": 14.5812, "lon": 121.0538, "station": true},
+            {"name": "Boni", "lat": 14.5739, "lon": 121.0480, "station": true},
+            {"name": "Guadalupe", "lat": 14.5670, "lon": 121.0456, "station": true},
+            {"name": "Buendia", "lat": 14.5543, "lon": 121.0341, "station": true},
+            {"name": "Ayala", "lat": 14.5493, "lon": 121.0279, "station": true},
+            {"name": "Magallanes", "lat": 14.5420, "lon": 121.0195, "station": true},
+            {"name": "Taft Avenue", "lat": 14.5376, "lon": 121.0016, "station": true}
+        ]
+    }
+]
