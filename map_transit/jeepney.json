@@ -1,0 +1,596 @@
+[
+  {
+    "route_name": "San Juan → Divisoria via Magsaysay",
+    "traffic_flow": "Westbound",
+    "roads": [
+      {
+        "name": "N. Domingo Street",
+        "lat": 14.6042,
+        "lng": 121.0315
+      },
+      {
+        "name": "Magsaysay Blvd (Westbound Lane)",
+        "lat": 14.602,
+        "lng": 121.012
+      },
+      {
+        "name": "Legarda Street",
+        "lat": 14.6001,
+        "lng": 120.992
+      },
+      {
+        "name": "C.M. Recto Avenue (Westbound)",
+        "lat": 14.6045,
+        "lng": 120.98
+      }
+    ]
+  },
+  {
+    "route_name": "Divisoria → San Juan via Magsaysay",
+    "traffic_flow": "Eastbound",
+    "roads": [
+      {
+        "name": "C.M. Recto Avenue (Eastbound)",
+        "lat": 14.6042,
+        "lng": 120.98
+      },
+      {
+        "name": "Legarda Street",
+        "lat": 14.5998,
+        "lng": 120.992
+      },
+      {
+        "name": "Magsaysay Blvd (Eastbound Lane)",
+        "lat": 14.6014,
+        "lng": 121.012
+      },
+      {
+        "name": "N. Domingo Street",
+        "lat": 14.6041,
+        "lng": 121.0315
+      }
+    ]
+  },
+  {
+    "route_name": "Guadalupe → Cartimar via Buendia",
+    "traffic_flow": "Westbound",
+    "roads": [
+      {
+        "name": "J.P. Rizal Avenue",
+        "lat": 14.5676,
+        "lng": 121.0458
+      },
+      {
+        "name": "Makati Avenue",
+        "lat": 14.5641,
+        "lng": 121.03
+      },
+      {
+        "name": "Gil Puyat Ave (Westbound Lane)",
+        "lat": 14.5573,
+        "lng": 121.015
+      },
+      {
+        "name": "Taft Avenue",
+        "lat": 14.5542,
+        "lng": 120.9975
+      }
+    ]
+  },
+  {
+    "route_name": "Cartimar → Guadalupe via Buendia",
+    "traffic_flow": "Eastbound",
+    "roads": [
+      {
+        "name": "Taft Avenue",
+        "lat": 14.5539,
+        "lng": 120.9975
+      },
+      {
+        "name": "Gil Puyat Ave (Eastbound Lane)",
+        "lat": 14.5568,
+        "lng": 121.015
+      },
+      {
+        "name": "Makati Avenue",
+        "lat": 14.5639,
+        "lng": 121.03
+      },
+      {
+        "name": "J.P. Rizal Avenue",
+        "lat": 14.5675,
+        "lng": 121.0458
+      }
+    ]
+  },
+  {
+    "route_name": "Project 2-3 → Remedios via España",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Kamuning Road",
+        "lat": 14.6285,
+        "lng": 121.041
+      },
+      {
+        "name": "E. Rodriguez Sr. Ave (Westbound Lane)",
+        "lat": 14.6201,
+        "lng": 121.018
+      },
+      {
+        "name": "España Blvd (Southbound Lane)",
+        "lat": 14.6085,
+        "lng": 120.9896
+      },
+      {
+        "name": "Quezon Blvd (Southbound Lane)",
+        "lat": 14.5985,
+        "lng": 120.9833
+      },
+      {
+        "name": "Taft Avenue (Southbound Lane)",
+        "lat": 14.58,
+        "lng": 120.9828
+      }
+    ]
+  },
+  {
+    "route_name": "Remedios → Project 2-3 via España",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "Taft Avenue (Northbound Lane)",
+        "lat": 14.5799,
+        "lng": 120.9832
+      },
+      {
+        "name": "Quezon Blvd (Northbound Lane)",
+        "lat": 14.5984,
+        "lng": 120.9837
+      },
+      {
+        "name": "España Blvd (Northbound Lane)",
+        "lat": 14.6084,
+        "lng": 120.9902
+      },
+      {
+        "name": "E. Rodriguez Sr. Ave (Eastbound Lane)",
+        "lat": 14.6199,
+        "lng": 121.0181
+      },
+      {
+        "name": "Kamuning Road",
+        "lat": 14.6284,
+        "lng": 121.0411
+      }
+    ]
+  },
+  {
+    "route_name": "Quiapo → Baclaran via Taft",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Quezon Blvd (Southbound Lane)",
+        "lat": 14.5985,
+        "lng": 120.9833
+      },
+      {
+        "name": "Taft Avenue (Southbound Lane)",
+        "lat": 14.55,
+        "lng": 120.9948
+      },
+      {
+        "name": "Redemptorist Road",
+        "lat": 14.5323,
+        "lng": 120.9935
+      }
+    ]
+  },
+  {
+    "route_name": "Baclaran → Quiapo via Taft",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "Redemptorist Road",
+        "lat": 14.5322,
+        "lng": 120.9936
+      },
+      {
+        "name": "Taft Avenue (Northbound Lane)",
+        "lat": 14.5499,
+        "lng": 120.9953
+      },
+      {
+        "name": "Quezon Blvd (Northbound Lane)",
+        "lat": 14.5984,
+        "lng": 120.9837
+      }
+    ]
+  },
+  {
+    "route_name": "Cubao → Divisoria",
+    "traffic_flow": "Westbound",
+    "roads": [
+      {
+        "name": "Aurora Blvd (Westbound Lane)",
+        "lat": 14.6151,
+        "lng": 121.03
+      },
+      {
+        "name": "Magsaysay Blvd (Westbound Lane)",
+        "lat": 14.6018,
+        "lng": 121.0055
+      },
+      {
+        "name": "Legarda Street",
+        "lat": 14.6001,
+        "lng": 120.992
+      },
+      {
+        "name": "C.M. Recto Ave (Westbound)",
+        "lat": 14.6043,
+        "lng": 120.975
+      }
+    ]
+  },
+  {
+    "route_name": "Divisoria → Cubao",
+    "traffic_flow": "Eastbound",
+    "roads": [
+      {
+        "name": "C.M. Recto Ave (Eastbound)",
+        "lat": 14.6042,
+        "lng": 120.9751
+      },
+      {
+        "name": "Legarda Street",
+        "lat": 14.5998,
+        "lng": 120.9921
+      },
+      {
+        "name": "Magsaysay Blvd (Eastbound Lane)",
+        "lat": 14.6013,
+        "lng": 121.0055
+      },
+      {
+        "name": "Aurora Blvd (Eastbound Lane)",
+        "lat": 14.6149,
+        "lng": 121.0301
+      }
+    ]
+  },
+  {
+    "route_name": "Caloocan → Monumento",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "A. Mabini Street",
+        "lat": 14.64,
+        "lng": 120.975
+      },
+      {
+        "name": "10th Avenue",
+        "lat": 14.65,
+        "lng": 120.98
+      },
+      {
+        "name": "Rizal Avenue Ext (Northbound)",
+        "lat": 14.654,
+        "lng": 120.9835
+      }
+    ]
+  },
+  {
+    "route_name": "Monumento → Caloocan",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Rizal Avenue Ext (Southbound)",
+        "lat": 14.6539,
+        "lng": 120.9836
+      },
+      {
+        "name": "10th Avenue",
+        "lat": 14.6499,
+        "lng": 120.9801
+      },
+      {
+        "name": "A. Mabini Street",
+        "lat": 14.6399,
+        "lng": 120.9751
+      }
+    ]
+  },
+  {
+    "route_name": "Bagong Silang → Cubao via Quirino",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Susano Road",
+        "lat": 14.76,
+        "lng": 121.045
+      },
+      {
+        "name": "Quirino Highway (Southbound Lane)",
+        "lat": 14.7,
+        "lng": 121.0598
+      },
+      {
+        "name": "Mindanao Avenue (Southbound Lane)",
+        "lat": 14.67,
+        "lng": 121.0348
+      },
+      {
+        "name": "EDSA (Southbound Lane)",
+        "lat": 14.63,
+        "lng": 121.0398
+      }
+    ]
+  },
+  {
+    "route_name": "Cubao → Bagong Silang via Quirino",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "EDSA (Northbound Lane)",
+        "lat": 14.6299,
+        "lng": 121.0403
+      },
+      {
+        "name": "Mindanao Avenue (Northbound Lane)",
+        "lat": 14.6699,
+        "lng": 121.0353
+      },
+      {
+        "name": "Quirino Highway (Northbound Lane)",
+        "lat": 14.6999,
+        "lng": 121.0603
+      },
+      {
+        "name": "Susano Road",
+        "lat": 14.7599,
+        "lng": 121.0451
+      }
+    ]
+  },
+  {
+    "route_name": "Camarin → Baclaran via Taft",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Camarin Road",
+        "lat": 14.7508,
+        "lng": 121.0426
+      },
+      {
+        "name": "Quirino Highway",
+        "lat": 14.685,
+        "lng": 121.025
+      },
+      {
+        "name": "A. Bonifacio Ave (Southbound)",
+        "lat": 14.64,
+        "lng": 120.9948
+      },
+      {
+        "name": "Taft Avenue (Southbound Lane)",
+        "lat": 14.56,
+        "lng": 120.9918
+      }
+    ]
+  },
+  {
+    "route_name": "Baclaran → Camarin via Taft",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "Taft Avenue (Northbound Lane)",
+        "lat": 14.5599,
+        "lng": 120.9924
+      },
+      {
+        "name": "A. Bonifacio Ave (Northbound)",
+        "lat": 14.6399,
+        "lng": 120.9953
+      },
+      {
+        "name": "Quirino Highway",
+        "lat": 14.6849,
+        "lng": 121.0251
+      },
+      {
+        "name": "Camarin Road",
+        "lat": 14.7507,
+        "lng": 121.0427
+      }
+    ]
+  },
+  {
+    "route_name": "Caloocan → Quiapo via Rizal Ave",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Rizal Avenue Ext (Southbound)",
+        "lat": 14.6565,
+        "lng": 120.9837
+      },
+      {
+        "name": "Rizal Avenue (Southbound)",
+        "lat": 14.62,
+        "lng": 120.9818
+      },
+      {
+        "name": "Quezon Blvd (Southbound)",
+        "lat": 14.5985,
+        "lng": 120.9833
+      }
+    ]
+  },
+  {
+    "route_name": "Quiapo → Caloocan via Rizal Ave",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "Quezon Blvd (Northbound)",
+        "lat": 14.5984,
+        "lng": 120.9837
+      },
+      {
+        "name": "Rizal Avenue (Northbound)",
+        "lat": 14.6199,
+        "lng": 120.9823
+      },
+      {
+        "name": "Rizal Avenue Ext (Northbound)",
+        "lat": 14.6564,
+        "lng": 120.9839
+      }
+    ]
+  },
+  {
+    "route_name": "Tala → Divisoria via Del Pan",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Dr. Jose N. Rodriguez Ave",
+        "lat": 14.7671,
+        "lng": 121.0658
+      },
+      {
+        "name": "Quirino Highway",
+        "lat": 14.72,
+        "lng": 121.06
+      },
+      {
+        "name": "Del Pan Road",
+        "lat": 14.605,
+        "lng": 120.965
+      },
+      {
+        "name": "C.M. Recto Avenue",
+        "lat": 14.6041,
+        "lng": 120.9713
+      }
+    ]
+  },
+  {
+    "route_name": "Divisoria → Tala via Del Pan",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "C.M. Recto Avenue",
+        "lat": 14.604,
+        "lng": 120.9714
+      },
+      {
+        "name": "Del Pan Road",
+        "lat": 14.6049,
+        "lng": 120.9651
+      },
+      {
+        "name": "Quirino Highway",
+        "lat": 14.7199,
+        "lng": 121.0601
+      },
+      {
+        "name": "Dr. Jose N. Rodriguez Ave",
+        "lat": 14.767,
+        "lng": 121.0659
+      }
+    ]
+  },
+  {
+    "route_name": "Southwoods → LRT Taft via Skyway",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "Southwoods Avenue",
+        "lat": 14.3184,
+        "lng": 121.0376
+      },
+      {
+        "name": "Skyway (Northbound)",
+        "lat": 14.45,
+        "lng": 121.04
+      },
+      {
+        "name": "Gil Puyat Avenue",
+        "lat": 14.554,
+        "lng": 121
+      },
+      {
+        "name": "Taft Avenue (Northbound Lane)",
+        "lat": 14.5385,
+        "lng": 121.0001
+      }
+    ]
+  },
+  {
+    "route_name": "LRT Taft → Southwoods via Skyway",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Taft Avenue (Southbound Lane)",
+        "lat": 14.5384,
+        "lng": 121.0002
+      },
+      {
+        "name": "Gil Puyat Avenue",
+        "lat": 14.5539,
+        "lng": 121.0001
+      },
+      {
+        "name": "Skyway (Southbound)",
+        "lat": 14.4499,
+        "lng": 121.0401
+      },
+      {
+        "name": "Southwoods Avenue",
+        "lat": 14.3183,
+        "lng": 121.0377
+      }
+    ]
+  },
+  {
+    "route_name": "Navotas → Baclaran via R-10",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Radial Road 10 (Southbound)",
+        "lat": 14.61,
+        "lng": 120.955
+      },
+      {
+        "name": "Roxas Blvd (Southbound Lane)",
+        "lat": 14.57,
+        "lng": 120.9798
+      },
+      {
+        "name": "Redemptorist Road",
+        "lat": 14.5332,
+        "lng": 120.991
+      }
+    ]
+  },
+  {
+    "route_name": "Baclaran → Navotas via R-10",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "Redemptorist Road",
+        "lat": 14.5331,
+        "lng": 120.9911
+      },
+      {
+        "name": "Roxas Blvd (Northbound Lane)",
+        "lat": 14.5699,
+        "lng": 120.9803
+      },
+      {
+        "name": "Radial Road 10 (Northbound)",
+        "lat": 14.6099,
+        "lng": 120.9553
+      }
+    ]
+  }
+]

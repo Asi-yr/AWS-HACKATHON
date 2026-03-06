@@ -1,5 +1,8 @@
 import requests
 import time
+import json
+import math
+import os
 
 # ════════════════════════════════════════════════════════════════════════════
 #  navigation.py  —  SafeRouteAI
@@ -13,9 +16,10 @@ import time
 #  │  4. !! TRAIN ROUTING — DO NOT MODIFY !! (line ~145)                 │
 #  │     4a. _extract_relation_data()                                    │
 #  │     4b. get_osm_railway_geometry()                                  │
-#  │  5. Road / Bus / Jeepney routing stubs  (line ~330)                 │
-#  │  6. [FUTURE] Multi-modal connector hook (line ~400)                 │
-#  │  7. Public API — get_navigation_data()  (line ~435)                 │
+#  │  5. Road / Bus routing                  (line ~330)                 │
+#  │  5b. Jeepney JSON-backed routing        (line ~390)                 │
+#  │  6. [FUTURE] Multi-modal connector hook (line ~530)                 │
+#  │  7. Public API — get_navigation_data()  (line ~565)                 │
 #  └─────────────────────────────────────────────────────────────────────┘
 # ════════════════════════════════════════════════════════════════════════
 
@@ -55,24 +59,34 @@ def _overpass_query(query, max_retries=5, timeout=30):
 
 # ── 2. General helpers ────────────────────────────────────────────────────────
 
+_GEOCODE_CACHE = {}
+
 def geocode_location(address):
+    if address in _GEOCODE_CACHE:
+        return _GEOCODE_CACHE[address]
+
     if "," in address:
         try:
             parts = [x.strip() for x in address.split(',')]
             lat, lon = float(parts[0]), float(parts[1])
-            return (lon, lat) if lon > 100 else (lat, lon)
+            result = (lon, lat) if lon > 100 else (lat, lon)
+            _GEOCODE_CACHE[address] = result
+            return result
         except (ValueError, TypeError):
             pass
     url = (
         f"https://nominatim.openstreetmap.org/search"
-        f"?q={address}&format=json&limit=1&countrycodes=ph"
+        f"?q={requests.utils.quote(address)}&format=json&limit=1&countrycodes=ph"
     )
     try:
         resp = requests.get(url, headers={'User-Agent': 'SafeRoute/1.0'}, timeout=10).json()
         if resp:
-            return float(resp[0]['lon']), float(resp[0]['lat'])
+            result = float(resp[0]['lon']), float(resp[0]['lat'])
+            _GEOCODE_CACHE[address] = result
+            return result
     except Exception as e:
-        print(f"Geocoding failed: {e}")
+        print(f"Geocoding failed for '{address}': {e}")
+    _GEOCODE_CACHE[address] = (None, None)
     return None, None
 
 
@@ -82,6 +96,16 @@ def _dist_sq(lat1, lon1, lat2, lon2):
 
 def _closest_idx(line, lat, lon):
     return min(range(len(line)), key=lambda i: _dist_sq(line[i][0], line[i][1], lat, lon))
+
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    """Great-circle distance in metres between two lat/lon points."""
+    R = 6_371_000
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    dφ = math.radians(lat2 - lat1)
+    dλ = math.radians(lon2 - lon1)
+    a = math.sin(dφ / 2) ** 2 + math.cos(φ1) * math.cos(φ2) * math.sin(dλ / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def _chain_one(segments, start_idx, used):
@@ -305,13 +329,10 @@ out geom;
 # ════════════════════════════════════════════════════════════════════════════
 
 
-# ── 5. Road / Bus / Jeepney P2P routing ──────────────────────────────────────
-#
-#  All road modes currently share the OSRM driving router.
-#  Each type has its own wrapper so future mode-specific OSM relation
-#  lookups can be added without touching anything above.
+# ── 5. Road / Bus routing ─────────────────────────────────────────────────────
 
 _OSRM_BASE    = "https://router.project-osrm.org/route/v1/driving"
+_OSRM_FOOT    = "https://router.project-osrm.org/route/v1/foot"
 _ROUTE_COLORS = {
     "car":     ["#3498db", "#1a6fa3", "#0e3d5c"],
     "jeepney": ["#e67e22", "#d35400", "#a04000"],
@@ -343,7 +364,8 @@ def _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat, mode_label, colors)
             "time":            f"{int(route['duration'] / 60)} mins",
             "distance":        f"{round(route['distance'] / 1000, 1)} km",
             "coords":          coords,
-            "stations":        [],   # road routes carry no station pins
+            "segments":        [],
+            "stations":        [],
             "safety_score":    80,
             "hazards_flagged": "Clear",
         })
@@ -354,22 +376,6 @@ def get_car_route(orig_lon, orig_lat, dest_lon, dest_lat):
     """Car / private vehicle — OSRM driving."""
     return _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat,
                             "Car", _ROUTE_COLORS["car"])
-
-
-def get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat):
-    """
-    Jeepney P2P routing.
-    STATUS: STUB — falls back to OSRM driving path.
-
-    TODO (next commit):
-      • Query OSM relations tagged route=share_taxi / route=jeepney
-        within Metro Manila bbox (same pattern as get_osm_railway_geometry)
-      • Filter relations whose stops cover both endpoints
-      • Snap to nearest jeepney stop nodes, return ordered stop list
-    """
-    print("[jeepney] STUB: using OSRM fallback")
-    return _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat,
-                            "Jeepney P2P", _ROUTE_COLORS["jeepney"])
 
 
 def get_bus_route(orig_lon, orig_lat, dest_lon, dest_lat):
@@ -386,6 +392,390 @@ def get_bus_route(orig_lon, orig_lat, dest_lon, dest_lat):
     print("[bus] STUB: using OSRM fallback")
     return _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat,
                             "Bus", _ROUTE_COLORS["bus"])
+
+
+# ── 5b. Jeepney routing — JSON stops → OSRM waypoints → ordered stop pins ─────
+#
+#  jeepney.json lives in map_transit/ (falls back to root).
+#  Each route entry has:
+#    route_name  — display name
+#    stops[]     — ordered array of {name, lat, lng} — NO geocoding needed.
+#                  These exact coords are used as OSRM via-points in sequence.
+#
+#  Algorithm:
+#    1. Read stop coords from JSON in order.  No Nominatim, no geocoding.
+#    2. Feed ALL stops as mandatory OSRM waypoints → polyline follows the
+#       real road corridor the jeepney travels, stop by stop.
+#    3. The stops become ordered map pins (like train stations).
+#    4. Snap user origin → nearest polyline point  (board point)
+#       Snap user dest   → nearest polyline point  (alight point)
+#    5. Accept only if board_idx < alight_idx and both walks ≤ threshold.
+#    6. Slice stop list to only those between board and alight positions.
+#    7. Return up to 3 best matches with walk → jeepney → walk segments.
+
+_JEEPNEY_ROUTES_DATA = None   # raw JSON, loaded once
+_JEEPNEY_POLY_CACHE  = {}     # route_name → {polyline, stations, dur, dist}
+
+_MAX_BOARD_WALK_M  = 2_000
+_MAX_ALIGHT_WALK_M = 2_000
+
+
+def _load_jeepney_data():
+    """Load jeepney.json once and cache it in memory."""
+    global _JEEPNEY_ROUTES_DATA
+    if _JEEPNEY_ROUTES_DATA is not None:
+        return _JEEPNEY_ROUTES_DATA
+
+    base = os.path.dirname(os.path.abspath(__file__))
+    cwd  = os.getcwd()
+
+    candidates = [
+        os.path.join(base, 'map_transit', 'jeepney.json'),
+        os.path.join(base, 'jeepney.json'),
+        os.path.join(cwd,  'map_transit', 'jeepney.json'),
+        os.path.join(cwd,  'jeepney.json'),
+    ]
+
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            raw = open(path, encoding='utf-8').read().strip()
+            # Auto-repair: file may be missing the opening '[' bracket
+            if not raw.startswith('['):
+                raw = '[' + raw
+            data = json.loads(raw)
+            # Normalise single-object files
+            if isinstance(data, dict):
+                data = [data]
+            _JEEPNEY_ROUTES_DATA = data
+            print(f"[jeepney] Loaded {len(data)} routes from {path}")
+            for r in data:
+                pts = r.get('roads') or r.get('stops') or []
+                print(f"[jeepney]   '{r.get('route_name','?')}' [{r.get('traffic_flow','')}] — {len(pts)} road pts")
+            return _JEEPNEY_ROUTES_DATA
+        except Exception as e:
+            print(f"[jeepney] Failed to parse {path}: {e}")
+
+    print("[jeepney] jeepney.json not found. Searched:")
+    for p in candidates:
+        print(f"[jeepney]   {'EXISTS' if os.path.exists(p) else 'missing'} -> {p}")
+    _JEEPNEY_ROUTES_DATA = []
+    return []
+
+
+def _get_road_points(jroute):
+    """Return waypoint list — supports new 'roads' key and old 'stops' key."""
+    return jroute.get('roads') or jroute.get('stops') or []
+
+
+def _infer_travel_direction(orig_lat, orig_lon, dest_lat, dest_lon):
+    """
+    Return dominant travel direction: Northbound/Southbound/Eastbound/Westbound.
+    Picks the axis with the larger displacement.
+    """
+    dlat = dest_lat - orig_lat
+    dlon = dest_lon - orig_lon
+    if abs(dlat) >= abs(dlon):
+        return 'Northbound' if dlat > 0 else 'Southbound'
+    return 'Eastbound' if dlon > 0 else 'Westbound'
+
+
+def _route_is_near(jroute, orig_lat, orig_lon, dest_lat, dest_lon, threshold_m=5000):
+    """
+    Fast pre-filter — no OSRM, no Nominatim.
+
+    Passes only if:
+      1. traffic_flow (if set) matches the inferred user travel direction.
+      2. At least one road point is within threshold_m of the origin.
+      3. At least one road point (later index) is within threshold_m of dest.
+    """
+    flow = jroute.get('traffic_flow', '')
+    if flow:
+        needed = _infer_travel_direction(orig_lat, orig_lon, dest_lat, dest_lon)
+        if flow != needed:
+            return False
+
+    points = _get_road_points(jroute)
+    orig_near_idx = None
+    dest_near_idx = None
+
+    for i, pt in enumerate(points):
+        lat = pt.get('lat')
+        lon = pt.get('lon') or pt.get('lng')
+        if lat is None or lon is None:
+            continue
+        if _haversine_m(orig_lat, orig_lon, lat, lon) <= threshold_m:
+            if orig_near_idx is None:
+                orig_near_idx = i
+        if _haversine_m(dest_lat, dest_lon, lat, lon) <= threshold_m:
+            dest_near_idx = i
+
+    if orig_near_idx is None or dest_near_idx is None:
+        return False
+    return orig_near_idx < dest_near_idx
+
+
+def _build_jeepney_polyline(jroute):
+    """
+    Build OSRM road polyline from jroute['roads'] (new format) or 'stops' (old).
+    Coords are road-midpoint positions — no Nominatim.
+
+    OSRM params:
+      continue_straight=true  — no U-turns at waypoints
+      approaches=curb         — correct curbside on divided roads
+    """
+    name = jroute['route_name']
+    if name in _JEEPNEY_POLY_CACHE:
+        return _JEEPNEY_POLY_CACHE[name]
+
+    raw_points = _get_road_points(jroute)
+    if len(raw_points) < 2:
+        print(f"[jeepney] '{name}' has fewer than 2 road points — skipping.")
+        _JEEPNEY_POLY_CACHE[name] = None
+        return None
+
+    stations  = []
+    waypoints = []
+
+    for pt in raw_points:
+        lat   = pt.get('lat')
+        lon   = pt.get('lon') or pt.get('lng')
+        pname = pt.get('name', 'Road point')
+        if lat is None or lon is None:
+            print(f"[jeepney]   '{pname}' missing coords — skipped")
+            continue
+        stations.append({'name': pname, 'lat': lat, 'lon': lon})
+        waypoints.append((lon, lat))
+
+    if len(waypoints) < 2:
+        print(f"[jeepney] Not enough valid points for '{name}'")
+        _JEEPNEY_POLY_CACHE[name] = None
+        return None
+
+    flow = jroute.get('traffic_flow', '')
+    print(f"[jeepney] Building '{name}' [{flow}] ({len(waypoints)} pts)...")
+
+    wp_str     = ';'.join(f"{lon},{lat}" for lon, lat in waypoints)
+    approaches = ';'.join('curb' for _ in waypoints)
+    url = (
+        f"{_OSRM_BASE}/{wp_str}"
+        f"?overview=full&geometries=geojson"
+        f"&continue_straight=true"
+        f"&approaches={approaches}"
+    )
+    try:
+        r = requests.get(url, headers={'User-Agent': 'SafeRouteAI'}, timeout=15).json()
+        if r.get('code') == 'Ok' and r.get('routes'):
+            rt       = r['routes'][0]
+            polyline = [[pt[1], pt[0]] for pt in rt['geometry']['coordinates']]
+            result   = {
+                'polyline': polyline,
+                'stations': stations,
+                'dur':      rt['duration'],
+                'dist':     rt['distance'],
+            }
+            _JEEPNEY_POLY_CACHE[name] = result
+            print(f"[jeepney] Built '{name}': {len(polyline)} pts, "
+                  f"{rt['distance']/1000:.1f} km")
+            return result
+        else:
+            print(f"[jeepney] OSRM error for '{name}': {r.get('code')}")
+    except Exception as e:
+        print(f"[jeepney] OSRM failed for '{name}': {e}")
+
+    _JEEPNEY_POLY_CACHE[name] = None
+    return None
+
+
+def _snap_to_polyline(polyline, lat, lon):
+    """Return (index, snapped_lat, snapped_lon, dist_m) on polyline closest to (lat, lon)."""
+    best = min(range(len(polyline)),
+               key=lambda i: _haversine_m(lat, lon, polyline[i][0], polyline[i][1]))
+    return best, polyline[best][0], polyline[best][1], \
+           _haversine_m(lat, lon, polyline[best][0], polyline[best][1])
+
+
+def _polyline_distance_m(polyline):
+    """Sum of haversine distances along a polyline in metres."""
+    return sum(
+        _haversine_m(polyline[i][0], polyline[i][1],
+                     polyline[i + 1][0], polyline[i + 1][1])
+        for i in range(len(polyline) - 1)
+    )
+
+
+def _get_walk_segment(orig_lat, orig_lon, dest_lat, dest_lon):
+    """
+    Return walking polyline, distance_m, duration_s between two points.
+    Tries OSRM foot profile first; falls back to a straight-line connector
+    so the map always has something to draw.
+    """
+    # Skip trivial walks (< 15 m) — don't clutter the map
+    straight = _haversine_m(orig_lat, orig_lon, dest_lat, dest_lon)
+    if straight < 15:
+        return None, 0, 0
+
+    url = (
+        f"{_OSRM_FOOT}/{orig_lon},{orig_lat};{dest_lon},{dest_lat}"
+        f"?overview=full&geometries=geojson"
+    )
+    try:
+        r = requests.get(url, headers={'User-Agent': 'SafeRouteAI'}, timeout=8).json()
+        if r.get('code') == 'Ok' and r.get('routes'):
+            rt = r['routes'][0]
+            coords = [[pt[1], pt[0]] for pt in rt['geometry']['coordinates']]
+            return coords, rt['distance'], rt['duration']
+    except Exception as e:
+        print(f"[walk] OSRM foot failed ({e}), using straight-line fallback")
+
+    # Straight-line fallback — simple but always works
+    return ([[orig_lat, orig_lon], [dest_lat, dest_lon]],
+            straight,
+            straight / 1.2)  # ~1.2 m/s walking speed
+
+
+def get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat):
+    """
+    Find the single best jeepney route for this origin/destination.
+
+    Steps:
+      1. Pre-filter all routes using raw JSON stop coords — cheap haversine
+         check.  Routes where no stop is near the user are skipped entirely,
+         so we never waste Nominatim or OSRM calls on irrelevant routes.
+      2. Build OSRM polyline only for the pre-filtered candidates.
+      3. Snap user origin/dest to nearest polyline point.
+      4. Return the one best match (least total walking distance).
+    """
+    all_routes = _load_jeepney_data()
+    color      = _ROUTE_COLORS["jeepney"][0]
+
+    # ── Step 1: cheap pre-filter ──────────────────────────────────────────
+    nearby = [r for r in all_routes
+              if _route_is_near(r, orig_lat, orig_lon, dest_lat, dest_lon)]
+    print(f"[jeepney] {len(nearby)}/{len(all_routes)} routes pass pre-filter")
+
+    if not nearby:
+        return {"error": (
+            "No jeepney route found near your origin and destination. "
+            "Try a different commuter type or check your locations."
+        )}
+
+    # ── Step 2 & 3: build polyline + snap, keep only valid direction ──────
+    best = None
+
+    for jroute in nearby:
+        built = _build_jeepney_polyline(jroute)
+        if not built:
+            continue
+
+        polyline = built['polyline']
+        if len(polyline) < 2:
+            continue
+
+        board_idx,  board_lat,  board_lon,  board_m  = _snap_to_polyline(polyline, orig_lat, orig_lon)
+        alight_idx, alight_lat, alight_lon, alght_m  = _snap_to_polyline(polyline, dest_lat, dest_lon)
+
+        if board_idx >= alight_idx:
+            continue
+        if board_m > _MAX_BOARD_WALK_M or alght_m > _MAX_ALIGHT_WALK_M:
+            continue
+
+        jeepney_seg = polyline[board_idx: alight_idx + 1]
+        jeep_dist_m = _polyline_distance_m(jeepney_seg)
+        total_walk  = board_m + alght_m
+
+        # Slice stops to those between board and alight
+        route_stops = []
+        for stop in built['stations']:
+            si, _, _, _ = _snap_to_polyline(polyline, stop['lat'], stop['lon'])
+            if board_idx <= si <= alight_idx:
+                route_stops.append({**stop, '_idx': si})
+        route_stops.sort(key=lambda s: s['_idx'])
+        for s in route_stops:
+            s.pop('_idx', None)
+
+        cand = {
+            'jroute':      jroute,
+            'board_lat':   board_lat,   'board_lon':  board_lon,
+            'board_m':     board_m,
+            'alight_lat':  alight_lat,  'alight_lon': alight_lon,
+            'alight_m':    alght_m,
+            'jeepney_seg': jeepney_seg,
+            'jeep_dist_m': jeep_dist_m,
+            'total_walk_m': total_walk,
+            'route_stops': route_stops,
+        }
+
+        if best is None or total_walk < best['total_walk_m']:
+            best = cand
+
+    if best is None:
+        return {"error": (
+            "No jeepney route found near your origin and destination. "
+            "Try a different commuter type or check your locations."
+        )}
+
+    # ── Step 4: build the single result ───────────────────────────────────
+    jroute      = best['jroute']
+    jeepney_seg = best['jeepney_seg']
+
+    w_board_coords,  w_board_dist,  w_board_dur  = _get_walk_segment(
+        orig_lat, orig_lon, best['board_lat'], best['board_lon']
+    )
+    w_alight_coords, w_alight_dist, w_alight_dur = _get_walk_segment(
+        best['alight_lat'], best['alight_lon'], dest_lat, dest_lon
+    )
+
+    jeep_mins  = max(1, int(best['jeep_dist_m'] / (15_000 / 60)))
+    walk_mins  = int(((w_board_dur or 0) + (w_alight_dur or 0)) / 60)
+    total_mins = jeep_mins + walk_mins
+    total_km   = round(
+        (best['jeep_dist_m'] + (w_board_dist or 0) + (w_alight_dist or 0)) / 1_000, 1
+    )
+
+    segments = []
+    if w_board_coords and len(w_board_coords) >= 2:
+        segments.append({
+            'type':   'walk',
+            'coords': w_board_coords,
+            'color':  '#7f8c8d',
+            'label':  f"Walk {int(best['board_m'])}m to jeepney stop",
+        })
+    segments.append({
+        'type':   'jeepney',
+        'coords': jeepney_seg,
+        'color':  color,
+        'label':  jroute['route_name'],
+    })
+    if w_alight_coords and len(w_alight_coords) >= 2:
+        segments.append({
+            'type':   'walk',
+            'coords': w_alight_coords,
+            'color':  '#7f8c8d',
+            'label':  f"Walk {int(best['alight_m'])}m to destination",
+        })
+
+    print(f"[jeepney] Best match: '{jroute['route_name']}' "
+          f"walk_in={int(best['board_m'])}m walk_out={int(best['alight_m'])}m")
+
+    return {"routes": [{
+        'id':              0,
+        'name':            jroute['route_name'],
+        'type':            'jeepney',
+        'color':           color,
+        'time':            f"~{total_mins} mins",
+        'distance':        f"{total_km} km",
+        'coords':          jeepney_seg,
+        'segments':        segments,
+        'stations':        best['route_stops'],
+        'board_point':     {'lat': best['board_lat'], 'lon': best['board_lon']},
+        'alight_point':    {'lat': best['alight_lat'], 'lon': best['alight_lon']},
+        'walk_board_m':    int(best['board_m']),
+        'walk_alight_m':   int(best['alight_m']),
+        'safety_score':    75,
+        'hazards_flagged': 'Variable — mid-block stops',
+    }]}
 
 
 # ── 6. [FUTURE] Multi-modal connector hook ───────────────────────────────────
@@ -463,12 +853,13 @@ def get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, f
             "time":            "N/A",
             "distance":        "N/A",
             "coords":          result['track_segments'],
+            "segments":        [],
             "stations":        result['stations'],
             "safety_score":    95,
             "hazards_flagged": "Clear",
         }]}
 
-    # ── Road modes
+    # ── Jeepney: JSON-backed designated-route matching
     if ctype == "jeepney":
         return get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat)
 

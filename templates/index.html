@@ -43,7 +43,6 @@
                 </div>
 
                 <!-- ── Transport Mode Selector ─────────────────────────────── -->
-                <!-- Hidden input carries the selected value to Flask -->
                 <input type="hidden" name="commuterType" id="commuter-type-value" value="car">
 
                 <label class="input-label">Transport Mode</label>
@@ -52,32 +51,28 @@
                 <div class="mode-group-label">🚇 Rail</div>
                 <div class="mode-grid" id="mode-grid">
                     <button type="button" class="mode-tile"
-                            data-value="lrt-1"
-                            data-color="#008000"
+                            data-value="lrt-1" data-color="#008000"
                             onclick="selectMode(this)">
                         <span class="mode-icon">🟢</span>
                         <span class="mode-name">LRT-1</span>
                         <span class="mode-sub">Green Line</span>
                     </button>
                     <button type="button" class="mode-tile"
-                            data-value="lrt-2"
-                            data-color="#0000CD"
+                            data-value="lrt-2" data-color="#0000CD"
                             onclick="selectMode(this)">
                         <span class="mode-icon">🔵</span>
                         <span class="mode-name">LRT-2</span>
                         <span class="mode-sub">Blue Line</span>
                     </button>
                     <button type="button" class="mode-tile"
-                            data-value="mrt-3"
-                            data-color="#DAA520"
+                            data-value="mrt-3" data-color="#DAA520"
                             onclick="selectMode(this)">
                         <span class="mode-icon">🟡</span>
                         <span class="mode-name">MRT-3</span>
                         <span class="mode-sub">Yellow Line</span>
                     </button>
                     <button type="button" class="mode-tile"
-                            data-value="pnr"
-                            data-color="#8B4513"
+                            data-value="pnr" data-color="#8B4513"
                             onclick="selectMode(this)">
                         <span class="mode-icon">🚂</span>
                         <span class="mode-name">PNR</span>
@@ -89,31 +84,27 @@
                 <div class="mode-group-label" style="margin-top:12px;">🛣️ Road</div>
                 <div class="mode-grid">
                     <button type="button" class="mode-tile active"
-                            data-value="car"
-                            data-color="#3498db"
+                            data-value="car" data-color="#3498db"
                             onclick="selectMode(this)">
                         <span class="mode-icon">🚗</span>
                         <span class="mode-name">Car</span>
                         <span class="mode-sub">Private</span>
                     </button>
                     <button type="button" class="mode-tile"
-                            data-value="jeepney"
-                            data-color="#e67e22"
+                            data-value="jeepney" data-color="#e67e22"
                             onclick="selectMode(this)">
                         <span class="mode-icon">🚐</span>
                         <span class="mode-name">Jeepney</span>
                         <span class="mode-sub">P2P</span>
                     </button>
                     <button type="button" class="mode-tile"
-                            data-value="bus"
-                            data-color="#27ae60"
+                            data-value="bus" data-color="#27ae60"
                             onclick="selectMode(this)">
                         <span class="mode-icon">🚌</span>
                         <span class="mode-name">Bus</span>
                         <span class="mode-sub">City Bus</span>
                     </button>
                 </div>
-                <!-- ── End Transport Mode Selector ────────────────────────── -->
 
                 <button type="submit" class="btn-primary" id="submit-btn">
                     Find Safe Routes
@@ -123,8 +114,58 @@
             <!-- Route result cards -->
             <div id="route-results" class="route-results">
                 {% for route in routes %}
+
+                {# ── Jeepney card ───────────────────────────────────────────── #}
+                {% if route.type == 'jeepney' %}
+                <div class="route-card jeepney-card" style="border-left-color: {{ route.color }};">
+                    <div class="route-title" style="color: {{ route.color }}">
+                        🚐 {{ route.name }}
+                    </div>
+                    <div class="route-stats">
+                        <span>🕒 {{ route.time }}</span>
+                        <span>📏 {{ route.distance }}</span>
+                    </div>
+
+                    {# Walk legs summary #}
+                    <div class="jeepney-legs">
+                        {% if route.walk_board_m is defined and route.walk_board_m > 0 %}
+                        <div class="leg-row walk-leg">
+                            <span class="leg-icon">🚶</span>
+                            <span class="leg-desc">Walk {{ route.walk_board_m }}m → board jeepney</span>
+                        </div>
+                        {% endif %}
+                        <div class="leg-row jeep-leg" style="color: {{ route.color }};">
+                            <span class="leg-icon">🚐</span>
+                            <span class="leg-desc">Ride along designated route</span>
+                        </div>
+                        {% if route.walk_alight_m is defined and route.walk_alight_m > 0 %}
+                        <div class="leg-row walk-leg">
+                            <span class="leg-icon">🚶</span>
+                            <span class="leg-desc">Alight → walk {{ route.walk_alight_m }}m to destination</span>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="route-safety">
+                        Safety Score: {{ route.safety_score }}/100 &nbsp;|&nbsp;
+                        {{ route.hazards_flagged }}
+                    </div>
+
+                    {# Landmarks along route #}
+                    {% if route.landmarks %}
+                    <div class="route-landmarks">
+                        <span class="landmarks-label">📍 Via:</span>
+                        {{ route.landmarks | join(' → ') }}
+                    </div>
+                    {% endif %}
+                </div>
+
+                {# ── Train card ─────────────────────────────────────────────── #}
+                {% elif route.type == 'train' %}
                 <div class="route-card" style="border-left-color: {{ route.color }};">
-                    <div class="route-title" style="color: {{ route.color }}">{{ route.name }}</div>
+                    <div class="route-title" style="color: {{ route.color }}">
+                        🚇 {{ route.name }}
+                    </div>
                     <div class="route-stats">
                         <span>🕒 {{ route.time }}</span>
                         <span>📏 {{ route.distance }}</span>
@@ -139,6 +180,22 @@
                     </div>
                     {% endif %}
                 </div>
+
+                {# ── Car / Bus / fallback card ──────────────────────────────── #}
+                {% else %}
+                <div class="route-card" style="border-left-color: {{ route.color }};">
+                    <div class="route-title" style="color: {{ route.color }}">{{ route.name }}</div>
+                    <div class="route-stats">
+                        <span>🕒 {{ route.time }}</span>
+                        <span>📏 {{ route.distance }}</span>
+                    </div>
+                    <div class="route-safety">
+                        Safety Score: {{ route.safety_score }}/100<br>
+                        Hazard: {{ route.hazards_flagged }}
+                    </div>
+                </div>
+                {% endif %}
+
                 {% endfor %}
             </div>
         </div>
@@ -158,16 +215,11 @@
     <script>
         // ── Transport mode tile selector ─────────────────────────────────────
         function selectMode(tile) {
-            // Deselect all tiles
             document.querySelectorAll('.mode-tile').forEach(t => t.classList.remove('active'));
-            // Activate clicked tile
             tile.classList.add('active');
-            // Push value into hidden input
             document.getElementById('commuter-type-value').value = tile.dataset.value;
-            // Update tile accent colour via CSS variable
             document.documentElement.style.setProperty('--mode-color', tile.dataset.color);
         }
-        // Initialise accent for default selection (car)
         document.documentElement.style.setProperty('--mode-color', '#3498db');
 
 
@@ -175,7 +227,7 @@
         let isPinpointing = false;
 
         function updatePinpointStatus() {
-            const originVal = document.getElementById('origin').value;
+            const originVal  = document.getElementById('origin').value;
             const statusLabel = document.getElementById('pick-status');
             if (!originVal || originVal.trim() === "") {
                 statusLabel.innerText = "📍 Click map → set START (Green)";
@@ -220,7 +272,7 @@
         window.addEventListener("message", function(event) {
             if (event.data && event.data.type === 'map_click' && isPinpointing) {
                 const { lat, lng } = event.data;
-                const coord = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+                const coord    = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
                 const originBox = document.getElementById('origin');
                 const destBox   = document.getElementById('destination');
 
