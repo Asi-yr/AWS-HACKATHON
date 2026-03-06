@@ -15,8 +15,8 @@
       },
       {
         "name": "Legarda Street",
-        "lat": 14.6001,
-        "lng": 120.992
+        "lat": 14.5998,
+        "lng": 120.9865
       },
       {
         "name": "C.M. Recto Avenue (Westbound)",
@@ -36,8 +36,8 @@
       },
       {
         "name": "Legarda Street",
-        "lat": 14.5998,
-        "lng": 120.992
+        "lat": 14.6003,
+        "lng": 120.9868
       },
       {
         "name": "Magsaysay Blvd (Eastbound Lane)",
@@ -222,9 +222,9 @@
         "lng": 121.0055
       },
       {
-        "name": "Legarda Street",
+        "name": "Legarda Street (Westbound)",
         "lat": 14.6001,
-        "lng": 120.992
+        "lng": 120.9865
       },
       {
         "name": "C.M. Recto Ave (Westbound)",
@@ -243,9 +243,9 @@
         "lng": 120.9751
       },
       {
-        "name": "Legarda Street",
-        "lat": 14.5998,
-        "lng": 120.9921
+        "name": "Legarda Street (Westbound)",
+        "lat": 14.6001,
+        "lng": 120.9865
       },
       {
         "name": "Magsaysay Blvd (Eastbound Lane)",
@@ -266,12 +266,12 @@
       {
         "name": "A. Mabini Street",
         "lat": 14.64,
-        "lng": 120.975
+        "lng": 120.982
       },
       {
         "name": "10th Avenue",
-        "lat": 14.65,
-        "lng": 120.98
+        "lat": 14.649,
+        "lng": 120.983
       },
       {
         "name": "Rizal Avenue Ext (Northbound)",
@@ -291,13 +291,13 @@
       },
       {
         "name": "10th Avenue",
-        "lat": 14.6499,
-        "lng": 120.9801
+        "lat": 14.6489,
+        "lng": 120.9832
       },
       {
         "name": "A. Mabini Street",
         "lat": 14.6399,
-        "lng": 120.9751
+        "lng": 120.9822
       }
     ]
   },
@@ -463,8 +463,8 @@
       },
       {
         "name": "Del Pan Road",
-        "lat": 14.605,
-        "lng": 120.965
+        "lat": 14.612,
+        "lng": 120.964
       },
       {
         "name": "C.M. Recto Avenue",
@@ -484,8 +484,8 @@
       },
       {
         "name": "Del Pan Road",
-        "lat": 14.6049,
-        "lng": 120.9651
+        "lat": 14.6121,
+        "lng": 120.9642
       },
       {
         "name": "Quirino Highway",
@@ -516,7 +516,7 @@
       {
         "name": "Gil Puyat Avenue",
         "lat": 14.554,
-        "lng": 121
+        "lng": 121.0
       },
       {
         "name": "Taft Avenue (Northbound Lane)",
