@@ -72,6 +72,49 @@ def get_base_map(center_lat=14.605, center_lon=120.985, zoom=13):
     m.get_root().html.add_child(Element(click_js))
     return m
 
+
+def _draw_train_route(route, m):
+    """Draw track polyline + ordered station markers for a train route."""
+    route_layer = folium.FeatureGroup(name=route['name'])
+
+    # ── Track polyline ──
+    for segment in route.get('coords', []):
+        if len(segment) >= 2:
+            folium.PolyLine(
+                locations=segment,
+                color="#8e44ad",
+                weight=5,
+                opacity=0.85,
+                dash_array='10, 6',
+                tooltip=route['name'],
+            ).add_to(route_layer)
+
+    # ── Station pins (ordered, from OSM relation) ──
+    stations = route.get('stations', [])
+    for idx, station in enumerate(stations):
+        is_terminal = (idx == 0 or idx == len(stations) - 1)
+
+        # Outer ring: larger + filled for terminals, smaller for intermediate
+        folium.CircleMarker(
+            location=[station['lat'], station['lon']],
+            radius=9 if is_terminal else 6,
+            color="#8e44ad",
+            weight=2,
+            fill=True,
+            fill_color="#ffffff",
+            fill_opacity=1.0,
+            tooltip=f"{'🔴 ' if is_terminal else ''}{station['name']}",
+            popup=folium.Popup(
+                f"<b>{station['name']}</b>"
+                + ("<br><i>Terminal</i>" if is_terminal else ""),
+                max_width=180,
+            ),
+        ).add_to(route_layer)
+
+    route_layer.add_to(m)
+    return route_layer
+
+
 @app.route('/', methods=['GET', 'POST'])
 def home():
     if 'user' not in session:
@@ -91,58 +134,53 @@ def home():
         if not orig_lon or not dest_lon:
             flash("Location not found. Please type a specific address.")
         else:
-            # Fetch Routes (Now supports OSM Train Tracks)
-            nav_response = get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, [])
+            nav_response = get_navigation_data(
+                orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, []
+            )
             
             if "error" in nav_response:
                 flash(nav_response["error"])
             else:
                 routes_data = nav_response.get("routes", [])
                 
-                # Draw Origin/Dest Markers
+                # Draw origin/destination markers
                 if routes_data:
                     start_coord = [orig_lat, orig_lon]
-                    end_coord = [dest_lat, dest_lon]
+                    end_coord   = [dest_lat, dest_lon]
                     marker_group = folium.FeatureGroup(name="Start & End Points")
-                    folium.Marker(start_coord, popup="Starting Point", icon=folium.Icon(color="green", icon="play")).add_to(marker_group)
-                    folium.Marker(end_coord, popup="Destination", icon=folium.Icon(color="red", icon="stop")).add_to(marker_group)
+                    folium.Marker(
+                        start_coord, popup="Starting Point",
+                        icon=folium.Icon(color="green", icon="play")
+                    ).add_to(marker_group)
+                    folium.Marker(
+                        end_coord, popup="Destination",
+                        icon=folium.Icon(color="red", icon="stop")
+                    ).add_to(marker_group)
                     marker_group.add_to(m)
-                    
-                    # Fit map to show start and end
                     m.fit_bounds([start_coord, end_coord])
 
-                # --- MODIFIED: Draw Routes (Handles Train Segments vs Road Lines) ---
+                # Draw routes
                 for route in routes_data:
-                    route_layer = folium.FeatureGroup(name=route['name'])
-                    
                     if route.get('type') == 'train':
-                        # Train data from OSM comes as a list of segments (List of Lists of Coords)
-                        # We iterate and draw each segment separately
-                        for segment in route['coords']:
-                             folium.PolyLine(
-                                locations=segment,
-                                color="purple", # Train tracks color
-                                weight=5,
-                                opacity=0.8,
-                                dash_array='10, 10' # Makes it look like tracks
-                            ).add_to(route_layer)
+                        _draw_train_route(route, m)
                     else:
-                        # Standard Road Route (Single Line)
+                        # Standard road route
+                        route_layer = folium.FeatureGroup(name=route['name'])
                         folium.PolyLine(
                             locations=route['coords'],
                             color=route['color'],
                             weight=7 if route['id'] == 0 else 5,
                             opacity=0.9,
-                            tooltip=f"{route['name']} ({route['time']})"
+                            tooltip=f"{route['name']} ({route['time']})",
                         ).add_to(route_layer)
-                    
-                    route_layer.add_to(m)
+                        route_layer.add_to(m)
 
                 if routes_data:
                     folium.LayerControl().add_to(m)
 
     map_html = m.get_root().render()
     return render_template('index.html', user=session['user'], map_html=map_html, routes=routes_data)
+
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -161,6 +199,7 @@ def register():
         flash("Registration successful!"); return redirect(url_for('login'))
     return render_template('register.html')
 
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -178,22 +217,29 @@ def login():
             return redirect(url_for('login'))
     return render_template('login.html')
 
+
 @app.route('/logout')
 def logout():
     session.pop('user', None)
     return redirect(url_for('login'))
 
+
 @app.route('/api/suggest', methods=['GET'])
 def suggest_location():
     query = request.args.get('q', '')
-    if len(query) < 3: return jsonify([])
-    url = f"https://nominatim.openstreetmap.org/search?q={query}&format=json&addressdetails=1&limit=5&countrycodes=ph"
+    if len(query) < 3:
+        return jsonify([])
+    url = (
+        f"https://nominatim.openstreetmap.org/search"
+        f"?q={query}&format=json&addressdetails=1&limit=5&countrycodes=ph"
+    )
     headers = {'User-Agent': 'SafeRoute-Flask-App/1.0'}
     try:
         response = requests.get(url, headers=headers)
         return jsonify(response.json())
-    except Exception as e:
+    except Exception:
         return jsonify([])
+
 
 @app.route('/api/reverse', methods=['GET'])
 def reverse_geocode_api():
@@ -208,14 +254,15 @@ def reverse_geocode_api():
     except Exception:
         return jsonify({"address": f"{lat}, {lon}"})
 
+
 @app.route('/api/routes', methods=['POST'])
 def get_routes():
     data = request.json
-    origin_text = data.get('origin')
-    dest_text = data.get('destination')
-    commuter_type = data.get('commuterType')
-    orig_coords = data.get('originCoords')
-    dest_coords = data.get('destCoords')
+    origin_text    = data.get('origin')
+    dest_text      = data.get('destination')
+    commuter_type  = data.get('commuterType')
+    orig_coords    = data.get('originCoords')
+    dest_coords    = data.get('destCoords')
 
     if orig_coords:
         orig_lon, orig_lat = float(orig_coords['lon']), float(orig_coords['lat'])
@@ -230,11 +277,17 @@ def get_routes():
     if not orig_lon or not dest_lon:
         return jsonify({"error": "Location not found."}), 400
 
-    nav_response = get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, [])
+    nav_response = get_navigation_data(
+        orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, []
+    )
     if "error" in nav_response:
         return jsonify({"error": nav_response["error"]}), 400
 
+    # Each route now contains:
+    #   coords    -> list of track segments (for polylines)
+    #   stations  -> ordered list of {lat, lon, name} (for station pins)
     return jsonify(nav_response)
+
 
 if __name__ == '__main__':
     app.run(debug=True)
