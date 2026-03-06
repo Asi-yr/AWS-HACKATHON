@@ -1,7 +1,26 @@
 import requests
 import time
 
-# ── Overpass retry ────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+#  navigation.py  —  SafeRouteAI
+#  Route calculation for all commuter types.
+#
+#  ┌─────────────────────────────────────────────────────────────────────┐
+#  │  SECTION MAP                                                        │
+#  │  1. Overpass API retry wrapper          (line ~35)                  │
+#  │  2. General helpers                     (line ~75)                  │
+#  │  3. OSM name resolver                   (line ~125)                 │
+#  │  4. !! TRAIN ROUTING — DO NOT MODIFY !! (line ~145)                 │
+#  │     4a. _extract_relation_data()                                    │
+#  │     4b. get_osm_railway_geometry()                                  │
+#  │  5. Road / Bus / Jeepney routing stubs  (line ~330)                 │
+#  │  6. [FUTURE] Multi-modal connector hook (line ~400)                 │
+#  │  7. Public API — get_navigation_data()  (line ~435)                 │
+#  └─────────────────────────────────────────────────────────────────────┘
+# ════════════════════════════════════════════════════════════════════════
+
+
+# ── 1. Overpass API retry wrapper ────────────────────────────────────────────
 
 _OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
@@ -33,7 +52,8 @@ def _overpass_query(query, max_retries=5, timeout=30):
     print("[overpass] All attempts exhausted.")
     return None
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+
+# ── 2. General helpers ────────────────────────────────────────────────────────
 
 def geocode_location(address):
     if "," in address:
@@ -43,7 +63,10 @@ def geocode_location(address):
             return (lon, lat) if lon > 100 else (lat, lon)
         except (ValueError, TypeError):
             pass
-    url = f"https://nominatim.openstreetmap.org/search?q={address}&format=json&limit=1&countrycodes=ph"
+    url = (
+        f"https://nominatim.openstreetmap.org/search"
+        f"?q={address}&format=json&limit=1&countrycodes=ph"
+    )
     try:
         resp = requests.get(url, headers={'User-Agent': 'SafeRoute/1.0'}, timeout=10).json()
         if resp:
@@ -62,7 +85,6 @@ def _closest_idx(line, lat, lon):
 
 
 def _chain_one(segments, start_idx, used):
-    """Build one connected polyline from segments, starting at start_idx."""
     ep = {}
     for i, seg in enumerate(segments):
         ep[tuple(seg[0])]  = ('start', i)
@@ -102,30 +124,51 @@ def _chain_all(segments):
     print(f"[railway] {len(segments)} raw ways -> {len(components)} component(s)")
     return components
 
-# ── OSM line name resolver ────────────────────────────────────────────────────
+
+# ── 3. OSM name resolver ──────────────────────────────────────────────────────
+#  Maps frontend commuter_type values to their OSM relation name.
+#  Add aliases here freely — do NOT touch anything in section 4.
 
 def _osm_name(user_input):
     key = user_input.lower().replace(" ", "").replace("-", "")
     return {
-        "lrt1": "Line 1", "line1": "Line 1",
-        "lrt2": "Line 2", "line2": "Line 2",
-        "mrt3": "Line 3", "mrt":   "Line 3", "line3": "Line 3",
-        "mrt7": "Line 7", "line7": "Line 7",
-        "pnr":  "PNR",
+        "lrt1":   "Line 1", "line1":  "Line 1",
+        "lrt2":   "Line 2", "line2":  "Line 2",
+        "mrt3":   "Line 3", "mrt":    "Line 3", "line3": "Line 3",
+        "mrt7":   "Line 7", "line7":  "Line 7",
+        "pnr":    "PNR",
         "subway": "Metro Manila Subway",
     }.get(key, user_input)
 
-# ── Station extractor from OSM relation members ───────────────────────────────
 
-_STOP_ROLES = {'stop', 'stop_entry_only', 'stop_exit_only'}
+# ════════════════════════════════════════════════════════════════════════════
+#  4. !! TRAIN ROUTING — DO NOT MODIFY !!
+#
+#  STATUS: PRODUCTION-STABLE — working correctly for LRT-1, LRT-2, MRT-3, PNR
+#
+#  These two functions use OSM *route relations* (not raw way geometry) to:
+#    • Obtain stations in their correct physical order (from relation members)
+#    • Snap origin & destination to the nearest real OSM station node
+#    • Slice exactly the stops between those two snap points
+#    • Trim the track polyline to the same range — no overshoot, no undershoot
+#
+#  If you need to:
+#    • Support a new line     → add an alias in _osm_name() above (section 3)
+#    • Add transfer routing   → write a NEW function in section 6 that CALLS
+#                               get_osm_railway_geometry() per leg
+#    • Change map rendering   → edit _draw_train_route() in main.py only
+#
+#  DO NOT change _extract_relation_data() or get_osm_railway_geometry().
+# ════════════════════════════════════════════════════════════════════════════
+
+_STOP_ROLES           = {'stop', 'stop_entry_only', 'stop_exit_only'}
 _STATION_RAILWAY_TAGS = {'station', 'stop', 'halt', 'tram_stop', 'subway_entrance'}
 
+
 def _extract_relation_data(relation):
-    """
-    Pull ordered stops and way geometry from a single OSM route relation.
-    Returns (stops_list, way_segments_list).
-    Stops are in OSM member order — which matches the line's physical sequence.
-    """
+    # !! DO NOT MODIFY !!
+    # Returns (stops_list, way_segments_list) from one OSM route relation.
+    # Stops are in OSM member order = physical line sequence.
     stops = []
     ways  = []
     seen_stop_refs = set()
@@ -135,51 +178,35 @@ def _extract_relation_data(relation):
         role  = member.get('role', '')
 
         if mtype == 'node':
-            tags = member.get('tags', {})
+            tags    = member.get('tags', {})
             is_stop = (
                 role in _STOP_ROLES or
                 tags.get('railway') in _STATION_RAILWAY_TAGS or
                 tags.get('public_transport') in ('stop_position', 'station')
             )
-            # Skip platforms — they're duplicate positional data
+            # Skip platforms — duplicate positional data
             if role == 'platform' or tags.get('public_transport') == 'platform':
                 continue
             ref = member.get('ref') or f"{member.get('lat')},{member.get('lon')}"
             if is_stop and ref not in seen_stop_refs:
                 seen_stop_refs.add(ref)
                 station_name = (
-                    tags.get('name') or
-                    tags.get('name:en') or
-                    tags.get('ref') or
-                    'Station'
+                    tags.get('name') or tags.get('name:en') or tags.get('ref') or 'Station'
                 )
-                stops.append({
-                    'lat':  member['lat'],
-                    'lon':  member['lon'],
-                    'name': station_name,
-                })
+                stops.append({'lat': member['lat'], 'lon': member['lon'], 'name': station_name})
 
         elif mtype == 'way' and 'geometry' in member:
             ways.append([[pt['lat'], pt['lon']] for pt in member['geometry']])
 
     return stops, ways
 
-# ── Main train routing function ───────────────────────────────────────────────
 
 def get_osm_railway_geometry(user_input, orig_lat, orig_lon, dest_lat, dest_lon):
-    """
-    1. Fetch OSM route relation(s) for the line.
-       Relations contain stops IN ORDER as member nodes — this is authoritative.
-    2. Pick the relation (direction) whose stop sequence covers both endpoints.
-    3. Snap origin & destination to their nearest station.
-    4. Slice the ordered station list between those two snapped stations.
-    5. Trim the chained track between the first and last station in that slice.
-    6. Return track_segments (for the polyline) + stations (for map pins).
-    """
+    # !! DO NOT MODIFY !!
+    # See section 4 header above for full explanation.
     name = _osm_name(user_input)
     print(f"[railway] Querying OSM route relation for: {name}")
 
-    # ── Step 1: Fetch route relation(s) ──────────────────────────────────────
     query = f"""
 [out:json][timeout:35];
 (
@@ -200,25 +227,20 @@ out geom;
 
     print(f"[railway] Found {len(relations)} relation(s).")
 
-    # ── Step 2: Extract stops & ways from every relation ─────────────────────
     candidates = []
-    all_ways = []
+    all_ways   = []
     for rel in relations:
         stops, ways = _extract_relation_data(rel)
         all_ways.extend(ways)
         if len(stops) >= 2:
             candidates.append((stops, ways, rel.get('tags', {})))
-            print(f"[railway]   Relation '{rel.get('tags', {}).get('name', '?')}' "
+            print(f"[railway]   '{rel.get('tags', {}).get('name', '?')}' "
                   f"-> {len(stops)} stops, {len(ways)} ways")
 
     if not candidates:
         print("[railway] No relations with usable stops found.")
         return None
 
-    # ── Step 3: Pick the best relation for this trip ──────────────────────────
-    # Score: minimise the distance from origin to its nearest stop  +
-    #        distance from dest to its nearest stop.
-    # The relation whose stops are physically closest to both endpoints wins.
     def score_candidate(stops):
         o_d = min(_dist_sq(s['lat'], s['lon'], orig_lat, orig_lon) for s in stops)
         d_d = min(_dist_sq(s['lat'], s['lon'], dest_lat, dest_lon) for s in stops)
@@ -226,44 +248,38 @@ out geom;
 
     best_stops, _, _ = min(candidates, key=lambda c: score_candidate(c[0]))
 
-    # Merge all ways for a complete track (avoids gaps from one direction only)
-    seen_keys = set()
+    # Deduplicate way segments across relations before chaining
+    seen_keys   = set()
     unique_ways = []
     for seg in all_ways:
-        key = (round(seg[0][0], 5), round(seg[0][1], 5),
-               round(seg[-1][0], 5), round(seg[-1][1], 5))
+        key  = (round(seg[0][0], 5), round(seg[0][1], 5),
+                round(seg[-1][0], 5), round(seg[-1][1], 5))
         rkey = (key[2], key[3], key[0], key[1])
         if key not in seen_keys and rkey not in seen_keys:
             seen_keys.add(key)
             unique_ways.append(seg)
 
-    print(f"[railway] Using {len(best_stops)} ordered stops, "
-          f"{len(unique_ways)} unique way segments.")
+    print(f"[railway] {len(best_stops)} ordered stops | {len(unique_ways)} unique ways")
 
-    # ── Step 4: Snap origin & destination to nearest station ──────────────────
     def nearest_stop_idx(lat, lon, stops):
-        return min(
-            range(len(stops)),
-            key=lambda i: _dist_sq(stops[i]['lat'], stops[i]['lon'], lat, lon)
-        )
+        return min(range(len(stops)),
+                   key=lambda i: _dist_sq(stops[i]['lat'], stops[i]['lon'], lat, lon))
 
     orig_si = nearest_stop_idx(orig_lat, orig_lon, best_stops)
     dest_si = nearest_stop_idx(dest_lat, dest_lon, best_stops)
 
-    print(f"[railway] Origin  snapped -> '{best_stops[orig_si]['name']}' (idx {orig_si})")
-    print(f"[railway] Dest    snapped -> '{best_stops[dest_si]['name']}' (idx {dest_si})")
+    print(f"[railway] Origin  -> '{best_stops[orig_si]['name']}' (idx {orig_si})")
+    print(f"[railway] Dest    -> '{best_stops[dest_si]['name']}' (idx {dest_si})")
 
     if orig_si == dest_si:
         print("[railway] Origin and destination snap to the same station.")
         return None
 
-    # ── Step 5: Slice the ordered station list ────────────────────────────────
-    si, ei = min(orig_si, dest_si), max(orig_si, dest_si)
+    si, ei     = min(orig_si, dest_si), max(orig_si, dest_si)
     route_stops = best_stops[si: ei + 1]
-    print(f"[railway] Route covers {len(route_stops)} stations: "
-          f"'{route_stops[0]['name']}' → '{route_stops[-1]['name']}'")
+    print(f"[railway] {len(route_stops)} stations: "
+          f"'{route_stops[0]['name']}' -> '{route_stops[-1]['name']}'")
 
-    # ── Step 6: Build track trimmed to first → last station ───────────────────
     track_segments = []
     if unique_ways:
         components = _chain_all(unique_ways)
@@ -271,80 +287,193 @@ out geom;
 
         if len(main_track) >= 2:
             def snap_track(lat, lon):
-                return min(
-                    range(len(main_track)),
-                    key=lambda i: _dist_sq(main_track[i][0], main_track[i][1], lat, lon)
-                )
+                return min(range(len(main_track)),
+                           key=lambda i: _dist_sq(main_track[i][0], main_track[i][1], lat, lon))
+
             t_start = snap_track(route_stops[0]['lat'],  route_stops[0]['lon'])
             t_end   = snap_track(route_stops[-1]['lat'], route_stops[-1]['lon'])
             ts, te  = min(t_start, t_end), max(t_start, t_end)
             trimmed = main_track[ts: te + 1]
             if len(trimmed) >= 2:
                 track_segments.append(trimmed)
-                print(f"[railway] Track trimmed to {len(trimmed)} points.")
+                print(f"[railway] Track trimmed to {len(trimmed)} pts.")
 
-    return {
-        'track_segments': track_segments,
-        'stations': route_stops,       # ordered, snapped to real OSM station nodes
-    }
+    return {'track_segments': track_segments, 'stations': route_stops}
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+#  END OF PROTECTED TRAIN SECTION — safe to edit everything below
+# ════════════════════════════════════════════════════════════════════════════
 
-def get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, flood_zones):
-    is_train = any(x in commuter_type.lower()
-                   for x in ["train", "lrt", "mrt", "pnr", "rail", "line"])
 
-    if is_train:
-        result = get_osm_railway_geometry(
-            commuter_type, orig_lat, orig_lon, dest_lat, dest_lon
-        )
-        if not result:
-            return {"error": (
-                f"Could not find route for '{commuter_type}'. "
-                "The line may be missing from OSM or both stops may be the same."
-            )}
-        routes = [{
-            "id": 0,
-            "name": f"{commuter_type} Route",
-            "type": "train",
-            "color": "#8e44ad",
-            "time": "N/A",
-            "distance": "N/A",
-            "coords": result['track_segments'],   # list of [lat,lon] lists
-            "stations": result['stations'],        # ordered list of {lat,lon,name}
-            "safety_score": 95,
-            "hazards_flagged": "Clear",
-        }]
-        return {"routes": routes}
+# ── 5. Road / Bus / Jeepney P2P routing ──────────────────────────────────────
+#
+#  All road modes currently share the OSRM driving router.
+#  Each type has its own wrapper so future mode-specific OSM relation
+#  lookups can be added without touching anything above.
 
-    # ── Road routing via OSRM ─────────────────────────────────────────────────
-    osrm = (
-        f"https://router.project-osrm.org/route/v1/driving/"
-        f"{orig_lon},{orig_lat};{dest_lon},{dest_lat}"
+_OSRM_BASE    = "https://router.project-osrm.org/route/v1/driving"
+_ROUTE_COLORS = {
+    "car":     ["#3498db", "#1a6fa3", "#0e3d5c"],
+    "jeepney": ["#e67e22", "#d35400", "#a04000"],
+    "bus":     ["#27ae60", "#1e8449", "#145a32"],
+}
+
+
+def _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat, mode_label, colors):
+    """Shared OSRM caller — returns a standard routes payload."""
+    url = (
+        f"{_OSRM_BASE}/{orig_lon},{orig_lat};{dest_lon},{dest_lat}"
         f"?overview=full&geometries=geojson&alternatives=true&steps=true"
     )
     try:
-        r = requests.get(osrm, headers={'User-Agent': 'SafeRouteAI'}, timeout=10).json()
+        r = requests.get(url, headers={'User-Agent': 'SafeRouteAI'}, timeout=10).json()
         if r.get("code") != "Ok":
             return {"error": "Could not calculate road route."}
     except Exception:
         return {"error": "Routing server is currently unavailable."}
 
-    colors = ["#3498db", "#f1c40f", "#2ecc71"]
     routes = []
     for i, route in enumerate(r.get("routes", [])[:3]):
         coords = [[pt[1], pt[0]] for pt in route["geometry"]["coordinates"]]
         routes.append({
-            "id": i,
-            "name": f"Route {i+1} (Road)",
-            "type": "road",
-            "color": colors[i],
-            "time": f"{int(route['duration'] / 60)} mins",
-            "distance": f"{round(route['distance'] / 1000, 1)} km",
-            "coords": coords,
-            "stations": [],
-            "safety_score": 80,
+            "id":              i,
+            "name":            f"{mode_label} Route {i + 1}",
+            "type":            "road",
+            "color":           colors[i % len(colors)],
+            "time":            f"{int(route['duration'] / 60)} mins",
+            "distance":        f"{round(route['distance'] / 1000, 1)} km",
+            "coords":          coords,
+            "stations":        [],   # road routes carry no station pins
+            "safety_score":    80,
             "hazards_flagged": "Clear",
         })
-
     return {"routes": routes}
+
+
+def get_car_route(orig_lon, orig_lat, dest_lon, dest_lat):
+    """Car / private vehicle — OSRM driving."""
+    return _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat,
+                            "Car", _ROUTE_COLORS["car"])
+
+
+def get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat):
+    """
+    Jeepney P2P routing.
+    STATUS: STUB — falls back to OSRM driving path.
+
+    TODO (next commit):
+      • Query OSM relations tagged route=share_taxi / route=jeepney
+        within Metro Manila bbox (same pattern as get_osm_railway_geometry)
+      • Filter relations whose stops cover both endpoints
+      • Snap to nearest jeepney stop nodes, return ordered stop list
+    """
+    print("[jeepney] STUB: using OSRM fallback")
+    return _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat,
+                            "Jeepney P2P", _ROUTE_COLORS["jeepney"])
+
+
+def get_bus_route(orig_lon, orig_lat, dest_lon, dest_lat):
+    """
+    Bus routing.
+    STATUS: STUB — falls back to OSRM driving path.
+
+    TODO (next commit):
+      • Query OSM relations tagged route=bus within Metro Manila bbox
+      • Filter to routes passing near both endpoints
+      • Snap to bus stop nodes, return ordered stop list
+      • Optional: integrate GTFS feed when available
+    """
+    print("[bus] STUB: using OSRM fallback")
+    return _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat,
+                            "Bus", _ROUTE_COLORS["bus"])
+
+
+# ── 6. [FUTURE] Multi-modal connector hook ───────────────────────────────────
+#
+#  Reserved for connecting multiple route legs together
+#  e.g. Walk → LRT-1 → Transfer → MRT-3 → Walk.
+#
+#  Design contract (to be implemented in a future commit):
+#    • Each "leg" dict:
+#        {
+#          "leg_type":  "walk" | "train" | "bus" | "jeepney",
+#          "line_name": str,            # e.g. "LRT-1"
+#          "coords":    [[lat,lon]...], # polyline
+#          "stations":  [{lat,lon,name}...],
+#          "color":     hex str,
+#          "time":      str,
+#        }
+#    • Journey dict:
+#        {
+#          "journey_type": "multimodal",
+#          "legs": [leg, leg, ...],
+#          "total_time": str,
+#          "transfer_points": [{lat,lon,name}...],
+#        }
+#
+#  ENTRY POINT (implement here when ready):
+#
+#    def plan_multimodal_journey(orig_lon, orig_lat, dest_lon, dest_lat, modes: list):
+#        legs = []
+#        for mode in modes:
+#            # call get_osm_railway_geometry() for rail legs
+#            # call get_jeepney_route() / get_bus_route() for road legs
+#            # insert walk legs between transfer points
+#        return {"journey_type": "multimodal", "legs": legs}
+#
+#  In get_navigation_data() below, route to plan_multimodal_journey() when
+#  commuter_type == "multimodal" or when the frontend sends a modes list.
+
+
+# ── 7. Public API — get_navigation_data() ────────────────────────────────────
+#
+#  Dispatcher: maps commuter_type (from frontend) to the right function.
+#  Train types are matched first — do NOT reorder those checks.
+
+# All frontend values that should trigger train routing
+_TRAIN_TYPES = {"lrt-1", "lrt-2", "mrt-3", "pnr", "mrt-7"}
+
+# Per-line display metadata
+_TRAIN_META = {
+    "lrt-1": {"color": "#008000", "label": "LRT-1 (Green Line)"},
+    "lrt-2": {"color": "#0000CD", "label": "LRT-2 (Blue Line)"},
+    "mrt-3": {"color": "#DAA520", "label": "MRT-3 (Yellow Line)"},
+    "pnr":   {"color": "#8B4513", "label": "PNR (Commuter Rail)"},
+    "mrt-7": {"color": "#800080", "label": "MRT-7"},
+}
+
+
+def get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, flood_zones):
+    ctype = commuter_type.lower().strip()
+
+    # ── Train lines — DO NOT move or reorder this block
+    if ctype in _TRAIN_TYPES or any(x in ctype for x in ["train", "rail", "lrt", "mrt", "pnr"]):
+        meta   = _TRAIN_META.get(ctype, {"color": "#8e44ad", "label": commuter_type})
+        result = get_osm_railway_geometry(ctype, orig_lat, orig_lon, dest_lat, dest_lon)
+        if not result:
+            return {"error": (
+                f"Could not find route for '{commuter_type}'. "
+                "The line may be missing from OSM or both stops may be the same."
+            )}
+        return {"routes": [{
+            "id":              0,
+            "name":            meta["label"],
+            "type":            "train",
+            "color":           meta["color"],
+            "time":            "N/A",
+            "distance":        "N/A",
+            "coords":          result['track_segments'],
+            "stations":        result['stations'],
+            "safety_score":    95,
+            "hazards_flagged": "Clear",
+        }]}
+
+    # ── Road modes
+    if ctype == "jeepney":
+        return get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat)
+
+    if ctype == "bus":
+        return get_bus_route(orig_lon, orig_lat, dest_lon, dest_lat)
+
+    # ── Default: car / unrecognised → OSRM car routing
+    return get_car_route(orig_lon, orig_lat, dest_lon, dest_lat)
