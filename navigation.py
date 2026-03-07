@@ -464,100 +464,146 @@ def _load_jeepney_data():
     return []
 
 
-def _get_road_points(jroute):
-    """Return waypoint list — supports new 'roads' key and old 'stops' key."""
-    return jroute.get('roads') or jroute.get('stops') or []
+# Cache for Nominatim road-name → (lat, lon) resolutions
+_ROAD_GEOCODE_CACHE = {}
+
+def _geocode_road(road_name):
+    """
+    Resolve a road name string to (lat, lon) via Nominatim.
+    Searches within Metro Manila, prefers highway/road results.
+    Result is cached in _ROAD_GEOCODE_CACHE for the server lifetime.
+    Returns (lat, lon) or (None, None) on failure.
+    """
+    if road_name in _ROAD_GEOCODE_CACHE:
+        return _ROAD_GEOCODE_CACHE[road_name]
+
+    params = {
+        'q':              road_name,
+        'format':         'json',
+        'limit':          5,
+        'countrycodes':   'ph',
+        'viewbox':        '120.85,14.35,121.20,14.85',  # Metro Manila bounding box
+        'bounded':        1,
+    }
+    try:
+        resp = requests.get(
+            'https://nominatim.openstreetmap.org/search',
+            params=params,
+            headers={'User-Agent': 'SafeRouteAI/1.0'},
+            timeout=8
+        ).json()
+
+        # Prefer highway types; fall back to first result
+        best = None
+        for r in resp:
+            if r.get('type') in ('primary', 'secondary', 'tertiary', 'residential',
+                                  'trunk', 'motorway', 'road', 'unclassified'):
+                best = r
+                break
+        if best is None and resp:
+            best = resp[0]
+
+        if best:
+            lat = float(best['lat'])
+            lon = float(best['lon'])
+            print(f"[geocode] '{road_name}' → {lat:.4f}, {lon:.4f} ({best.get('display_name','')[:60]})")
+            _ROAD_GEOCODE_CACHE[road_name] = (lat, lon)
+            return lat, lon
+        else:
+            print(f"[geocode] No result for '{road_name}'")
+    except Exception as e:
+        print(f"[geocode] Failed for '{road_name}': {e}")
+
+    _ROAD_GEOCODE_CACHE[road_name] = (None, None)
+    return None, None
 
 
-def _infer_travel_direction(orig_lat, orig_lon, dest_lat, dest_lon):
+def _resolve_jeepney_route(jroute):
     """
-    Return dominant travel direction: Northbound/Southbound/Eastbound/Westbound.
-    Picks the axis with the larger displacement.
+    Geocode all road name strings in jroute['roads'] and return a list of
+    resolved {name, lat, lon} dicts.  Results are added back into the jroute
+    as jroute['_resolved'] so they're only geocoded once per server run.
     """
-    dlat = dest_lat - orig_lat
-    dlon = dest_lon - orig_lon
-    if abs(dlat) >= abs(dlon):
-        return 'Northbound' if dlat > 0 else 'Southbound'
-    return 'Eastbound' if dlon > 0 else 'Westbound'
+    if '_resolved' in jroute:
+        return jroute['_resolved']
+
+    resolved = []
+    for road in jroute.get('roads', []):
+        if isinstance(road, str):
+            # New name-only format
+            lat, lon = _geocode_road(road)
+            if lat is not None:
+                resolved.append({'name': road, 'lat': lat, 'lon': lon})
+            else:
+                print(f"[jeepney] Could not resolve '{road}' — skipping waypoint")
+        elif isinstance(road, dict):
+            # Old coord-based format fallback
+            lat = road.get('lat') or (road.get('fwd') or {}).get('lat')
+            lon = road.get('lng') or road.get('lon') or (road.get('fwd') or {}).get('lng')
+            if lat and lon:
+                resolved.append({'name': road.get('name', 'Road'), 'lat': lat, 'lon': lon})
+
+    jroute['_resolved'] = resolved
+    return resolved
 
 
 def _route_is_near(jroute, orig_lat, orig_lon, dest_lat, dest_lon, threshold_m=5000):
     """
-    Fast pre-filter — no OSRM, no Nominatim.
+    Pre-filter + direction detection using geocoded road coords.
 
-    Passes only if:
-      1. traffic_flow (if set) matches the inferred user travel direction.
-      2. At least one road point is within threshold_m of the origin.
-      3. At least one road point (later index) is within threshold_m of dest.
+    Geocodes road names on first call (cached).  Then checks both directions:
+      Forward (A→B): origin near first point, dest near last point
+      Reverse (B→A): origin near last point, dest near first point
+
+    Returns (True, going_fwd) or (False, None).
     """
-    flow = jroute.get('traffic_flow', '')
-    if flow:
-        needed = _infer_travel_direction(orig_lat, orig_lon, dest_lat, dest_lon)
-        if flow != needed:
+    pts = _resolve_jeepney_route(jroute)
+    if len(pts) < 2:
+        return False, None
+
+    def _check(ordered_pts):
+        orig_near = any(_haversine_m(orig_lat, orig_lon, p['lat'], p['lon']) <= threshold_m
+                        for p in ordered_pts)
+        dest_near = any(_haversine_m(dest_lat, dest_lon, p['lat'], p['lon']) <= threshold_m
+                        for p in ordered_pts)
+        if not (orig_near and dest_near):
             return False
+        d_o_first = _haversine_m(orig_lat, orig_lon, ordered_pts[0]['lat'], ordered_pts[0]['lon'])
+        d_o_last  = _haversine_m(orig_lat, orig_lon, ordered_pts[-1]['lat'], ordered_pts[-1]['lon'])
+        d_d_first = _haversine_m(dest_lat, dest_lon, ordered_pts[0]['lat'], ordered_pts[0]['lon'])
+        d_d_last  = _haversine_m(dest_lat, dest_lon, ordered_pts[-1]['lat'], ordered_pts[-1]['lon'])
+        return d_o_first < d_o_last and d_d_last < d_d_first
 
-    points = _get_road_points(jroute)
-    orig_near_idx = None
-    dest_near_idx = None
-
-    for i, pt in enumerate(points):
-        lat = pt.get('lat')
-        lon = pt.get('lon') or pt.get('lng')
-        if lat is None or lon is None:
-            continue
-        if _haversine_m(orig_lat, orig_lon, lat, lon) <= threshold_m:
-            if orig_near_idx is None:
-                orig_near_idx = i
-        if _haversine_m(dest_lat, dest_lon, lat, lon) <= threshold_m:
-            dest_near_idx = i
-
-    if orig_near_idx is None or dest_near_idx is None:
-        return False
-    return orig_near_idx < dest_near_idx
+    if _check(pts):
+        return True, True
+    if _check(list(reversed(pts))):
+        return True, False
+    return False, None
 
 
-def _build_jeepney_polyline(jroute):
+def _build_jeepney_polyline(jroute, going_fwd=True):
     """
-    Build OSRM road polyline from jroute['roads'] (new format) or 'stops' (old).
-    Coords are road-midpoint positions — no Nominatim.
-
-    OSRM params:
-      continue_straight=true  — no U-turns at waypoints
-      approaches=curb         — correct curbside on divided roads
+    Build OSRM road polyline. Uses geocoded road-name coords.
+    going_fwd=False reverses the waypoint order for the B→A direction.
+    OSRM approaches=curb keeps the route on the correct curbside.
     """
-    name = jroute['route_name']
-    if name in _JEEPNEY_POLY_CACHE:
-        return _JEEPNEY_POLY_CACHE[name]
+    name      = jroute['route_name']
+    cache_key = f"{name}:{'fwd' if going_fwd else 'rev'}"
+    if cache_key in _JEEPNEY_POLY_CACHE:
+        return _JEEPNEY_POLY_CACHE[cache_key]
 
-    raw_points = _get_road_points(jroute)
-    if len(raw_points) < 2:
-        print(f"[jeepney] '{name}' has fewer than 2 road points — skipping.")
-        _JEEPNEY_POLY_CACHE[name] = None
+    pts = _resolve_jeepney_route(jroute)
+    if len(pts) < 2:
+        print(f"[jeepney] '{name}' — not enough geocoded points.")
+        _JEEPNEY_POLY_CACHE[cache_key] = None
         return None
 
-    stations  = []
-    waypoints = []
+    ordered = pts if going_fwd else list(reversed(pts))
+    direction = 'fwd' if going_fwd else 'rev'
+    print(f"[jeepney] Building '{name}' [{direction}] ({len(ordered)} pts)...")
 
-    for pt in raw_points:
-        lat   = pt.get('lat')
-        lon   = pt.get('lon') or pt.get('lng')
-        pname = pt.get('name', 'Road point')
-        if lat is None or lon is None:
-            print(f"[jeepney]   '{pname}' missing coords — skipped")
-            continue
-        stations.append({'name': pname, 'lat': lat, 'lon': lon})
-        waypoints.append((lon, lat))
-
-    if len(waypoints) < 2:
-        print(f"[jeepney] Not enough valid points for '{name}'")
-        _JEEPNEY_POLY_CACHE[name] = None
-        return None
-
-    flow = jroute.get('traffic_flow', '')
-    print(f"[jeepney] Building '{name}' [{flow}] ({len(waypoints)} pts)...")
-
-    wp_str     = ';'.join(f"{lon},{lat}" for lon, lat in waypoints)
-    approaches = ';'.join('curb' for _ in waypoints)
+    wp_str     = ';'.join(f"{p['lon']},{p['lat']}" for p in ordered)
+    approaches = ';'.join('curb' for _ in ordered)
     url = (
         f"{_OSRM_BASE}/{wp_str}"
         f"?overview=full&geometries=geojson"
@@ -571,12 +617,12 @@ def _build_jeepney_polyline(jroute):
             polyline = [[pt[1], pt[0]] for pt in rt['geometry']['coordinates']]
             result   = {
                 'polyline': polyline,
-                'stations': stations,
+                'stations': ordered,
                 'dur':      rt['duration'],
                 'dist':     rt['distance'],
             }
-            _JEEPNEY_POLY_CACHE[name] = result
-            print(f"[jeepney] Built '{name}': {len(polyline)} pts, "
+            _JEEPNEY_POLY_CACHE[cache_key] = result
+            print(f"[jeepney] Built '{name}' [{direction}]: {len(polyline)} pts, "
                   f"{rt['distance']/1000:.1f} km")
             return result
         else:
@@ -584,7 +630,7 @@ def _build_jeepney_polyline(jroute):
     except Exception as e:
         print(f"[jeepney] OSRM failed for '{name}': {e}")
 
-    _JEEPNEY_POLY_CACHE[name] = None
+    _JEEPNEY_POLY_CACHE[cache_key] = None
     return None
 
 
@@ -650,9 +696,12 @@ def get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat):
     all_routes = _load_jeepney_data()
     color      = _ROUTE_COLORS["jeepney"][0]
 
-    # ── Step 1: cheap pre-filter ──────────────────────────────────────────
-    nearby = [r for r in all_routes
-              if _route_is_near(r, orig_lat, orig_lon, dest_lat, dest_lon)]
+    # ── Step 1: cheap pre-filter + direction detection ───────────────────
+    nearby = []
+    for r in all_routes:
+        passes, going_fwd = _route_is_near(r, orig_lat, orig_lon, dest_lat, dest_lon)
+        if passes:
+            nearby.append((r, going_fwd))
     print(f"[jeepney] {len(nearby)}/{len(all_routes)} routes pass pre-filter")
 
     if not nearby:
@@ -664,8 +713,8 @@ def get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat):
     # ── Step 2 & 3: build polyline + snap, keep only valid direction ──────
     best = None
 
-    for jroute in nearby:
-        built = _build_jeepney_polyline(jroute)
+    for jroute, going_fwd in nearby:
+        built = _build_jeepney_polyline(jroute, going_fwd)
         if not built:
             continue
 
