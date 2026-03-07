@@ -224,6 +224,80 @@ def _draw_jeepney_route(route, m):
     route_layer.add_to(m)
 
 
+def _draw_bus_route(route, m):
+    """
+    Draw a multi-leg bus route: walk -> bus -> walk.
+    Visual: solid thicker line with terminal stop markers.
+    """
+    route_layer = folium.FeatureGroup(name=route['name'])
+    segments    = route.get('segments', [])
+    line_color  = route['color']
+
+    if not segments:
+        folium.PolyLine(
+            locations=route['coords'],
+            color=line_color, weight=6, opacity=0.9,
+            tooltip=route['name'],
+        ).add_to(route_layer)
+        route_layer.add_to(m)
+        return
+
+    for seg in segments:
+        coords = seg.get('coords', [])
+        if len(coords) < 2:
+            continue
+
+        if seg['type'] == 'walk':
+            folium.PolyLine(
+                locations=coords, color='#7f8c8d', weight=3,
+                opacity=0.8, dash_array='8 6',
+                tooltip=seg.get('label', 'Walk'),
+            ).add_to(route_layer)
+
+        elif seg['type'] == 'bus':
+            folium.PolyLine(
+                locations=coords,
+                color=seg.get('color', line_color),
+                weight=7, opacity=0.9,
+                tooltip=f"Bus: {seg.get('label', route['name'])} ({route.get('time', '')})",
+            ).add_to(route_layer)
+
+            # OSM bus stop pins along the route
+            stations = route.get('stations', [])
+            for idx, stop in enumerate(stations):
+                is_terminal = (idx == 0 or idx == len(stations) - 1)
+                folium.CircleMarker(
+                    location=[stop['lat'], stop['lon']],
+                    radius=7 if is_terminal else 4,
+                    color='white',
+                    fill=True,
+                    fill_color=line_color,
+                    fill_opacity=1.0 if is_terminal else 0.7,
+                    weight=2,
+                    tooltip=stop.get('name', f'Stop {idx+1}'),
+                ).add_to(route_layer)
+
+            # Board marker — walk destination
+            if route.get('board_point'):
+                bp = route['board_point']
+                folium.Marker(
+                    location=[bp['lat'], bp['lon']],
+                    tooltip=f"Board bus here ({route.get('walk_board_m', '?')}m walk)",
+                    icon=folium.Icon(color='blue', icon='bus', prefix='fa'),
+                ).add_to(route_layer)
+
+            # Alight marker
+            if route.get('alight_point'):
+                ap = route['alight_point']
+                folium.Marker(
+                    location=[ap['lat'], ap['lon']],
+                    tooltip=f"Alight here ({route.get('walk_alight_m', '?')}m walk)",
+                    icon=folium.Icon(color='orange', icon='flag', prefix='fa'),
+                ).add_to(route_layer)
+
+    route_layer.add_to(m)
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route('/', methods=['GET', 'POST'])
@@ -270,6 +344,8 @@ def home():
                         _draw_train_route(route, m)
                     elif route.get('type') == 'jeepney':
                         _draw_jeepney_route(route, m)
+                    elif route.get('type') == 'bus':
+                        _draw_bus_route(route, m)
                     else:
                         _draw_road_route(route, m)
 

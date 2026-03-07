@@ -62,28 +62,32 @@ def _overpass_query(query, max_retries=5, timeout=30):
 _GEOCODE_CACHE = {}
 
 def geocode_location(address):
+    """Geocode origin/dest user input safely."""
     if address in _GEOCODE_CACHE:
         return _GEOCODE_CACHE[address]
 
     if "," in address:
         try:
-            parts = [x.strip() for x in address.split(',')]
+            parts =[x.strip() for x in address.split(',')]
             lat, lon = float(parts[0]), float(parts[1])
             result = (lon, lat) if lon > 100 else (lat, lon)
             _GEOCODE_CACHE[address] = result
             return result
         except (ValueError, TypeError):
             pass
-    url = (
-        f"https://nominatim.openstreetmap.org/search"
-        f"?q={requests.utils.quote(address)}&format=json&limit=1&countrycodes=ph"
-    )
+            
+    time.sleep(1.1) # Prevent rate-limit crash
+    url = (f"https://nominatim.openstreetmap.org/search"
+           f"?q={requests.utils.quote(address)}&format=json&limit=1&countrycodes=ph")
     try:
-        resp = requests.get(url, headers={'User-Agent': 'SafeRoute/1.0'}, timeout=10).json()
-        if resp:
-            result = float(resp[0]['lon']), float(resp[0]['lat'])
-            _GEOCODE_CACHE[address] = result
-            return result
+        headers = {'User-Agent': 'SafeRouteAI/1.0 (contact@saferoute.local)'}
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            resp = response.json()
+            if resp:
+                result = float(resp[0]['lon']), float(resp[0]['lat'])
+                _GEOCODE_CACHE[address] = result
+                return result
     except Exception as e:
         print(f"Geocoding failed for '{address}': {e}")
     _GEOCODE_CACHE[address] = (None, None)
@@ -378,21 +382,518 @@ def get_car_route(orig_lon, orig_lat, dest_lon, dest_lat):
                             "Car", _ROUTE_COLORS["car"])
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  BUS ROUTING — OSM Overpass first, bus.json fallback
+#
+#  Strategy:
+#   1. Query Overpass for route=bus relations whose stops are near both
+#      origin and destination (within Metro Manila + nearby provinces bbox).
+#   2. For each matching OSM relation: extract ordered stop nodes → build
+#      OSRM polyline through those stops.
+#   3. If Overpass returns nothing (timeout / no coverage), fall back to
+#      bus.json endpoint pairs → Nominatim geocode → OSRM.
+#
+#  OSM stop nodes become the blue dot "stations" pins on the map.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_BUS_OSM_CACHE   = {}    # keyed cache: routes_for_NODE, node_NODE
+_BUS_POLY_CACHE  = {}     # cache_key → {polyline, stations, dur, dist}
+_BUS_ROUTES_DATA = None   # bus.json fallback data
+
+_OVERPASS_URL  = 'https://overpass-api.de/api/interpreter'
+_BUS_BBOX      = '14.20,120.75,15.10,121.35'   # lat_min,lon_min,lat_max,lon_max
+
+
+def _load_bus_json():
+    """Load bus.json fallback, cached."""
+    global _BUS_ROUTES_DATA
+    if _BUS_ROUTES_DATA is not None:
+        return _BUS_ROUTES_DATA
+    base = os.path.dirname(os.path.abspath(__file__))
+    cwd  = os.getcwd()
+    for path in [
+        os.path.join(base, 'map_transit', 'bus.json'),
+        os.path.join(base, 'bus.json'),
+        os.path.join(cwd,  'map_transit', 'bus.json'),
+        os.path.join(cwd,  'bus.json'),
+    ]:
+        if not os.path.exists(path):
+            continue
+        try:
+            data = json.loads(open(path, encoding='utf-8').read().strip())
+            _BUS_ROUTES_DATA = data if isinstance(data, list) else [data]
+            print(f"[bus] JSON fallback: {len(_BUS_ROUTES_DATA)} routes from {path}")
+            return _BUS_ROUTES_DATA
+        except Exception as e:
+            print(f"[bus] JSON parse error {path}: {e}")
+    _BUS_ROUTES_DATA = []
+    return []
+
+
+# def _fetch_stops_near(lat, lon, radius_m=600):
+#     """
+#     Query Overpass for bus stops within radius_m of a point.
+#     Uses a small around: query — fast, never times out.
+#     Returns list of {node_id, name, lat, lon}.
+#     """
+#     q = f"""
+# [out:json][timeout:15];
+# (
+#   node["highway"="bus_stop"](around:{radius_m},{lat},{lon});
+#   node["public_transport"="stop_position"](around:{radius_m},{lat},{lon});
+#   node["public_transport"="platform"]["bus"="yes"](around:{radius_m},{lat},{lon});
+# );
+# out body;
+# """
+#     data = _overpass_query(q, max_retries=3, timeout=15)
+#     if not data:
+#         return []
+#     stops = []
+#     for el in data.get('elements', []):
+#         if el['type'] == 'node' and 'lat' in el:
+#             tags = el.get('tags', {})
+#             stops.append({
+#                 'node_id': el['id'],
+#                 'name':    tags.get('name') or tags.get('ref') or f"Bus stop {el['id']}",
+#                 'lat':     el['lat'],
+#                 'lon':     el['lon'],
+#             })
+#     print(f"[bus OSM] {len(stops)} stops within {radius_m}m of ({lat:.4f},{lon:.4f})")
+#     return stops
+
+
+# def _fetch_routes_for_stop(node_id):
+#     """
+#     Given a stop node_id, fetch all bus route relations that include it.
+#     Returns list of {osm_id, name, ref, stop_ids:[...]}.
+#     Uses cached results to avoid duplicate queries.
+#     """
+#     cache_key = f"routes_for_{node_id}"
+#     if cache_key in _BUS_OSM_CACHE:
+#         return _BUS_OSM_CACHE[cache_key]
+
+#     q = f"""
+# [out:json][timeout:20];
+# node({node_id});
+# rel["route"="bus"](bn);
+# out body;
+# """
+#     data = _overpass_query(q, max_retries=3, timeout=20)
+#     routes = []
+#     if data:
+#         for el in data.get('elements', []):
+#             if el['type'] != 'relation':
+#                 continue
+#             tags    = el.get('tags', {})
+#             members = el.get('members', [])
+#             stop_ids = [
+#                 m['ref'] for m in members
+#                 if m['type'] == 'node' and m.get('role') in
+#                    ('stop', 'stop_entry_only', 'stop_exit_only', 'platform', '')
+#             ]
+#             routes.append({
+#                 'osm_id':     el['id'],
+#                 'route_name': tags.get('name') or f"Bus {tags.get('ref','?')}",
+#                 'ref':        tags.get('ref', ''),
+#                 'stop_ids':   stop_ids,
+#             })
+
+#     print(f"[bus OSM] stop {node_id} belongs to {len(routes)} bus relations")
+#     _BUS_OSM_CACHE[cache_key] = routes
+#     return routes
+
+
+# def _fetch_stop_coords(stop_ids):
+#     """
+#     Fetch lat/lon for a list of OSM node ids.
+#     Batches them in one Overpass query. Cached individually.
+#     """
+#     needed = [sid for sid in stop_ids if f"node_{sid}" not in _BUS_OSM_CACHE]
+#     if needed:
+#         ids_str = ''.join(f'node({sid});' for sid in needed)
+#         q = f"[out:json][timeout:15];({ids_str});out body;"
+#         data = _overpass_query(q, max_retries=2, timeout=15)
+#         if data:
+#             for el in data.get('elements', []):
+#                 if el['type'] == 'node' and 'lat' in el:
+#                     tags = el.get('tags', {})
+#                     _BUS_OSM_CACHE[f"node_{el['id']}"] = {
+#                         'node_id': el['id'],
+#                         'name':    tags.get('name') or tags.get('ref') or f"Stop {el['id']}",
+#                         'lat':     el['lat'],
+#                         'lon':     el['lon'],
+#                     }
+#     return [_BUS_OSM_CACHE[f"node_{sid}"]
+#             for sid in stop_ids if f"node_{sid}" in _BUS_OSM_CACHE]
+
+
+# def _fetch_osm_bus_routes(orig_lat, orig_lon, dest_lat, dest_lon):
+#     """
+#     Two-step local query — never fetches all of Metro Manila at once:
+
+#     Step 1: Find bus stops within 600m of origin AND within 600m of dest.
+#     Step 2: One batched query — get all bus relations that include ANY
+#             origin stop (using node union + rel(bn)).
+#     Step 3: Keep only relations that also include a destination stop.
+#     Step 4: Fetch ordered stop coords for matched relations.
+
+#     Returns list of {osm_id, route_name, ref, stops:[{name,lat,lon}]}
+#     """
+#     orig_stops = _fetch_stops_near(orig_lat, orig_lon, radius_m=600)
+#     dest_stops = _fetch_stops_near(dest_lat, dest_lon, radius_m=600)
+
+#     if not orig_stops or not dest_stops:
+#         print("[bus OSM] No stops found near origin or destination")
+#         return []
+
+#     dest_node_ids = {s['node_id'] for s in dest_stops}
+
+#     # Single batched query: all bus relations touching any origin stop
+#     orig_ids_str = ''.join(f'node({s["node_id"]});' for s in orig_stops)
+#     q = f"""
+# [out:json][timeout:25];
+# (
+#   {orig_ids_str}
+# );
+# rel["route"="bus"](bn);
+# out body;
+# """
+#     data = _overpass_query(q, max_retries=3, timeout=25)
+#     if not data:
+#         print("[bus OSM] Batched relations query failed")
+#         return []
+
+#     # Parse relations, keep only those that also cover a dest stop
+#     matched_relations = {}
+#     for el in data.get('elements', []):
+#         if el['type'] != 'relation':
+#             continue
+#         tags    = el.get('tags', {})
+#         members = el.get('members', [])
+#         stop_ids = [
+#             m['ref'] for m in members
+#             if m['type'] == 'node' and m.get('role') in
+#                ('stop', 'stop_entry_only', 'stop_exit_only', 'platform', '')
+#         ]
+#         if not any(sid in dest_node_ids for sid in stop_ids):
+#             continue
+#         matched_relations[el['id']] = {
+#             'osm_id':     el['id'],
+#             'route_name': tags.get('name') or f"Bus {tags.get('ref','?')}",
+#             'ref':        tags.get('ref', ''),
+#             'stop_ids':   stop_ids,
+#         }
+
+#     if not matched_relations:
+#         print("[bus OSM] No relations connect origin stops to destination stops")
+#         return []
+
+#     print(f"[bus OSM] {len(matched_relations)} matching relations found")
+
+#     # Fetch full ordered stop coords for each matched relation
+#     result = []
+#     for rel in matched_relations.values():
+#         stop_ids = rel['stop_ids'][:60]
+#         stops    = _fetch_stop_coords(stop_ids)
+#         if len(stops) < 2:
+#             continue
+#         result.append({
+#             'osm_id':     rel['osm_id'],
+#             'route_name': rel['route_name'],
+#             'ref':        rel['ref'],
+#             'stops':      stops,
+#         })
+
+#     return result
+
+
+# def _osm_bus_is_near(route, orig_lat, orig_lon, dest_lat, dest_lon, threshold_m=600):
+#     """
+#     Check if an OSM bus route serves both origin and destination.
+#     threshold_m is tight (600m) because we have real stop positions.
+#     Returns (True, board_stop_idx, alight_stop_idx) or (False, None, None).
+#     """
+#     stops = route['stops']
+#     board_idx  = None
+#     board_dist = float('inf')
+#     alight_idx = None
+#     alight_dist = float('inf')
+
+#     for i, s in enumerate(stops):
+#         d_orig = _haversine_m(orig_lat, orig_lon, s['lat'], s['lon'])
+#         d_dest = _haversine_m(dest_lat, dest_lon, s['lat'], s['lon'])
+#         if d_orig < board_dist:
+#             board_dist = d_orig
+#             board_idx  = i
+#         if d_dest < alight_dist:
+#             alight_dist = d_dest
+#             alight_idx  = i
+
+#     if board_idx is None or alight_idx is None:
+#         return False, None, None
+#     if board_dist > threshold_m or alight_dist > threshold_m:
+#         return False, None, None
+#     if board_idx == alight_idx:
+#         return False, None, None
+
+#     # Both directions are valid for OSM routes (they may be one-way or circular)
+#     return True, board_idx, alight_idx
+
+
+# def _build_osm_bus_polyline(route, board_idx, alight_idx):
+#     """
+#     Build OSRM polyline for an OSM bus route using the stop nodes as waypoints.
+#     Slices stops between board and alight (handles forward and reverse).
+#     """
+#     cache_key = f"osm:{route['osm_id']}:{board_idx}:{alight_idx}"
+#     if cache_key in _BUS_POLY_CACHE:
+#         return _BUS_POLY_CACHE[cache_key]
+
+#     stops = route['stops']
+#     # Determine direction
+#     if board_idx < alight_idx:
+#         seg_stops = stops[board_idx: alight_idx + 1]
+#     else:
+#         seg_stops = list(reversed(stops[alight_idx: board_idx + 1]))
+
+#     if len(seg_stops) < 2:
+#         _BUS_POLY_CACHE[cache_key] = None
+#         return None
+
+#     print(f"[bus OSM] Building '{route['route_name']}' "
+#           f"({len(seg_stops)} stops, {board_idx}→{alight_idx})...")
+
+#     wp_str     = ';'.join(f"{s['lon']},{s['lat']}" for s in seg_stops)
+#     approaches = ';'.join('curb' for _ in seg_stops)
+#     url = (
+#         f"{_OSRM_BASE}/{wp_str}"
+#         f"?overview=full&geometries=geojson"
+#         f"&continue_straight=true"
+#         f"&approaches={approaches}"
+#     )
+#     try:
+#         r = requests.get(url, headers={'User-Agent': 'SafeRouteAI'}, timeout=15).json()
+#         if r.get('code') == 'Ok' and r.get('routes'):
+#             rt       = r['routes'][0]
+#             polyline = [[pt[1], pt[0]] for pt in rt['geometry']['coordinates']]
+#             result   = {
+#                 'polyline':  polyline,
+#                 'stations':  seg_stops,
+#                 'dur':       rt['duration'],
+#                 'dist':      rt['distance'],
+#                 'source':    'osm',
+#             }
+#             _BUS_POLY_CACHE[cache_key] = result
+#             print(f"[bus OSM] Built '{route['route_name']}': "
+#                   f"{len(polyline)} pts, {rt['distance']/1000:.1f} km")
+#             return result
+#     except Exception as e:
+#         print(f"[bus OSM] OSRM failed: {e}")
+
+#     _BUS_POLY_CACHE[cache_key] = None
+#     return None
+
+
+# ── JSON fallback helpers (same Nominatim + OSRM pattern as jeepney) ─────────
+
+_BUS_GEOCODE_CACHE = {}
+
+def _geocode_bus_endpoint(name):
+    """Nominatim geocode for bus.json endpoint names. Safe from crashes."""
+    if name in _BUS_GEOCODE_CACHE:
+        return _BUS_GEOCODE_CACHE[name]
+        
+    time.sleep(1.1) # Prevent rate-limit crash
+    try:
+        headers = {'User-Agent': 'SafeRouteAI/1.0 (contact@saferoute.local)'}
+        response = requests.get(
+            'https://nominatim.openstreetmap.org/search',
+            params={'q': name, 'format': 'json', 'limit': 3, 'countrycodes': 'ph', 'bounded': 0},
+            headers=headers, timeout=8
+        )
+        if response.status_code == 200:
+            resp = response.json()
+            if resp:
+                lat, lon = float(resp[0]['lat']), float(resp[0]['lon'])
+                print(f"[bus JSON geocode] '{name}' → {lat:.4f}, {lon:.4f}")
+                _BUS_GEOCODE_CACHE[name] = (lat, lon)
+                return lat, lon
+            else:
+                print(f"[bus JSON geocode] No results for '{name}'")
+        else:
+            print(f"[bus JSON geocode] Rate limited: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"[bus JSON geocode] Failed '{name}': {e}")
+    _BUS_GEOCODE_CACHE[name] = (None, None)
+    return None, None
+
+
+def _resolve_json_bus_route(jroute):
+    """Geocode bus.json endpoint names once, cache in jroute['_resolved']."""
+    if '_resolved' in jroute:
+        return jroute['_resolved']
+    resolved = []
+    for road in jroute.get('roads', []):
+        name = road if isinstance(road, str) else road.get('name', '')
+        lat, lon = _geocode_bus_endpoint(name)
+        if lat is not None:
+            resolved.append({'name': name, 'lat': lat, 'lon': lon})
+    jroute['_resolved'] = resolved
+    return resolved
+
+
+def _json_bus_is_near(jroute, orig_lat, orig_lon, dest_lat, dest_lon, threshold_m=6000):
+    """Direction-aware pre-filter for JSON bus routes."""
+    pts = _resolve_json_bus_route(jroute)
+    if len(pts) < 2:
+        return False, None
+
+    def _check(ordered):
+        if not any(_haversine_m(orig_lat, orig_lon, p['lat'], p['lon']) <= threshold_m for p in ordered):
+            return False
+        if not any(_haversine_m(dest_lat, dest_lon, p['lat'], p['lon']) <= threshold_m for p in ordered):
+            return False
+        d_o_first = _haversine_m(orig_lat, orig_lon, ordered[0]['lat'], ordered[0]['lon'])
+        d_o_last  = _haversine_m(orig_lat, orig_lon, ordered[-1]['lat'], ordered[-1]['lon'])
+        d_d_first = _haversine_m(dest_lat, dest_lon, ordered[0]['lat'], ordered[0]['lon'])
+        d_d_last  = _haversine_m(dest_lat, dest_lon, ordered[-1]['lat'], ordered[-1]['lon'])
+        return d_o_first < d_o_last and d_d_last < d_d_first
+
+    if _check(pts):
+        return True, True
+    if _check(list(reversed(pts))):
+        return True, False
+    return False, None
+
+
+def _build_json_bus_polyline(jroute, going_fwd=True):
+    """OSRM polyline from bus.json geocoded endpoints."""
+    name      = jroute['route_name']
+    cache_key = f"json:{name}:{'fwd' if going_fwd else 'rev'}"
+    if cache_key in _BUS_POLY_CACHE:
+        return _BUS_POLY_CACHE[cache_key]
+
+    pts     = _resolve_json_bus_route(jroute)
+    ordered = pts if going_fwd else list(reversed(pts))
+    if len(ordered) < 2:
+        _BUS_POLY_CACHE[cache_key] = None
+        return None
+
+    wp_str     = ';'.join(f"{p['lon']},{p['lat']}" for p in ordered)
+    approaches = ';'.join('curb' for _ in ordered)
+    url = (
+        f"{_OSRM_BASE}/{wp_str}"
+        f"?overview=full&geometries=geojson"
+        f"&continue_straight=true&approaches={approaches}"
+    )
+    try:
+        r = requests.get(url, headers={'User-Agent': 'SafeRouteAI'}, timeout=15).json()
+        if r.get('code') == 'Ok' and r.get('routes'):
+            rt       = r['routes'][0]
+            polyline = [[pt[1], pt[0]] for pt in rt['geometry']['coordinates']]
+            result   = {'polyline': polyline, 'stations': ordered,
+                        'dur': rt['duration'], 'dist': rt['distance'], 'source': 'json'}
+            _BUS_POLY_CACHE[cache_key] = result
+            return result
+    except Exception as e:
+        print(f"[bus JSON] OSRM failed: {e}")
+    _BUS_POLY_CACHE[cache_key] = None
+    return None
+
+
+# ── Main entry point ──────────────────────────────────────────────────────────
+
 def get_bus_route(orig_lon, orig_lat, dest_lon, dest_lat):
     """
-    Bus routing.
-    STATUS: STUB — falls back to OSRM driving path.
-
-    TODO (next commit):
-      • Query OSM relations tagged route=bus within Metro Manila bbox
-      • Filter to routes passing near both endpoints
-      • Snap to bus stop nodes, return ordered stop list
-      • Optional: integrate GTFS feed when available
+    Bus routing — Exclusively uses bus.json fallback data.
     """
-    print("[bus] STUB: using OSRM fallback")
-    return _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat,
-                            "Bus", _ROUTE_COLORS["bus"])
+    color = (_ROUTE_COLORS["bus"][0]
+             if isinstance(_ROUTE_COLORS.get("bus"), list)
+             else _ROUTE_COLORS.get("bus", "#27ae60"))
 
+    best = None
+    print("[bus] Processing JSON routes from bus.json...")
+    
+    # Iterate exclusively through the local JSON file
+    for jroute in _load_bus_json():
+        passes, going_fwd = _json_bus_is_near(jroute, orig_lat, orig_lon, dest_lat, dest_lon)
+        if not passes:
+            continue
+            
+        built = _build_json_bus_polyline(jroute, going_fwd)
+        if not built:
+            continue
+            
+        polyline = built['polyline']
+        if len(polyline) < 2:
+            continue
+
+        board_idx, board_lat, board_lon, board_m   = _snap_to_polyline(polyline, orig_lat, orig_lon)
+        alight_idx, alight_lat, alight_lon, alght_m = _snap_to_polyline(polyline, dest_lat, dest_lon)
+        
+        if board_idx >= alight_idx:
+            continue
+        if board_m > _MAX_BOARD_WALK_M or alght_m > _MAX_ALIGHT_WALK_M:
+            continue
+
+        bus_seg    = polyline[board_idx: alight_idx + 1]
+        total_walk = board_m + alght_m
+        
+        cand = {
+            'name': jroute['route_name'], 'built': built,
+            'board_lat': board_lat, 'board_lon': board_lon, 'board_m': board_m,
+            'alight_lat': alight_lat, 'alight_lon': alight_lon, 'alight_m': alght_m,
+            'bus_seg': bus_seg, 'bus_dist': _polyline_distance_m(bus_seg),
+            'total_walk_m': total_walk,
+        }
+        
+        if best is None or total_walk < best['total_walk_m']:
+            best = cand
+
+    if best is None:
+        return {"error": "No bus route found near your origin and destination."}
+
+    # Build the final response
+    built   = best['built']
+    bus_seg = best['bus_seg']
+
+    w_board_coords,  w_board_dist,  w_board_dur  = _get_walk_segment(
+        orig_lat, orig_lon, best['board_lat'], best['board_lon'])
+    w_alight_coords, w_alight_dist, w_alight_dur = _get_walk_segment(
+        best['alight_lat'], best['alight_lon'], dest_lat, dest_lon)
+
+    bus_mins   = max(1, int(best['bus_dist'] / (20_000 / 60)))
+    walk_mins  = int(((w_board_dur or 0) + (w_alight_dur or 0)) / 60)
+    total_mins = bus_mins + walk_mins
+    total_km   = round((best['bus_dist'] + (w_board_dist or 0) + (w_alight_dist or 0)) / 1_000, 1)
+
+    segments =[]
+    if w_board_coords and len(w_board_coords) >= 2:
+        segments.append({'type': 'walk', 'coords': w_board_coords,
+                         'color': '#7f8c8d', 'label': f"Walk {int(best['board_m'])}m to bus stop"})
+    segments.append({'type': 'bus', 'coords': bus_seg, 'color': color,
+                     'label': best['name']})
+    if w_alight_coords and len(w_alight_coords) >= 2:
+        segments.append({'type': 'walk', 'coords': w_alight_coords,
+                         'color': '#7f8c8d', 'label': f"Walk {int(best['alight_m'])}m to destination"})
+
+    return {
+        'id':             0,
+        'name':           best['name'],
+        'type':           'bus',
+        'color':          color,
+        'time':           f"~{total_mins} mins",
+        'distance':       f"{total_km} km",
+        'coords':         bus_seg,
+        'segments':       segments,
+        'stations':       built['stations'],
+        'board_point':    {'lat': best['board_lat'], 'lon': best['board_lon']},
+        'alight_point':   {'lat': best['alight_lat'], 'lon': best['alight_lon']},
+        'walk_board_m':   int(best['board_m']),
+        'walk_alight_m':  int(best['alight_m']),
+        'safety_score':   70,
+        'hazards_flagged': "Source: JSON database",
+    }
 
 # ── 5b. Jeepney routing — JSON stops → OSRM waypoints → ordered stop pins ─────
 #
@@ -415,6 +916,9 @@ def get_bus_route(orig_lon, orig_lat, dest_lon, dest_lat):
 
 _JEEPNEY_ROUTES_DATA = None   # raw JSON, loaded once
 _JEEPNEY_POLY_CACHE  = {}     # route_name → {polyline, stations, dur, dist}
+
+_BUS_ROUTES_DATA = None       # raw JSON, loaded once
+_BUS_POLY_CACHE  = {}         # route_name → {polyline, stations, dur, dist}
 
 _MAX_BOARD_WALK_M  = 2_000
 _MAX_ALIGHT_WALK_M = 2_000
@@ -468,52 +972,31 @@ def _load_jeepney_data():
 _ROAD_GEOCODE_CACHE = {}
 
 def _geocode_road(road_name):
-    """
-    Resolve a road name string to (lat, lon) via Nominatim.
-    Searches within Metro Manila, prefers highway/road results.
-    Result is cached in _ROAD_GEOCODE_CACHE for the server lifetime.
-    Returns (lat, lon) or (None, None) on failure.
-    """
+    """Resolve a road name string to (lat, lon) for jeepney fallback safely."""
     if road_name in _ROAD_GEOCODE_CACHE:
         return _ROAD_GEOCODE_CACHE[road_name]
 
-    params = {
-        'q':              road_name,
-        'format':         'json',
-        'limit':          5,
-        'countrycodes':   'ph',
-        'viewbox':        '120.85,14.35,121.20,14.85',  # Metro Manila bounding box
-        'bounded':        1,
-    }
+    time.sleep(1.1) # Prevent rate-limit crash
+    params = {'q': road_name, 'format': 'json', 'limit': 5, 'countrycodes': 'ph', 'bounded': 1, 'viewbox': '120.85,14.35,121.20,14.85'}
     try:
-        resp = requests.get(
-            'https://nominatim.openstreetmap.org/search',
-            params=params,
-            headers={'User-Agent': 'SafeRouteAI/1.0'},
-            timeout=8
-        ).json()
+        headers = {'User-Agent': 'SafeRouteAI/1.0 (contact@saferoute.local)'}
+        response = requests.get('https://nominatim.openstreetmap.org/search', params=params, headers=headers, timeout=8)
 
-        # Prefer highway types; fall back to first result
-        best = None
-        for r in resp:
-            if r.get('type') in ('primary', 'secondary', 'tertiary', 'residential',
-                                  'trunk', 'motorway', 'road', 'unclassified'):
-                best = r
-                break
-        if best is None and resp:
-            best = resp[0]
-
-        if best:
-            lat = float(best['lat'])
-            lon = float(best['lon'])
-            print(f"[geocode] '{road_name}' → {lat:.4f}, {lon:.4f} ({best.get('display_name','')[:60]})")
-            _ROAD_GEOCODE_CACHE[road_name] = (lat, lon)
-            return lat, lon
-        else:
-            print(f"[geocode] No result for '{road_name}'")
+        if response.status_code == 200:
+            resp = response.json()
+            best = None
+            for r in resp:
+                if r.get('type') in ('primary', 'secondary', 'tertiary', 'residential', 'trunk', 'motorway', 'road', 'unclassified'):
+                    best = r
+                    break
+            if best is None and resp: best = resp[0]
+            if best:
+                lat, lon = float(best['lat']), float(best['lon'])
+                print(f"[geocode] '{road_name}' → {lat:.4f}, {lon:.4f}")
+                _ROAD_GEOCODE_CACHE[road_name] = (lat, lon)
+                return lat, lon
     except Exception as e:
         print(f"[geocode] Failed for '{road_name}': {e}")
-
     _ROAD_GEOCODE_CACHE[road_name] = (None, None)
     return None, None
 
@@ -913,7 +1396,10 @@ def get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, f
         return get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat)
 
     if ctype == "bus":
-        return get_bus_route(orig_lon, orig_lat, dest_lon, dest_lat)
+        result = get_bus_route(orig_lon, orig_lat, dest_lon, dest_lat)
+        if "error" in result:
+            return result
+        return {"routes": [result]}
 
     # ── Default: car / unrecognised → OSRM car routing
     return get_car_route(orig_lon, orig_lat, dest_lon, dest_lat)

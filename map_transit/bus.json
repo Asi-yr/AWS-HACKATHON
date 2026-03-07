@@ -1,0 +1,261 @@
+[
+  {
+    "route_name": "Monumento ↔ Baclaran via EDSA",
+    "roads": [
+      "LRT Monumento Station, Caloocan",
+      "Baclaran Church, Paranaque"
+    ]
+  },
+  {
+    "route_name": "Cubao ↔ Baclaran via EDSA",
+    "roads": [
+      "Araneta Center, Cubao, Quezon City",
+      "Baclaran Church, Paranaque"
+    ]
+  },
+  {
+    "route_name": "Fairview ↔ Quiapo via Commonwealth",
+    "roads": [
+      "SM Fairview, Quezon City",
+      "Quiapo Church, Manila"
+    ]
+  },
+  {
+    "route_name": "Novaliches ↔ Divisoria via Rizal Ave",
+    "roads": [
+      "Novaliches Public Market, Quezon City",
+      "Divisoria Market, Manila"
+    ]
+  },
+  {
+    "route_name": "Alabang ↔ Quiapo via South Super Hwy",
+    "roads": [
+      "Alabang Town Center, Muntinlupa",
+      "Quiapo Church, Manila"
+    ]
+  },
+  {
+    "route_name": "PITX ↔ Quiapo via Roxas Blvd",
+    "roads": [
+      "PITX Terminal, Paranaque",
+      "Quiapo Church, Manila"
+    ]
+  },
+  {
+    "route_name": "Pasay (EDSA) ↔ Quiapo via Taft",
+    "roads": [
+      "EDSA-Taft Intersection, Pasay",
+      "Quiapo Church, Manila"
+    ]
+  },
+  {
+    "route_name": "Antipolo ↔ Cubao via Marcos Hwy",
+    "roads": [
+      "Antipolo Cathedral, Antipolo",
+      "Araneta Center, Cubao, Quezon City"
+    ]
+  },
+  {
+    "route_name": "Marikina ↔ Quiapo via Aurora Blvd",
+    "roads": [
+      "Marikina Public Market, Marikina",
+      "Quiapo Church, Manila"
+    ]
+  },
+  {
+    "route_name": "Las Pinas ↔ Baclaran via Alabang-Zapote",
+    "roads": [
+      "Las Pinas City Hall, Las Pinas",
+      "Baclaran Church, Paranaque"
+    ]
+  },
+  {
+    "route_name": "Valenzuela ↔ Divisoria via McArthur Hwy",
+    "roads": [
+      "Valenzuela City Hall, Valenzuela",
+      "Divisoria Market, Manila"
+    ]
+  },
+  {
+    "route_name": "Bulacan (Bocaue) ↔ Divisoria via NLEX",
+    "roads": [
+      "Bocaue Public Market, Bulacan",
+      "Divisoria Market, Manila"
+    ]
+  },
+  {
+    "route_name": "Monumento ↔ PITX via EDSA Carousel",
+    "roads": [
+      "LRT Monumento Station, Caloocan",
+      "PITX Terminal, Paranaque"
+    ]
+  },
+  {
+    "route_name": "Valenzuela (VGC) ↔ PITX via EDSA",
+    "roads": [
+      "Valenzuela Gateway Complex, Valenzuela",
+      "PITX Terminal, Paranaque"
+    ]
+  },
+  {
+    "route_name": "VGC ↔ Cubao via Mindanao Ave",
+    "roads": [
+      "Valenzuela Gateway Complex, Valenzuela",
+      "Araneta Center, Cubao, Quezon City"
+    ]
+  },
+  {
+    "route_name": "Malanday ↔ Mall of Asia via EDSA",
+    "roads": [
+      "Malanday Terminal, Valenzuela",
+      "SM Mall of Asia, Pasay"
+    ]
+  },
+  {
+    "route_name": "SM North EDSA ↔ BGC via C-5",
+    "roads": [
+      "SM North EDSA, Quezon City",
+      "Market! Market!, Taguig"
+    ]
+  },
+  {
+    "route_name": "FTI ↔ Navotas via EDSA",
+    "roads": [
+      "FTI Terminal, Taguig",
+      "Navotas Bus Terminal, Navotas"
+    ]
+  },
+  {
+    "route_name": "Navotas ↔ Mall of Asia via EDSA",
+    "roads": [
+      "Navotas Bus Terminal, Navotas",
+      "SM Mall of Asia, Pasay"
+    ]
+  },
+  {
+    "route_name": "Fairview ↔ PITX via Quezon Ave",
+    "roads": [
+      "SM Fairview, Quezon City",
+      "PITX Terminal, Paranaque"
+    ]
+  },
+  {
+    "route_name": "BGC ↔ Ayala via McKinley",
+    "roads": [
+      "Market! Market!, Taguig",
+      "Ayala Center, Makati"
+    ]
+  },
+  {
+    "route_name": "Pacita ↔ BGC via SLEX",
+    "roads": [
+      "Pacita Complex, San Pedro",
+      "Market! Market!, Taguig"
+    ]
+  },
+  {
+    "route_name": "Ayala ↔ Alabang via SLEX",
+    "roads": [
+      "Ayala Center, Makati",
+      "Starmall Alabang, Muntinlupa"
+    ]
+  },
+  {
+    "route_name": "SJDM ↔ North EDSA via Commonwealth",
+    "roads": [
+      "Tungkong Mangga, San Jose del Monte",
+      "SM North EDSA, Quezon City"
+    ]
+  },
+  {
+    "route_name": "Sucat ↔ Lawton via Roxas Blvd",
+    "roads": [
+      "Sucat Interchange, Muntinlupa",
+      "Lawton Plaza, Manila"
+    ]
+  },
+  {
+    "route_name": "Taytay ↔ Quiapo via Ortigas Ave",
+    "roads": [
+      "Taytay Public Market, Rizal",
+      "Quiapo Church, Manila"
+    ]
+  },
+  {
+    "route_name": "Cubao ↔ Montalban via San Mateo",
+    "roads": [
+      "Araneta Center, Cubao, Quezon City",
+      "Montalban Town Center, Rizal"
+    ]
+  },
+  {
+    "route_name": "SM Fairview ↔ Ayala via EDSA",
+    "roads": [
+      "SM Fairview, Quezon City",
+      "Ayala Center, Makati"
+    ]
+  },
+  {
+    "route_name": "BGC ↔ PITX via EDSA",
+    "roads": [
+      "Market! Market!, Taguig",
+      "PITX Terminal, Paranaque"
+    ]
+  },
+  {
+    "route_name": "Ayala ↔ FTI via South Super Hwy",
+    "roads": [
+      "Ayala Center, Makati",
+      "FTI Terminal, Taguig"
+    ]
+  },
+  {
+    "route_name": "Lawton ↔ Dasmariñas via Coastal Road",
+    "roads": [
+      "Lawton Plaza, Manila",
+      "Pala-Pala, Dasmariñas"
+    ]
+  },
+  {
+    "route_name": "SM Megamall ↔ Antipolo via Ortigas Ave",
+    "roads": [
+      "SM Megamall, Mandaluyong",
+      "Robinsons Place Antipolo, Rizal"
+    ]
+  },
+  {
+    "route_name": "Trinoma ↔ Glorietta via EDSA (P2P)",
+    "roads": [
+      "Trinoma, Quezon City",
+      "Glorietta, Makati"
+    ]
+  },
+  {
+    "route_name": "NAIA ↔ Cubao via EDSA",
+    "roads": [
+      "NAIA Terminal 3, Pasay",
+      "Araneta Center, Cubao, Quezon City"
+    ]
+  },
+  {
+    "route_name": "Alabang ↔ Plaza Lawton via Taft",
+    "roads": [
+      "Starmall Alabang, Muntinlupa",
+      "Lawton Plaza, Manila"
+    ]
+  },
+  {
+    "route_name": "Monumento ↔ Meycauayan via McArthur Hwy",
+    "roads": [
+      "LRT Monumento Station, Caloocan",
+      "Meycauayan Public Market, Bulacan"
+    ]
+  },
+  {
+    "route_name": "Novaliches ↔ Malinta via General Luis",
+    "roads": [
+      "Novaliches Public Market, Quezon City",
+      "Malinta, Valenzuela"
+    ]
+  }
+]
