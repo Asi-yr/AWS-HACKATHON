@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>SafeRouteAI Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
+
 <body>
     <div class="app-container">
         <!-- Sidebar -->
@@ -15,11 +17,11 @@
             </div>
 
             {% with messages = get_flashed_messages() %}
-              {% if messages %}
-                {% for message in messages %}
-                  <div class="flash-message">{{ message }}</div>
-                {% endfor %}
-              {% endif %}
+            {% if messages %}
+            {% for message in messages %}
+            <div class="flash-message">{{ message }}</div>
+            {% endfor %}
+            {% endif %}
             {% endwith %}
 
             <form class="controls" method="POST" action="/" id="route-form">
@@ -27,87 +29,45 @@
                 <!-- Origin -->
                 <label class="input-label">Starting Location</label>
                 <div class="input-with-icon">
-                    <input type="text" name="origin" id="origin"
-                           placeholder="Type address or Lat, Lon" required>
+                    <input type="text" name="origin" id="origin" placeholder="Type address or Lat, Lon" required
+                        autocomplete="off">
                     <button type="button" class="locate-me-btn" title="Use Current Location"
-                            onclick="useCurrentLocation('origin')">🎯</button>
+                        onclick="useCurrentLocation('origin')">🎯</button>
                 </div>
 
                 <!-- Destination -->
                 <label class="input-label">Destination</label>
                 <div class="input-with-icon">
-                    <input type="text" name="destination" id="destination"
-                           placeholder="Type address or Lat, Lon" required>
+                    <input type="text" name="destination" id="destination" placeholder="Type address or Lat, Lon"
+                        required autocomplete="off">
                     <button type="button" class="locate-me-btn" title="Use Current Location"
-                            onclick="useCurrentLocation('destination')">🎯</button>
+                        onclick="useCurrentLocation('destination')">🎯</button>
                 </div>
 
-                <!-- ── Transport Mode Selector ─────────────────────────────── -->
+                <!-- Transport Mode Selector -->
                 <input type="hidden" name="commuterType" id="commuter-type-value" value="transit">
 
                 <label class="input-label">Transport Mode</label>
-                <div class="mode-grid" style="grid-template-columns: repeat(4, 1fr);">
-                    <button type="button" class="mode-tile"
-                            data-value="car" data-color="#3498db"
-                            onclick="selectMode(this)">
+                <div class="mode-grid">
+                    <button type="button" class="mode-tile" data-value="car" data-color="#3498db"
+                        onclick="selectMode(this)">
                         <span class="mode-icon">🚗</span>
                         <span class="mode-name">Car</span>
                     </button>
-                    <button type="button" class="mode-tile"
-                            data-value="motorcycle" data-color="#8e44ad"
-                            onclick="selectMode(this)">
+                    <button type="button" class="mode-tile" data-value="motorcycle" data-color="#8e44ad"
+                        onclick="selectMode(this)">
                         <span class="mode-icon">🏍️</span>
                         <span class="mode-name">Motorcycle</span>
                     </button>
-                    <button type="button" class="mode-tile active"
-                            data-value="transit" data-color="#9b59b6"
-                            onclick="selectMode(this)">
+                    <button type="button" class="mode-tile active" data-value="transit" data-color="#2980b9"
+                        onclick="selectMode(this)">
                         <span class="mode-icon">🚇</span>
                         <span class="mode-name">Transit</span>
                     </button>
-                    <button type="button" class="mode-tile"
-                            data-value="walk" data-color="#2ecc71"
-                            onclick="selectMode(this)">
+                    <button type="button" class="mode-tile" data-value="walk" data-color="#2ecc71"
+                        onclick="selectMode(this)">
                         <span class="mode-icon">🚶</span>
                         <span class="mode-name">Walk</span>
-                    </button>
-                </div>
-
-                <!-- Road group -->
-                <div class="mode-group-label" style="margin-top:12px;">🛣️ Road</div>
-                <div class="mode-grid">
-                    <button type="button" class="mode-tile active"
-                            data-value="car" data-color="#3498db"
-                            onclick="selectMode(this)">
-                        <span class="mode-icon">🚗</span>
-                        <span class="mode-name">Car</span>
-                        <span class="mode-sub">Private</span>
-                    </button>
-                    <button type="button" class="mode-tile"
-                            data-value="jeepney" data-color="#e67e22"
-                            onclick="selectMode(this)">
-                        <span class="mode-icon">🚐</span>
-                        <span class="mode-name">Jeepney</span>
-                        <span class="mode-sub">P2P</span>
-                    </button>
-                    <button type="button" class="mode-tile"
-                            data-value="bus" data-color="#27ae60"
-                            onclick="selectMode(this)">
-                        <span class="mode-icon">🚌</span>
-                        <span class="mode-name">Bus</span>
-                        <span class="mode-sub">City Bus</span>
-                    </button>
-                </div>
-
-                <!-- Multimodal group -->
-                <div class="mode-group-label" style="margin-top:12px;">🔗 Combined</div>
-                <div class="mode-grid" style="grid-template-columns: 1fr;">
-                    <button type="button" class="mode-tile"
-                            data-value="multimodal" data-color="#9b59b6"
-                            onclick="selectMode(this)">
-                        <span class="mode-icon">🗺️</span>
-                        <span class="mode-name">Multimodal Journey</span>
-                        <span class="mode-sub">Fastest combination of Jeepney + Train</span>
                     </button>
                 </div>
 
@@ -120,54 +80,11 @@
             <div id="route-results" class="route-results">
                 {% for route in routes %}
 
-                {# ── Jeepney card ───────────────────────────────────────────── #}
-                {% if route.type == 'jeepney' %}
-                <div class="route-card jeepney-card" style="border-left-color: {{ route.color }};">
-                    <div class="route-title" style="color: {{ route.color }}">
-                        🚐 {{ route.name }}
-                    </div>
-                    <div class="route-stats">
-                        <span>🕒 {{ route.time }}</span>
-                        <span>📏 {{ route.distance }}</span>
-                    </div>
-
-                    {# Walk legs summary #}
-                    <div class="jeepney-legs">
-                        {% if route.walk_board_m is defined and route.walk_board_m > 0 %}
-                        <div class="leg-row walk-leg">
-                            <span class="leg-icon">🚶</span>
-                            <span class="leg-desc">Walk {{ route.walk_board_m }}m → board jeepney</span>
-                        </div>
-                        {% endif %}
-                        <div class="leg-row jeep-leg" style="color: {{ route.color }};">
-                            <span class="leg-icon">🚐</span>
-                            <span class="leg-desc">Ride along designated route</span>
-                        </div>
-                        {% if route.walk_alight_m is defined and route.walk_alight_m > 0 %}
-                        <div class="leg-row walk-leg">
-                            <span class="leg-icon">🚶</span>
-                            <span class="leg-desc">Alight → walk {{ route.walk_alight_m }}m to destination</span>
-                        </div>
-                        {% endif %}
-                    </div>
-
-                    <div class="route-safety">
-                        Safety Score: {{ route.safety_score }}/100 &nbsp;|&nbsp;
-                        {{ route.hazards_flagged }}
-                    </div>
-
-                    {# Landmarks along route #}
-                    {% if route.landmarks %}
-                    <div class="route-landmarks">
-                        <span class="landmarks-label">📍 Via:</span>
-                        {{ route.landmarks | join(' → ') }}
-                    </div>
-                    {% endif %}
-                </div>
-
-                {# ── Train card ─────────────────────────────────────────────── #}
-                {% elif route.type == 'train' %}
-                <div class="route-card" style="border-left-color: {{ route.color }};">
+                {# ── Transit card (single or transfer) ─────────────────────────── #}
+                {% if route.type == 'transit' %}
+                <div class="route-card transit-card" style="border-left-color: {{ route.color }};"
+                    data-route-id="{{ loop.index0 }}" onmouseenter="highlightRoute({{ loop.index0 }})"
+                    onmouseleave="unhighlightRoute()">
                     <div class="route-title" style="color: {{ route.color }}">
                         🚇 {{ route.name }}
                     </div>
@@ -175,66 +92,37 @@
                         <span>🕒 {{ route.time }}</span>
                         <span>📏 {{ route.distance }}</span>
                     </div>
-                    <div class="route-safety">
-                        Safety Score: {{ route.safety_score }}/100<br>
-                        Hazard: {{ route.hazards_flagged }}
-                    </div>
-                    {% if route.stations %}
-                    <div class="route-stations-count">
-                        🚉 {{ route.stations | length }} stations
-                    </div>
-                    {% endif %}
-                </div>
-
-                {# ── Multimodal card ────────────────────────────────────────── #}
-                {% elif route.type == 'multimodal' %}
-                <div class="route-card jeepney-card" style="border-left-color: {{ route.color }};">
-                    <div class="route-title" style="color: {{ route.color }}">
-                        🗺️ {{ route.name }}
-                    </div>
-                    <div class="route-stats">
-                        <span>🕒 {{ route.time }}</span>
-                        <span>📏 {{ route.distance }}</span>
-                    </div>
-
-                    <div class="jeepney-legs">
+                    <div class="transit-legs">
                         {% for seg in route.segments %}
-                            {% if seg.type == 'walk' %}
-                            <div class="leg-row walk-leg">
-                                <span class="leg-icon">🚶</span>
-                                <span class="leg-desc">{{ seg.label }}</span>
-                            </div>
-                            {% elif seg.type == 'train' %}
-                            <div class="leg-row jeep-leg" style="color: {{ seg.color }};">
-                                <span class="leg-icon">🚇</span>
-                                <span class="leg-desc">Ride {{ seg.label }}</span>
-                            </div>
-                            {% elif seg.type == 'jeepney' or seg.type == 'bus' %}
-                            <div class="leg-row jeep-leg" style="color: {{ seg.color | default(route.color) }};">
-                                <span class="leg-icon">🚐</span>
-                                <span class="leg-desc">Ride {{ seg.label }}</span>
-                            </div>
-                            {% endif %}
+                        {% if seg.type == 'walk' %}
+                        <div class="leg-row walk-leg">
+                            <span class="leg-icon">🚶</span>
+                            <span class="leg-desc">{{ seg.label }}</span>
+                        </div>
+                        {% elif seg.type == 'train' %}
+                        <div class="leg-row train-leg" style="color: {{ seg.color }};">
+                            <span class="leg-icon">🚇</span>
+                            <span class="leg-desc">{{ seg.label }}</span>
+                        </div>
+                        {% endif %}
                         {% endfor %}
                     </div>
-
                     <div class="route-safety">
-                        Safety Score: {{ route.safety_score }}/100<br>
-                        {{ route.hazards_flagged }}
+                        Safety: {{ route.safety_score }}/100 &nbsp;|&nbsp; {{ route.hazards_flagged }}
                     </div>
                 </div>
 
-                {# ── Car / Bus / fallback card ──────────────────────────────── #}
+                {# ── Car / Walk / Motorcycle / fallback card ───────────────────── #}
                 {% else %}
-                <div class="route-card" style="border-left-color: {{ route.color }};">
+                <div class="route-card" style="border-left-color: {{ route.color }};" data-route-id="{{ loop.index0 }}"
+                    onmouseenter="highlightRoute({{ loop.index0 }})" onmouseleave="unhighlightRoute()">
                     <div class="route-title" style="color: {{ route.color }}">{{ route.name }}</div>
                     <div class="route-stats">
                         <span>🕒 {{ route.time }}</span>
                         <span>📏 {{ route.distance }}</span>
                     </div>
                     <div class="route-safety">
-                        Safety Score: {{ route.safety_score }}/100<br>
-                        Hazard: {{ route.hazards_flagged }}
+                        Safety: {{ route.safety_score }}/100 &nbsp;|&nbsp; {{ route.hazards_flagged }}
                     </div>
                 </div>
                 {% endif %}
@@ -247,11 +135,11 @@
         <div class="map-area">
             <div class="map-overlay-controls">
                 <button type="button" id="pinpoint-btn" title="Toggle Pinpoint Mode"
-                        onclick="togglePinpoint()">📍</button>
+                    onclick="togglePinpoint()">📍</button>
                 <div id="pick-status" class="pick-status-label">Pinpoint Mode ON</div>
             </div>
-            <iframe id="map-frame" srcdoc="{{ map_html | escape }}"
-                    width="100%" height="100%" style="border:none;"></iframe>
+            <iframe id="map-frame" srcdoc="{{ map_html | escape }}" width="100%" height="100%"
+                style="border:none;"></iframe>
         </div>
     </div>
 
@@ -263,14 +151,25 @@
             document.getElementById('commuter-type-value').value = tile.dataset.value;
             document.documentElement.style.setProperty('--mode-color', tile.dataset.color);
         }
-        document.documentElement.style.setProperty('--mode-color', '#3498db');
+        document.documentElement.style.setProperty('--mode-color', '#2980b9');
 
+        // ── Route card hover → bring that layer to front in map iframe ───────
+        function highlightRoute(routeIdx) {
+            const iframe = document.getElementById('map-frame');
+            if (iframe && iframe.contentWindow)
+                iframe.contentWindow.postMessage({ type: 'highlight_route', idx: routeIdx }, '*');
+        }
+        function unhighlightRoute() {
+            const iframe = document.getElementById('map-frame');
+            if (iframe && iframe.contentWindow)
+                iframe.contentWindow.postMessage({ type: 'unhighlight_route' }, '*');
+        }
 
         // ── Pinpoint / map-click logic ───────────────────────────────────────
         let isPinpointing = false;
 
         function updatePinpointStatus() {
-            const originVal  = document.getElementById('origin').value;
+            const originVal = document.getElementById('origin').value;
             const statusLabel = document.getElementById('pick-status');
             if (!originVal || originVal.trim() === "") {
                 statusLabel.innerText = "📍 Click map → set START (Green)";
@@ -283,7 +182,7 @@
 
         function togglePinpoint() {
             isPinpointing = !isPinpointing;
-            const btn    = document.getElementById("pinpoint-btn");
+            const btn = document.getElementById("pinpoint-btn");
             const status = document.getElementById("pick-status");
             if (isPinpointing) {
                 btn.classList.add("active");
@@ -301,34 +200,23 @@
                 iframe.contentWindow.postMessage({ type: 'draw_marker', lat, lng, kind }, '*');
         }
 
-        function checkAndAutoSubmit() {
-            const o = document.getElementById('origin').value;
-            const d = document.getElementById('destination').value;
-            if (o && o.trim() && d && d.trim()) {
-                const btn = document.getElementById('submit-btn');
-                btn.innerText = "Auto-calculating…";
-                btn.disabled  = true;
-                document.getElementById('route-form').submit();
-            }
-        }
-
-        window.addEventListener("message", function(event) {
+        window.addEventListener("message", function (event) {
             if (event.data && event.data.type === 'map_click' && isPinpointing) {
                 const { lat, lng } = event.data;
-                const coord    = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+                const coord = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
                 const originBox = document.getElementById('origin');
-                const destBox   = document.getElementById('destination');
+                const destBox = document.getElementById('destination');
 
                 if (!originBox.value || originBox.value.trim() === "") {
                     originBox.value = coord;
                     sendDrawCommand(lat, lng, 'origin');
                     updatePinpointStatus();
-                    checkAndAutoSubmit();
+                    // NOT auto-submitting — user must click Find Safe Routes
                 } else {
                     destBox.value = coord;
                     sendDrawCommand(lat, lng, 'destination');
                     togglePinpoint();
-                    checkAndAutoSubmit();
+                    // NOT auto-submitting — user must click Find Safe Routes
                 }
             }
         });
@@ -344,11 +232,69 @@
                     box.value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
                     if (isPinpointing) updatePinpointStatus();
                     sendDrawCommand(lat, lng, targetInputId === 'origin' ? 'origin' : 'destination');
-                    checkAndAutoSubmit();
+                    // NOT auto-submitting — user must click Find Safe Routes
                 },
                 () => { box.value = ""; alert("Could not retrieve location."); }
             );
         }
+        function setupAutocomplete(inputId) {
+            const input = document.getElementById(inputId);
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'autocomplete-dropdown';
+            dropdown.id = inputId + '-dropdown';
+            input.parentElement.appendChild(dropdown);
+
+            let debounceTimer = null;
+
+            input.addEventListener('input', function () {
+                clearTimeout(debounceTimer);
+                const query = input.value.trim();
+                dropdown.innerHTML = '';
+                dropdown.style.display = 'none';
+                if (query.length < 3) return;
+
+                debounceTimer = setTimeout(async () => {
+                    try {
+                        const res = await fetch(`/api/suggest?q=${encodeURIComponent(query)}`);
+                        const results = await res.json();
+                        if (!results.length) return;
+
+                        results.forEach(place => {
+                            const item = document.createElement('div');
+                            item.className = 'autocomplete-item';
+                            item.textContent = place.display_name;
+                            item.addEventListener('mousedown', function (e) {
+                                e.preventDefault();
+                                input.value = `${parseFloat(place.lat).toFixed(6)}, ${parseFloat(place.lon).toFixed(6)}`;
+                                dropdown.innerHTML = '';
+                                dropdown.style.display = 'none';
+                                sendDrawCommand(
+                                    parseFloat(place.lat),
+                                    parseFloat(place.lon),
+                                    inputId === 'origin' ? 'origin' : 'destination'
+                                );
+                            });
+                            dropdown.appendChild(item);
+                        });
+                        dropdown.style.display = 'block';
+                    } catch (e) {
+                        console.error('Autocomplete fetch failed:', e);
+                    }
+                }, 350);
+            });
+
+            input.addEventListener('blur', () => {
+                setTimeout(() => {
+                    dropdown.innerHTML = '';
+                    dropdown.style.display = 'none';
+                }, 150);
+            });
+        }
+
+        setupAutocomplete('origin');
+        setupAutocomplete('destination');
     </script>
 </body>
+
 </html>
