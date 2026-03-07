@@ -592,5 +592,431 @@
         "lng": 120.9553
       }
     ]
+  },
+  {
+    "route_name": "Valenzuela (Karuhatan) → Divisoria via McArthur",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Karuhatan Road",
+        "lat": 14.7,
+        "lng": 120.9648
+      },
+      {
+        "name": "McArthur Highway (Southbound Lane)",
+        "lat": 14.6701,
+        "lng": 120.9652
+      },
+      {
+        "name": "Rizal Avenue Ext (Southbound)",
+        "lat": 14.645,
+        "lng": 120.9788
+      },
+      {
+        "name": "C.M. Recto Avenue",
+        "lat": 14.6042,
+        "lng": 120.9713
+      }
+    ]
+  },
+  {
+    "route_name": "Divisoria → Valenzuela (Karuhatan) via McArthur",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "C.M. Recto Avenue",
+        "lat": 14.604,
+        "lng": 120.9714
+      },
+      {
+        "name": "Rizal Avenue Ext (Northbound)",
+        "lat": 14.6449,
+        "lng": 120.979
+      },
+      {
+        "name": "McArthur Highway (Northbound Lane)",
+        "lat": 14.67,
+        "lng": 120.9655
+      },
+      {
+        "name": "Karuhatan Road",
+        "lat": 14.6999,
+        "lng": 120.965
+      }
+    ]
+  },
+  {
+    "route_name": "Mandaluyong (Shaw Blvd) → Quiapo via Boni",
+    "traffic_flow": "Westbound",
+    "roads": [
+      {
+        "name": "Shaw Boulevard (Westbound Lane)",
+        "lat": 14.5832,
+        "lng": 121.0534
+      },
+      {
+        "name": "Boni Avenue (Westbound Lane)",
+        "lat": 14.5753,
+        "lng": 121.0302
+      },
+      {
+        "name": "Estrella Street",
+        "lat": 14.5699,
+        "lng": 121.0099
+      },
+      {
+        "name": "Quezon Blvd (Southbound Lane)",
+        "lat": 14.5985,
+        "lng": 120.9833
+      }
+    ]
+  },
+  {
+    "route_name": "Quiapo → Mandaluyong (Shaw Blvd) via Boni",
+    "traffic_flow": "Eastbound",
+    "roads": [
+      {
+        "name": "Quezon Blvd (Northbound Lane)",
+        "lat": 14.5984,
+        "lng": 120.9837
+      },
+      {
+        "name": "Estrella Street",
+        "lat": 14.57,
+        "lng": 121.0101
+      },
+      {
+        "name": "Boni Avenue (Eastbound Lane)",
+        "lat": 14.5752,
+        "lng": 121.0305
+      },
+      {
+        "name": "Shaw Boulevard (Eastbound Lane)",
+        "lat": 14.5831,
+        "lng": 121.0536
+      }
+    ]
+  },
+  {
+    "route_name": "Greenhills (Wilson) → Quiapo via Santolan",
+    "traffic_flow": "Westbound",
+    "roads": [
+      {
+        "name": "Wilson Street",
+        "lat": 14.5995,
+        "lng": 121.0565
+      },
+      {
+        "name": "Santolan Road",
+        "lat": 14.5971,
+        "lng": 121.046
+      },
+      {
+        "name": "N. Domingo Street",
+        "lat": 14.604,
+        "lng": 121.0315
+      },
+      {
+        "name": "Magsaysay Blvd (Westbound Lane)",
+        "lat": 14.602,
+        "lng": 121.012
+      },
+      {
+        "name": "Quezon Blvd (Southbound Lane)",
+        "lat": 14.5985,
+        "lng": 120.9833
+      }
+    ]
+  },
+  {
+    "route_name": "Quiapo → Greenhills (Wilson) via Santolan",
+    "traffic_flow": "Eastbound",
+    "roads": [
+      {
+        "name": "Quezon Blvd (Northbound Lane)",
+        "lat": 14.5984,
+        "lng": 120.9837
+      },
+      {
+        "name": "Magsaysay Blvd (Eastbound Lane)",
+        "lat": 14.6014,
+        "lng": 121.012
+      },
+      {
+        "name": "N. Domingo Street",
+        "lat": 14.6041,
+        "lng": 121.0315
+      },
+      {
+        "name": "Santolan Road",
+        "lat": 14.597,
+        "lng": 121.0462
+      },
+      {
+        "name": "Wilson Street",
+        "lat": 14.5994,
+        "lng": 121.0567
+      }
+    ]
+  },
+  {
+    "route_name": "Mall of Asia (MOA) → Quiapo via Roxas Blvd",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "Mall of Asia Arena Road",
+        "lat": 14.5351,
+        "lng": 120.9822
+      },
+      {
+        "name": "Roxas Boulevard (Northbound Lane)",
+        "lat": 14.5601,
+        "lng": 120.9827
+      },
+      {
+        "name": "Padre Faura Street",
+        "lat": 14.5802,
+        "lng": 120.9819
+      },
+      {
+        "name": "Quezon Blvd (Northbound Lane)",
+        "lat": 14.5984,
+        "lng": 120.9837
+      }
+    ]
+  },
+  {
+    "route_name": "Quiapo → Mall of Asia (MOA) via Roxas Blvd",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Quezon Blvd (Southbound Lane)",
+        "lat": 14.5985,
+        "lng": 120.9833
+      },
+      {
+        "name": "Padre Faura Street",
+        "lat": 14.58,
+        "lng": 120.9817
+      },
+      {
+        "name": "Roxas Boulevard (Southbound Lane)",
+        "lat": 14.56,
+        "lng": 120.9824
+      },
+      {
+        "name": "Mall of Asia Arena Road",
+        "lat": 14.535,
+        "lng": 120.982
+      }
+    ]
+  },
+  {
+    "route_name": "Cubao → Mandaluyong (EDSA Crossing) via EDSA",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "EDSA (Southbound Lane) - Cubao",
+        "lat": 14.6196,
+        "lng": 121.0502
+      },
+      {
+        "name": "EDSA (Southbound Lane) - Ortigas",
+        "lat": 14.5875,
+        "lng": 121.0561
+      },
+      {
+        "name": "EDSA (Southbound Lane) - Shaw",
+        "lat": 14.5814,
+        "lng": 121.0534
+      },
+      {
+        "name": "EDSA Crossing / Pioneer Street",
+        "lat": 14.5745,
+        "lng": 121.049
+      }
+    ]
+  },
+  {
+    "route_name": "Mandaluyong (EDSA Crossing) → Cubao via EDSA",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "EDSA Crossing / Pioneer Street",
+        "lat": 14.5744,
+        "lng": 121.0491
+      },
+      {
+        "name": "EDSA (Northbound Lane) - Shaw",
+        "lat": 14.5813,
+        "lng": 121.0536
+      },
+      {
+        "name": "EDSA (Northbound Lane) - Ortigas",
+        "lat": 14.5874,
+        "lng": 121.0563
+      },
+      {
+        "name": "EDSA (Northbound Lane) - Cubao",
+        "lat": 14.6195,
+        "lng": 121.0504
+      }
+    ]
+  },
+  {
+    "route_name": "South EDSA (Magallanes) → MOA via Buendia",
+    "traffic_flow": "Westbound",
+    "roads": [
+      {
+        "name": "Magallanes Interchange",
+        "lat": 14.5215,
+        "lng": 121.0013
+      },
+      {
+        "name": "Gil Puyat Ave (Westbound Lane)",
+        "lat": 14.5573,
+        "lng": 121.015
+      },
+      {
+        "name": "Taft Avenue (Southbound Lane)",
+        "lat": 14.5384,
+        "lng": 121.0002
+      },
+      {
+        "name": "Mall of Asia Arena Road",
+        "lat": 14.535,
+        "lng": 120.982
+      }
+    ]
+  },
+  {
+    "route_name": "MOA → South EDSA (Magallanes) via Buendia",
+    "traffic_flow": "Eastbound",
+    "roads": [
+      {
+        "name": "Mall of Asia Arena Road",
+        "lat": 14.5351,
+        "lng": 120.9822
+      },
+      {
+        "name": "Taft Avenue (Northbound Lane)",
+        "lat": 14.5385,
+        "lng": 121.0001
+      },
+      {
+        "name": "Gil Puyat Ave (Eastbound Lane)",
+        "lat": 14.5568,
+        "lng": 121.015
+      },
+      {
+        "name": "Magallanes Interchange",
+        "lat": 14.5214,
+        "lng": 121.0014
+      }
+    ]
+  },
+  {
+    "route_name": "Quezon City Hall → Divisoria via Commonwealth",
+    "traffic_flow": "Southbound",
+    "roads": [
+      {
+        "name": "Commonwealth Avenue (Southbound Lane)",
+        "lat": 14.6765,
+        "lng": 121.0503
+      },
+      {
+        "name": "Quezon Avenue (Southbound Lane)",
+        "lat": 14.6378,
+        "lng": 121.0163
+      },
+      {
+        "name": "España Blvd (Southbound Lane)",
+        "lat": 14.6085,
+        "lng": 120.9896
+      },
+      {
+        "name": "C.M. Recto Avenue",
+        "lat": 14.6042,
+        "lng": 120.9713
+      }
+    ]
+  },
+  {
+    "route_name": "Divisoria → Quezon City Hall via Commonwealth",
+    "traffic_flow": "Northbound",
+    "roads": [
+      {
+        "name": "C.M. Recto Avenue",
+        "lat": 14.604,
+        "lng": 120.9714
+      },
+      {
+        "name": "España Blvd (Northbound Lane)",
+        "lat": 14.6084,
+        "lng": 120.9902
+      },
+      {
+        "name": "Quezon Avenue (Northbound Lane)",
+        "lat": 14.6377,
+        "lng": 121.0165
+      },
+      {
+        "name": "Commonwealth Avenue (Northbound Lane)",
+        "lat": 14.6764,
+        "lng": 121.0505
+      }
+    ]
+  },
+  {
+    "route_name": "Cubao → Quiapo via Aurora Blvd",
+    "traffic_flow": "Westbound",
+    "roads": [
+      {
+        "name": "Aurora Boulevard (Westbound Lane) - Cubao",
+        "lat": 14.6151,
+        "lng": 121.03
+      },
+      {
+        "name": "Aurora Boulevard (Westbound Lane) - Sta. Mesa",
+        "lat": 14.6038,
+        "lng": 121.0055
+      },
+      {
+        "name": "Legarda Street (Westbound)",
+        "lat": 14.6001,
+        "lng": 120.9865
+      },
+      {
+        "name": "Quezon Blvd (Southbound Lane)",
+        "lat": 14.5985,
+        "lng": 120.9833
+      }
+    ]
+  },
+  {
+    "route_name": "Quiapo → Cubao via Aurora Blvd",
+    "traffic_flow": "Eastbound",
+    "roads": [
+      {
+        "name": "Quezon Blvd (Northbound Lane)",
+        "lat": 14.5984,
+        "lng": 120.9837
+      },
+      {
+        "name": "Legarda Street (Eastbound)",
+        "lat": 14.6003,
+        "lng": 120.9868
+      },
+      {
+        "name": "Aurora Boulevard (Eastbound Lane) - Sta. Mesa",
+        "lat": 14.6037,
+        "lng": 121.0057
+      },
+      {
+        "name": "Aurora Boulevard (Eastbound Lane) - Cubao",
+        "lat": 14.6149,
+        "lng": 121.0301
+      }
+    ]
   }
 ]
