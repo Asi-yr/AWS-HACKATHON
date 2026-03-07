@@ -43,40 +43,33 @@
                 </div>
 
                 <!-- ── Transport Mode Selector ─────────────────────────────── -->
-                <input type="hidden" name="commuterType" id="commuter-type-value" value="car">
+                <input type="hidden" name="commuterType" id="commuter-type-value" value="transit">
 
                 <label class="input-label">Transport Mode</label>
-
-                <!-- Rail group -->
-                <div class="mode-group-label">🚇 Rail</div>
-                <div class="mode-grid" id="mode-grid">
+                <div class="mode-grid" style="grid-template-columns: repeat(4, 1fr);">
                     <button type="button" class="mode-tile"
-                            data-value="lrt-1" data-color="#008000"
+                            data-value="car" data-color="#3498db"
                             onclick="selectMode(this)">
-                        <span class="mode-icon">🟢</span>
-                        <span class="mode-name">LRT-1</span>
-                        <span class="mode-sub">Green Line</span>
+                        <span class="mode-icon">🚗</span>
+                        <span class="mode-name">Car</span>
                     </button>
                     <button type="button" class="mode-tile"
-                            data-value="lrt-2" data-color="#0000CD"
+                            data-value="motorcycle" data-color="#8e44ad"
                             onclick="selectMode(this)">
-                        <span class="mode-icon">🔵</span>
-                        <span class="mode-name">LRT-2</span>
-                        <span class="mode-sub">Blue Line</span>
+                        <span class="mode-icon">🏍️</span>
+                        <span class="mode-name">Motorcycle</span>
+                    </button>
+                    <button type="button" class="mode-tile active"
+                            data-value="transit" data-color="#9b59b6"
+                            onclick="selectMode(this)">
+                        <span class="mode-icon">🚇</span>
+                        <span class="mode-name">Transit</span>
                     </button>
                     <button type="button" class="mode-tile"
-                            data-value="mrt-3" data-color="#DAA520"
+                            data-value="walk" data-color="#2ecc71"
                             onclick="selectMode(this)">
-                        <span class="mode-icon">🟡</span>
-                        <span class="mode-name">MRT-3</span>
-                        <span class="mode-sub">Yellow Line</span>
-                    </button>
-                    <button type="button" class="mode-tile"
-                            data-value="pnr" data-color="#8B4513"
-                            onclick="selectMode(this)">
-                        <span class="mode-icon">🚂</span>
-                        <span class="mode-name">PNR</span>
-                        <span class="mode-sub">Commuter Rail</span>
+                        <span class="mode-icon">🚶</span>
+                        <span class="mode-name">Walk</span>
                     </button>
                 </div>
 
@@ -103,6 +96,18 @@
                         <span class="mode-icon">🚌</span>
                         <span class="mode-name">Bus</span>
                         <span class="mode-sub">City Bus</span>
+                    </button>
+                </div>
+
+                <!-- Multimodal group -->
+                <div class="mode-group-label" style="margin-top:12px;">🔗 Combined</div>
+                <div class="mode-grid" style="grid-template-columns: 1fr;">
+                    <button type="button" class="mode-tile"
+                            data-value="multimodal" data-color="#9b59b6"
+                            onclick="selectMode(this)">
+                        <span class="mode-icon">🗺️</span>
+                        <span class="mode-name">Multimodal Journey</span>
+                        <span class="mode-sub">Fastest combination of Jeepney + Train</span>
                     </button>
                 </div>
 
@@ -179,6 +184,44 @@
                         🚉 {{ route.stations | length }} stations
                     </div>
                     {% endif %}
+                </div>
+
+                {# ── Multimodal card ────────────────────────────────────────── #}
+                {% elif route.type == 'multimodal' %}
+                <div class="route-card jeepney-card" style="border-left-color: {{ route.color }};">
+                    <div class="route-title" style="color: {{ route.color }}">
+                        🗺️ {{ route.name }}
+                    </div>
+                    <div class="route-stats">
+                        <span>🕒 {{ route.time }}</span>
+                        <span>📏 {{ route.distance }}</span>
+                    </div>
+
+                    <div class="jeepney-legs">
+                        {% for seg in route.segments %}
+                            {% if seg.type == 'walk' %}
+                            <div class="leg-row walk-leg">
+                                <span class="leg-icon">🚶</span>
+                                <span class="leg-desc">{{ seg.label }}</span>
+                            </div>
+                            {% elif seg.type == 'train' %}
+                            <div class="leg-row jeep-leg" style="color: {{ seg.color }};">
+                                <span class="leg-icon">🚇</span>
+                                <span class="leg-desc">Ride {{ seg.label }}</span>
+                            </div>
+                            {% elif seg.type == 'jeepney' or seg.type == 'bus' %}
+                            <div class="leg-row jeep-leg" style="color: {{ seg.color | default(route.color) }};">
+                                <span class="leg-icon">🚐</span>
+                                <span class="leg-desc">Ride {{ seg.label }}</span>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+
+                    <div class="route-safety">
+                        Safety Score: {{ route.safety_score }}/100<br>
+                        {{ route.hazards_flagged }}
+                    </div>
                 </div>
 
                 {# ── Car / Bus / fallback card ──────────────────────────────── #}

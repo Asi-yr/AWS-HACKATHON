@@ -297,6 +297,30 @@ def _draw_bus_route(route, m):
 
     route_layer.add_to(m)
 
+def _draw_multimodal_route(route, m):
+    route_layer = folium.FeatureGroup(name=route['name'])
+    for seg in route.get('segments', []):
+        coords = seg.get('coords',[])
+        if not coords: continue
+        
+        if seg['type'] == 'walk':
+            folium.PolyLine(locations=coords, color='#7f8c8d', weight=3, dash_array='8 6', tooltip=seg.get('label', 'Walk')).add_to(route_layer)
+        elif seg['type'] == 'train':
+            for t_seg in coords:
+                folium.PolyLine(locations=t_seg, color=seg.get('color', '#8e44ad'), weight=6, dash_array='10 6', tooltip=seg.get('label', 'Train')).add_to(route_layer)
+        else: # Jeepney or Bus legs
+            folium.PolyLine(locations=coords, color=seg.get('color', '#e67e22'), weight=6, tooltip=seg.get('label', 'Road')).add_to(route_layer)
+            
+    # Draw stations pins across the whole journey
+    for station in route.get('stations', []):
+        folium.CircleMarker(
+            location=[station['lat'], station['lon']],
+            radius=5, color=route['color'], weight=2, fill=True, fill_color='#fff', fill_opacity=1.0,
+            tooltip=station.get('name', 'Station/Stop')
+        ).add_to(route_layer)
+        
+    route_layer.add_to(m)
+
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -346,6 +370,8 @@ def home():
                         _draw_jeepney_route(route, m)
                     elif route.get('type') == 'bus':
                         _draw_bus_route(route, m)
+                    elif route.get('type') == 'multimodal':     # ADD THIS CHECK
+                        _draw_multimodal_route(route, m)        # ADD THIS CALL
                     else:
                         _draw_road_route(route, m)
 

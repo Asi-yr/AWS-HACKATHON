@@ -40,26 +40,12 @@ body { background-color: #f4f7f6; color: #333; overflow: hidden; height: 100vh; 
 .locate-me-btn:hover { transform: translateY(-50%) scale(1.2); }
 
 /* ── Transport mode selector ───────────────────────────────────────────────── */
-.mode-group-label {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #95a5a6;
-    margin-bottom: 6px;
-    margin-top: 4px;
-}
-
 .mode-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);  /* 4 columns for rail row */
+    grid-template-columns: repeat(4, 1fr); /* 4 equal columns */
     gap: 6px;
-    margin-bottom: 4px;
-}
-
-/* Road row has 3 items — let them stretch naturally */
-.mode-grid:nth-of-type(2) {
-    grid-template-columns: repeat(3, 1fr);
+    margin-bottom: 15px;
+    margin-top: 10px;
 }
 
 .mode-tile {
@@ -67,21 +53,21 @@ body { background-color: #f4f7f6; color: #333; overflow: hidden; height: 100vh; 
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 8px 4px 6px;
+    padding: 10px 4px;
     border: 1.5px solid #e0e0e0;
     border-radius: 8px;
     background: #fafafa;
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.1s;
-    gap: 2px;
-    min-height: 64px;
+    gap: 4px;
+    min-height: 70px;
 }
 
 .mode-tile:hover {
     border-color: var(--mode-color, #2980b9);
     background: #f0f8ff;
-    transform: translateY(-1px);
-    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.08);
 }
 
 .mode-tile.active {
@@ -91,9 +77,8 @@ body { background-color: #f4f7f6; color: #333; overflow: hidden; height: 100vh; 
     box-shadow: 0 0 0 3px rgba(41, 128, 185, 0.12);
 }
 
-.mode-icon  { font-size: 20px; line-height: 1; }
-.mode-name  { font-size: 11px; font-weight: 700; color: #2c3e50; text-align: center; }
-.mode-sub   { font-size: 9px;  color: #95a5a6;  text-align: center; }
+.mode-icon  { font-size: 24px; line-height: 1; }
+.mode-name  { font-size: 12px; font-weight: 700; color: #2c3e50; text-align: center; }
 
 /* ── Route cards ───────────────────────────────────────────────────────────── */
 .route-results { margin-top: 20px; }

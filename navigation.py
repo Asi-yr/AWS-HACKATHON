@@ -378,8 +378,47 @@ def _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat, mode_label, colors)
 
 def get_car_route(orig_lon, orig_lat, dest_lon, dest_lat):
     """Car / private vehicle — OSRM driving."""
-    return _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat,
-                            "Car", _ROUTE_COLORS["car"])
+    return _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat, "Car", _ROUTE_COLORS["car"])
+
+
+# ====
+# new features that will be implemented soon, the motorcycle and the walk mode.
+# when modifying please finally uncomment thanks.
+# ====
+#
+def get_motorcycle_route(orig_lon, orig_lat, dest_lon, dest_lat):
+    """Motorcycle routing — Uses OSRM driving but styled specifically for 2-wheels."""
+    colors =["#8e44ad", "#9b59b6", "#af7ac5"] # Purple theme
+    return _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat, "Motorcycle", colors)
+
+def get_walk_route(orig_lon, orig_lat, dest_lon, dest_lat):
+    """Dedicated walking mode using OSRM Foot profile."""
+    url = (
+        f"{_OSRM_FOOT}/{orig_lon},{orig_lat};{dest_lon},{dest_lat}"
+        f"?overview=full&geometries=geojson"
+    )
+    try:
+        r = requests.get(url, headers={'User-Agent': 'SafeRouteAI'}, timeout=10).json()
+        if r.get("code") == "Ok" and r.get("routes"):
+            route = r["routes"][0]
+            coords = [[pt[1], pt[0]] for pt in route["geometry"]["coordinates"]]
+            return {"routes":[{
+                "id": 0,
+                "name": "Walking Route",
+                "type": "walk",
+                "color": "#2ecc71",
+                "time": f"{int(route['duration'] / 60)} mins",
+                "distance": f"{round(route['distance'] / 1000, 1)} km",
+                "coords": coords,
+                "segments":[],
+                "stations":[],
+                "safety_score": 90,
+                "hazards_flagged": "Pedestrian paths only",
+            }]}
+    except Exception as e:
+        print(f"[walk route] OSRM failed: {e}")
+        
+    return {"error": "Could not calculate walking route."}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1332,19 +1371,140 @@ def get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat):
 #          "total_time": str,
 #          "transfer_points": [{lat,lon,name}...],
 #        }
-#
-#  ENTRY POINT (implement here when ready):
-#
-#    def plan_multimodal_journey(orig_lon, orig_lat, dest_lon, dest_lat, modes: list):
-#        legs = []
-#        for mode in modes:
-#            # call get_osm_railway_geometry() for rail legs
-#            # call get_jeepney_route() / get_bus_route() for road legs
-#            # insert walk legs between transfer points
-#        return {"journey_type": "multimodal", "legs": legs}
-#
-#  In get_navigation_data() below, route to plan_multimodal_journey() when
-#  commuter_type == "multimodal" or when the frontend sends a modes list.
+
+def plan_multimodal_journey(orig_lon, orig_lat, dest_lon, dest_lat, modes=None):
+    """
+    Heuristic multimodal router:
+    Finds the best Train backbone (LRT-1, LRT-2, MRT-3) and merges it with 
+    connecting Jeepney or Walking legs for a seamless combined route.
+    """
+    total_dist_straight = _haversine_m(orig_lat, orig_lon, dest_lat, dest_lon)
+    
+    train_lines =["mrt-3", "lrt-1", "lrt-2"]
+    best_train_data = None
+    best_train = None
+    best_score = float('inf')
+    
+    # 1. Evaluate which Train line connects the journey best
+    for t in train_lines:
+        t_data = get_osm_railway_geometry(t, orig_lat, orig_lon, dest_lat, dest_lon)
+        if t_data and len(t_data['stations']) >= 2:
+            s_start = t_data['stations'][0]
+            s_end   = t_data['stations'][-1]
+            dist_o  = _haversine_m(orig_lat, orig_lon, s_start['lat'], s_start['lon'])
+            dist_d  = _haversine_m(dest_lat, dest_lon, s_end['lat'], s_end['lon'])
+            score   = dist_o + dist_d
+            
+            if score < best_score and score < (total_dist_straight * 1.5):
+                best_score = score
+                best_train = t
+                best_train_data = t_data
+                
+    # Fallback to single modes if train is unviable (e.g. short distances)
+    if not best_train_data:
+        j_route = get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat)
+        if "error" not in j_route and j_route.get("routes"): return j_route
+        b_route = get_bus_route(orig_lon, orig_lat, dest_lon, dest_lat)
+        if "error" not in b_route: return {"routes": [b_route]}
+        return get_car_route(orig_lon, orig_lat, dest_lon, dest_lat)
+
+    # 2. Build the multi-leg segments
+    s_start = best_train_data['stations'][0]
+    s_end   = best_train_data['stations'][-1]
+    
+    # Hardcoded metas to ensure safety during lookup
+    t_meta_dict = {
+        "lrt-1": {"color": "#008000", "label": "LRT-1 (Green)"},
+        "lrt-2": {"color": "#0000CD", "label": "LRT-2 (Blue)"},
+        "mrt-3": {"color": "#DAA520", "label": "MRT-3 (Yellow)"}
+    }
+    t_meta = t_meta_dict.get(best_train, {"color": "#8e44ad", "label": best_train})
+
+    segments =[]
+    total_time_mins = 0
+    total_dist_km = 0.0
+    stations =[]
+
+    # Leg 1: Origin → Train Start (Jeepney or Walk)
+    dist_to_train = _haversine_m(orig_lat, orig_lon, s_start['lat'], s_start['lon'])
+    if dist_to_train > 800:
+        j1 = get_jeepney_route(orig_lon, orig_lat, s_start['lon'], s_start['lat'])
+        if "error" not in j1 and j1.get("routes"):
+            r = j1["routes"][0]
+            segments.extend(r.get("segments",[]))
+            total_time_mins += int(r['time'].replace('~','').replace(' mins',''))
+            total_dist_km += float(r['distance'].replace(' km',''))
+            if 'stations' in r: stations.extend(r['stations'])
+        else:
+            w_coords, w_d, w_t = _get_walk_segment(orig_lat, orig_lon, s_start['lat'], s_start['lon'])
+            if w_coords:
+                segments.append({'type': 'walk', 'coords': w_coords, 'label': f'Walk to {s_start["name"]}', 'color': '#7f8c8d'})
+                total_time_mins += int(w_t/60)
+                total_dist_km += w_d/1000
+    else:
+        w_coords, w_d, w_t = _get_walk_segment(orig_lat, orig_lon, s_start['lat'], s_start['lon'])
+        if w_coords:
+            segments.append({'type': 'walk', 'coords': w_coords, 'label': f'Walk to {s_start["name"]}', 'color': '#7f8c8d'})
+            total_time_mins += int(w_t/60)
+            total_dist_km += w_d/1000
+
+    # Leg 2: The Train Backbone
+    train_dist = sum(_polyline_distance_m(seg) for seg in best_train_data['track_segments'])
+    train_mins = max(1, int(train_dist / (40000 / 60))) # Approx 40km/h
+    segments.append({
+        'type': 'train',
+        'coords': best_train_data['track_segments'],
+        'color': t_meta['color'],
+        'label': t_meta['label']
+    })
+    total_time_mins += train_mins
+    total_dist_km += train_dist / 1000
+    stations.extend(best_train_data['stations'])
+
+    # Leg 3: Train End → Destination (Jeepney or Walk)
+    dist_from_train = _haversine_m(s_end['lat'], s_end['lon'], dest_lat, dest_lon)
+    if dist_from_train > 800:
+        j2 = get_jeepney_route(s_end['lon'], s_end['lat'], dest_lon, dest_lat)
+        if "error" not in j2 and j2.get("routes"):
+            r = j2["routes"][0]
+            segments.extend(r.get("segments",[]))
+            total_time_mins += int(r['time'].replace('~','').replace(' mins',''))
+            total_dist_km += float(r['distance'].replace(' km',''))
+            if 'stations' in r: stations.extend(r['stations'])
+        else:
+            w_coords, w_d, w_t = _get_walk_segment(s_end['lat'], s_end['lon'], dest_lat, dest_lon)
+            if w_coords:
+                segments.append({'type': 'walk', 'coords': w_coords, 'label': f'Walk to dest', 'color': '#7f8c8d'})
+                total_time_mins += int(w_t/60)
+                total_dist_km += w_d/1000
+    else:
+        w_coords, w_d, w_t = _get_walk_segment(s_end['lat'], s_end['lon'], dest_lat, dest_lon)
+        if w_coords:
+            segments.append({'type': 'walk', 'coords': w_coords, 'label': f'Walk to dest', 'color': '#7f8c8d'})
+            total_time_mins += int(w_t/60)
+            total_dist_km += w_d/1000
+
+    # Compile the full map polyline path
+    all_coords = []
+    for seg in segments:
+        if seg['type'] == 'train':
+            for t_seg in seg['coords']: all_coords.extend(t_seg)
+        else:
+            all_coords.extend(seg['coords'])
+
+    return {"routes":[{
+        "id": 0,
+        "name": f"Combined via {t_meta['label']}",
+        "type": "multimodal",
+        "color": "#9b59b6",
+        "time": f"~{total_time_mins} mins",
+        "distance": f"{total_dist_km:.1f} km",
+        "coords": all_coords,
+        "segments": segments,
+        "stations": stations,
+        "safety_score": 85,
+        "hazards_flagged": "Multiple transfers required",
+    }]}
 
 
 # ── 7. Public API — get_navigation_data() ────────────────────────────────────
@@ -1368,38 +1528,17 @@ _TRAIN_META = {
 def get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, flood_zones):
     ctype = commuter_type.lower().strip()
 
-    # ── Train lines — DO NOT move or reorder this block
-    if ctype in _TRAIN_TYPES or any(x in ctype for x in ["train", "rail", "lrt", "mrt", "pnr"]):
-        meta   = _TRAIN_META.get(ctype, {"color": "#8e44ad", "label": commuter_type})
-        result = get_osm_railway_geometry(ctype, orig_lat, orig_lon, dest_lat, dest_lon)
-        if not result:
-            return {"error": (
-                f"Could not find route for '{commuter_type}'. "
-                "The line may be missing from OSM or both stops may be the same."
-            )}
-        return {"routes": [{
-            "id":              0,
-            "name":            meta["label"],
-            "type":            "train",
-            "color":           meta["color"],
-            "time":            "N/A",
-            "distance":        "N/A",
-            "coords":          result['track_segments'],
-            "segments":        [],
-            "stations":        result['stations'],
-            "safety_score":    95,
-            "hazards_flagged": "Clear",
-        }]}
+    # 1. TRANSIT -> Routes completely through the smart multimodal engine
+    if ctype == "transit":
+        return plan_multimodal_journey(orig_lon, orig_lat, dest_lon, dest_lat)
 
-    # ── Jeepney: JSON-backed designated-route matching
-    if ctype == "jeepney":
-        return get_jeepney_route(orig_lon, orig_lat, dest_lon, dest_lat)
+    # 2. WALK -> Dedicated OSRM foot routing
+    if ctype == "walk":
+        return get_walk_route(orig_lon, orig_lat, dest_lon, dest_lat)
 
-    if ctype == "bus":
-        result = get_bus_route(orig_lon, orig_lat, dest_lon, dest_lat)
-        if "error" in result:
-            return result
-        return {"routes": [result]}
+    # 3. MOTORCYCLE -> Dedicated OSRM routing
+    if ctype == "motorcycle":
+        return get_motorcycle_route(orig_lon, orig_lat, dest_lon, dest_lat)
 
-    # ── Default: car / unrecognised → OSRM car routing
+    # 4. CAR (Default) -> Dedicated OSRM driving
     return get_car_route(orig_lon, orig_lat, dest_lon, dest_lat)
