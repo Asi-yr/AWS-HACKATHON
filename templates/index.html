@@ -1,300 +1,630 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <title>SafeRouteAI Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SafeRouteAI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
-
 <body>
-    <div class="app-container">
-        <!-- Sidebar -->
-        <div class="sidebar">
-            <div class="header">
-                <h2>SafeRouteAI</h2>
-                <span class="user-info">Hi, {{ user }} | <a href="/logout">Logout</a></span>
-            </div>
 
-            {% with messages = get_flashed_messages() %}
-            {% if messages %}
-            {% for message in messages %}
-            <div class="flash-message">{{ message }}</div>
-            {% endfor %}
-            {% endif %}
-            {% endwith %}
+<div class="app-container">
 
-            <form class="controls" method="POST" action="/" id="route-form">
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <!--  SIDEBAR                                                            -->
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <div class="sidebar">
 
-                <!-- Origin -->
-                <label class="input-label">Starting Location</label>
-                <div class="input-with-icon">
-                    <input type="text" name="origin" id="origin" placeholder="Type address or Lat, Lon" required
-                        autocomplete="off">
-                    <button type="button" class="locate-me-btn" title="Use Current Location"
-                        onclick="useCurrentLocation('origin')">🎯</button>
-                </div>
-
-                <!-- Destination -->
-                <label class="input-label">Destination</label>
-                <div class="input-with-icon">
-                    <input type="text" name="destination" id="destination" placeholder="Type address or Lat, Lon"
-                        required autocomplete="off">
-                    <button type="button" class="locate-me-btn" title="Use Current Location"
-                        onclick="useCurrentLocation('destination')">🎯</button>
-                </div>
-
-                <!-- Transport Mode Selector -->
-                <input type="hidden" name="commuterType" id="commuter-type-value" value="transit">
-
-                <label class="input-label">Transport Mode</label>
-                <div class="mode-grid">
-                    <button type="button" class="mode-tile" data-value="car" data-color="#3498db"
-                        onclick="selectMode(this)">
-                        <span class="mode-icon">🚗</span>
-                        <span class="mode-name">Car</span>
-                    </button>
-                    <button type="button" class="mode-tile" data-value="motorcycle" data-color="#8e44ad"
-                        onclick="selectMode(this)">
-                        <span class="mode-icon">🏍️</span>
-                        <span class="mode-name">Motorcycle</span>
-                    </button>
-                    <button type="button" class="mode-tile active" data-value="transit" data-color="#2980b9"
-                        onclick="selectMode(this)">
-                        <span class="mode-icon">🚇</span>
-                        <span class="mode-name">Transit</span>
-                    </button>
-                    <button type="button" class="mode-tile" data-value="walk" data-color="#2ecc71"
-                        onclick="selectMode(this)">
-                        <span class="mode-icon">🚶</span>
-                        <span class="mode-name">Walk</span>
-                    </button>
-                </div>
-
-                <button type="submit" class="btn-primary" id="submit-btn">
-                    Find Safe Routes
-                </button>
-            </form>
-
-            <!-- Route result cards -->
-            <div id="route-results" class="route-results">
-                {% for route in routes %}
-
-                {# ── Transit card (single or transfer) ─────────────────────────── #}
-                {% if route.type == 'transit' %}
-                <div class="route-card transit-card" style="border-left-color: {{ route.color }};"
-                    data-route-id="{{ loop.index0 }}" onmouseenter="highlightRoute({{ loop.index0 }})"
-                    onmouseleave="unhighlightRoute()">
-                    <div class="route-title" style="color: {{ route.color }}">
-                        🚇 {{ route.name }}
-                    </div>
-                    <div class="route-stats">
-                        <span>🕒 {{ route.time }}</span>
-                        <span>📏 {{ route.distance }}</span>
-                    </div>
-                    <div class="transit-legs">
-                        {% for seg in route.segments %}
-                        {% if seg.type == 'walk' %}
-                        <div class="leg-row walk-leg">
-                            <span class="leg-icon">🚶</span>
-                            <span class="leg-desc">{{ seg.label }}</span>
-                        </div>
-                        {% elif seg.type == 'train' %}
-                        <div class="leg-row train-leg" style="color: {{ seg.color }};">
-                            <span class="leg-icon">🚇</span>
-                            <span class="leg-desc">{{ seg.label }}</span>
-                        </div>
-                        {% endif %}
-                        {% endfor %}
-                    </div>
-                    <div class="route-safety">
-                        Safety: {{ route.safety_score }}/100 &nbsp;|&nbsp; {{ route.hazards_flagged }}
-                    </div>
-                </div>
-
-                {# ── Car / Walk / Motorcycle / fallback card ───────────────────── #}
-                {% else %}
-                <div class="route-card" style="border-left-color: {{ route.color }};" data-route-id="{{ loop.index0 }}"
-                    onmouseenter="highlightRoute({{ loop.index0 }})" onmouseleave="unhighlightRoute()">
-                    <div class="route-title" style="color: {{ route.color }}">{{ route.name }}</div>
-                    <div class="route-stats">
-                        <span>🕒 {{ route.time }}</span>
-                        <span>📏 {{ route.distance }}</span>
-                    </div>
-                    <div class="route-safety">
-                        Safety: {{ route.safety_score }}/100 &nbsp;|&nbsp; {{ route.hazards_flagged }}
-                    </div>
-                </div>
-                {% endif %}
-
-                {% endfor %}
-            </div>
-        </div>
-
-        <!-- Map -->
-        <div class="map-area">
-            <div class="map-overlay-controls">
-                <button type="button" id="pinpoint-btn" title="Toggle Pinpoint Mode"
-                    onclick="togglePinpoint()">📍</button>
-                <div id="pick-status" class="pick-status-label">Pinpoint Mode ON</div>
-            </div>
-            <iframe id="map-frame" srcdoc="{{ map_html | escape }}" width="100%" height="100%"
-                style="border:none;"></iframe>
-        </div>
+    <div class="header">
+      <h2>🛡️ SafeRouteAI</h2>
+      <div class="user-info">
+        Logged in as <strong>{{ username }}</strong> &nbsp;·&nbsp;
+        <a href="/logout">Logout</a>
+      </div>
     </div>
 
-    <script>
-        // ── Transport mode tile selector ─────────────────────────────────────
-        function selectMode(tile) {
-            document.querySelectorAll('.mode-tile').forEach(t => t.classList.remove('active'));
-            tile.classList.add('active');
-            document.getElementById('commuter-type-value').value = tile.dataset.value;
-            document.documentElement.style.setProperty('--mode-color', tile.dataset.color);
-        }
-        document.documentElement.style.setProperty('--mode-color', '#2980b9');
+    <!-- Flash messages -->
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        {% for msg in messages %}
+          <div class="flash-message">{{ msg }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
 
-        // ── Route card hover → bring that layer to front in map iframe ───────
-        function highlightRoute(routeIdx) {
-            const iframe = document.getElementById('map-frame');
-            if (iframe && iframe.contentWindow)
-                iframe.contentWindow.postMessage({ type: 'highlight_route', idx: routeIdx }, '*');
-        }
-        function unhighlightRoute() {
-            const iframe = document.getElementById('map-frame');
-            if (iframe && iframe.contentWindow)
-                iframe.contentWindow.postMessage({ type: 'unhighlight_route' }, '*');
-        }
+    <div class="controls">
 
-        // ── Pinpoint / map-click logic ───────────────────────────────────────
-        let isPinpointing = false;
+      <!-- Origin -->
+      <label class="input-label">📍 Origin</label>
+      <div class="input-with-icon">
+        <input id="origin-input" type="text" placeholder="Starting point or address…" autocomplete="off" />
+        <button class="locate-me-btn" id="locate-origin-btn" title="Use my current location">📡</button>
+      </div>
 
-        function updatePinpointStatus() {
-            const originVal = document.getElementById('origin').value;
-            const statusLabel = document.getElementById('pick-status');
-            if (!originVal || originVal.trim() === "") {
-                statusLabel.innerText = "📍 Click map → set START (Green)";
-                statusLabel.style.background = "#27ae60";
-            } else {
-                statusLabel.innerText = "📍 Click map → set DESTINATION (Red)";
-                statusLabel.style.background = "#c0392b";
-            }
-        }
+      <!-- Destination -->
+      <label class="input-label">🏁 Destination</label>
+      <div class="input-with-icon">
+        <input id="dest-input" type="text" placeholder="Where are you going?" autocomplete="off" />
+        <button class="locate-me-btn" id="locate-dest-btn" title="Pin destination on map">📌</button>
+      </div>
 
-        function togglePinpoint() {
-            isPinpointing = !isPinpointing;
-            const btn = document.getElementById("pinpoint-btn");
-            const status = document.getElementById("pick-status");
-            if (isPinpointing) {
-                btn.classList.add("active");
-                status.style.display = "block";
-                updatePinpointStatus();
-            } else {
-                btn.classList.remove("active");
-                status.style.display = "none";
-            }
-        }
+      <!-- Transport Mode (4 tiles only) -->
+      <label class="input-label">🚦 Transport Mode</label>
+      <div class="mode-grid" id="mode-grid">
+        <div class="mode-tile" data-mode="car"        data-color="#e74c3c">
+          <span class="mode-icon">🚗</span>
+          <span class="mode-name">Car</span>
+        </div>
+        <div class="mode-tile" data-mode="motorcycle" data-color="#e67e22">
+          <span class="mode-icon">🏍️</span>
+          <span class="mode-name">Motorcycle</span>
+        </div>
+        <div class="mode-tile active" data-mode="transit" data-color="#2980b9" id="transit-tile">
+          <span class="mode-icon">🚌</span>
+          <span class="mode-name">Transit</span>
+        </div>
+        <div class="mode-tile" data-mode="walk" data-color="#27ae60">
+          <span class="mode-icon">🚶</span>
+          <span class="mode-name">Walk</span>
+        </div>
+      </div>
 
-        function sendDrawCommand(lat, lng, kind) {
-            const iframe = document.getElementById('map-frame');
-            if (iframe && iframe.contentWindow)
-                iframe.contentWindow.postMessage({ type: 'draw_marker', lat, lng, kind }, '*');
-        }
+      <!-- Sub-toggle: only visible when Transit is the active mode -->
+      <div class="transit-subtoggle" id="transit-subtoggle">
+        <div class="sub-tile active" data-submode="train" id="sub-train">🚇 Train</div>
+        <div class="sub-tile" data-submode="jeepney" id="sub-jeepney">🚌 Jeepney/Bus</div>
+      </div>
 
-        window.addEventListener("message", function (event) {
-            if (event.data && event.data.type === 'map_click' && isPinpointing) {
-                const { lat, lng } = event.data;
-                const coord = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-                const originBox = document.getElementById('origin');
-                const destBox = document.getElementById('destination');
+      <button class="btn-primary" id="find-routes-btn" disabled>
+        🔍 Find Safe Routes
+      </button>
+    </div>
 
-                if (!originBox.value || originBox.value.trim() === "") {
-                    originBox.value = coord;
-                    sendDrawCommand(lat, lng, 'origin');
-                    updatePinpointStatus();
-                    // NOT auto-submitting — user must click Find Safe Routes
-                } else {
-                    destBox.value = coord;
-                    sendDrawCommand(lat, lng, 'destination');
-                    togglePinpoint();
-                    // NOT auto-submitting — user must click Find Safe Routes
-                }
-            }
+    <!-- Route results -->
+    <div class="route-results" id="route-results"></div>
+
+  </div><!-- /sidebar -->
+
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <!--  MAP AREA                                                           -->
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <div class="map-area" id="map-area">
+    <div id="map" style="width:100%;height:100%;"></div>
+
+    <!-- Overlay controls -->
+    <div class="map-overlay-controls">
+      <button id="pinpoint-btn" title="Pick location on map">📌</button>
+      <span class="pick-status-label" id="pick-status-label">Click map to set location</span>
+    </div>
+  </div>
+
+</div><!-- /app-container -->
+
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+//  SafeRouteAI — Frontend JavaScript
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Map init ──────────────────────────────────────────────────────────────────
+const map = L.map('map').setView([14.5995, 120.9842], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors', maxZoom: 19
+}).addTo(map);
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let origCoords  = null;   // {lat, lon}
+let destCoords  = null;   // {lat, lon}
+let activeMode  = 'train';  // sub-toggle defaults to Train
+let pinTarget   = null;   // 'origin' | 'dest' | null
+let origMarker  = null;
+let destMarker  = null;
+let routeLayers = [];     // [{routeId, layers:[…]}, …]
+let activeRouteId = null;
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
+const mkIcon = (color, sym) => L.divIcon({
+  className: '',
+  html: `<div style="
+    background:${color};color:white;font-size:16px;
+    width:32px;height:32px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 6px rgba(0,0,0,.35);border:2px solid white;">
+    ${sym}</div>`,
+  iconSize: [32, 32], iconAnchor: [16, 16],
+});
+
+// Small white circle icon for transfer points (boarding/alighting)
+const transferIcon = (iconStr) => L.divIcon({
+  className: '',
+  html: `<div style="
+    background:white; color:#444; font-size:12px;
+    width:20px; height:20px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 1px 3px rgba(0,0,0,0.4); border:2px solid #666;">
+    ${iconStr}</div>`,
+  iconSize: [20, 20], iconAnchor: [10, 10],
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+let nearbyLayers = [];
+
+async function fetchAndDrawNearby(lat, lon) {
+    try {
+        // Reduced radius to 1000m to avoid clutter
+        const resp = await fetch(`/api/nearby?lat=${lat}&lon=${lon}&radius=1000`);
+        const data = await resp.json();
+        
+        const circle = L.circle([lat, lon], {
+            color: '#e74c3c',
+            fillColor: '#e74c3c',
+            fillOpacity: 0.08,
+            radius: 1000,
+            dashArray: '6, 6',
+            weight: 2
+        }).addTo(map);
+        nearbyLayers.push(circle);
+        
+        data.forEach(stop => {
+            let iconStr = '📍';
+            if (stop.type === 'jeepney') iconStr = '🚌';
+            if (stop.type === 'bus') iconStr = '🚍';
+            if (stop.type === 'train') iconStr = '🚇';
+            
+            const marker = L.marker([stop.lat, stop.lon], {
+                icon: mkIcon(stop.color, iconStr)
+            }).addTo(map).bindTooltip(`<b>${stop.route_name}</b><br>${stop.name}<br>Distance: ${Math.round(stop.dist)}m`);
+            
+            nearbyLayers.push(marker);
         });
+    } catch (e) { console.error("Failed to fetch nearby transit", e); }
+}
 
-        function useCurrentLocation(targetInputId) {
-            if (!navigator.geolocation) return alert("Geolocation not supported.");
-            const box = document.getElementById(targetInputId);
-            box.value = "Locating…";
-            navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                    const lat = pos.coords.latitude;
-                    const lng = pos.coords.longitude;
-                    box.value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-                    if (isPinpointing) updatePinpointStatus();
-                    sendDrawCommand(lat, lng, targetInputId === 'origin' ? 'origin' : 'destination');
-                    // NOT auto-submitting — user must click Find Safe Routes
-                },
-                () => { box.value = ""; alert("Could not retrieve location."); }
-            );
+function clearNearby() {
+    nearbyLayers.forEach(l => map.removeLayer(l));
+    nearbyLayers = [];
+}
+
+function setOrigin(lat, lon, label) {
+  origCoords = {lat, lon};
+  document.getElementById('origin-input').value = label || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  if (origMarker) map.removeLayer(origMarker);
+  origMarker = L.marker([lat, lon], {icon: mkIcon('#2980b9', '📍')})
+    .addTo(map).bindPopup('Origin').openPopup();
+  
+  clearNearby();
+  fetchAndDrawNearby(lat, lon);
+  if (destCoords) fetchAndDrawNearby(destCoords.lat, destCoords.lon);
+  
+  checkEnableButton();
+}
+
+function setDest(lat, lon, label) {
+  destCoords = {lat, lon};
+  document.getElementById('dest-input').value = label || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  if (destMarker) map.removeLayer(destMarker);
+  destMarker = L.marker([lat, lon], {icon: mkIcon('#e74c3c', '🏁')})
+    .addTo(map).bindPopup('Destination').openPopup();
+    
+  clearNearby();
+  fetchAndDrawNearby(lat, lon);
+  if (origCoords) fetchAndDrawNearby(origCoords.lat, origCoords.lon);
+  
+  checkEnableButton();
+}
+
+function checkEnableButton() {
+  const originFilled = origCoords || document.getElementById('origin-input').value.trim();
+  const destFilled   = destCoords || document.getElementById('dest-input').value.trim();
+  document.getElementById('find-routes-btn').disabled = !(originFilled && destFilled);
+}
+
+function clearRoutes() {
+  routeLayers.forEach(r => r.layers.forEach(l => map.removeLayer(l)));
+  routeLayers = [];
+  nearbyLayers.forEach(l => map.removeLayer(l)); // Also clear detection circles when route is found
+  nearbyLayers = [];
+  activeRouteId = null;
+}
+
+// ── Mode selector ─────────────────────────────────────────────────────────────
+// Fixed colors per mode — never changes
+const MODE_COLORS = {
+  car:        '#e74c3c',
+  motorcycle: '#8e44ad',
+  transit:    '#2980b9',
+  train:      '#27ae60',
+  jeepney:    '#e67e22',
+  walk:       '#27ae60',
+};
+
+// activeSubMode tracks the sub-toggle under Transit
+let activeSubMode = 'train';   // default sub-mode
+
+document.querySelectorAll('.mode-tile').forEach(tile => {
+  tile.addEventListener('click', () => {
+    document.querySelectorAll('.mode-tile').forEach(t => t.classList.remove('active'));
+    tile.classList.add('active');
+    const base = tile.dataset.mode;
+    // If transit, actual API mode is the sub-mode
+    activeMode = (base === 'transit') ? activeSubMode : base;
+    const color = MODE_COLORS[base] || tile.dataset.color;
+    document.documentElement.style.setProperty('--mode-color', color);
+    // Show/hide sub-toggle
+    document.getElementById('transit-subtoggle').classList.toggle('visible', base === 'transit');
+  });
+});
+
+// Sub-toggle (Train / Jeepney·Bus)
+document.querySelectorAll('.sub-tile').forEach(tile => {
+  tile.addEventListener('click', () => {
+    document.querySelectorAll('.sub-tile').forEach(t => t.classList.remove('active'));
+    tile.classList.add('active');
+    activeSubMode = tile.dataset.submode;
+    // Only update activeMode if the Transit parent tile is currently active
+    const transitTileActive = document.getElementById('transit-tile').classList.contains('active');
+    if (transitTileActive) {
+      activeMode = activeSubMode;
+      const color = MODE_COLORS[activeSubMode] || '#2980b9';
+      document.documentElement.style.setProperty('--mode-color', color);
+    }
+  });
+});
+
+// Show sub-toggle on load since Transit is the default active tile
+document.getElementById('transit-subtoggle').classList.add('visible');
+
+// ── Locate-me (origin) ────────────────────────────────────────────────────────
+document.getElementById('locate-origin-btn').addEventListener('click', () => {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(pos => {
+    setOrigin(pos.coords.latitude, pos.coords.longitude, 'My Location');
+    map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+  });
+});
+
+// ── Pinpoint button ───────────────────────────────────────────────────────────
+const pinBtn   = document.getElementById('pinpoint-btn');
+const pinLabel = document.getElementById('pick-status-label');
+
+document.getElementById('locate-dest-btn').addEventListener('click', () => {
+  startPinPick('dest');
+});
+
+function startPinPick(target) {
+  pinTarget = target;
+  pinBtn.classList.add('active');
+  pinLabel.style.display = 'block';
+  pinLabel.textContent = target === 'origin'
+    ? 'Click map to set origin…'
+    : 'Click map to set destination…';
+  map.getContainer().style.cursor = 'crosshair';
+}
+
+pinBtn.addEventListener('click', () => {
+  if (pinTarget) {
+    endPinPick();
+  } else {
+    startPinPick(origCoords ? 'dest' : 'origin');
+  }
+});
+
+function endPinPick() {
+  pinTarget = null;
+  pinBtn.classList.remove('active');
+  pinLabel.style.display = 'none';
+  map.getContainer().style.cursor = '';
+}
+
+map.on('click', e => {
+  if (!pinTarget) return;
+  const {lat, lng} = e.latlng;
+  if (pinTarget === 'origin') setOrigin(lat, lng);
+  else                        setDest(lat, lng);
+  endPinPick();
+});
+
+// ── Input change listeners (just validate, NOT auto-search) ───────────────────
+document.getElementById('origin-input').addEventListener('input', () => {
+  if (!document.getElementById('origin-input').value.trim()) origCoords = null;
+  checkEnableButton();
+});
+document.getElementById('dest-input').addEventListener('input', () => {
+  if (!document.getElementById('dest-input').value.trim()) destCoords = null;
+  checkEnableButton();
+});
+
+// ── Find Routes button ────────────────────────────────────────────────────────
+document.getElementById('find-routes-btn').addEventListener('click', findRoutes);
+
+async function findRoutes() {
+  const btn = document.getElementById('find-routes-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Searching…';
+  clearRoutes();
+  document.getElementById('route-results').innerHTML =
+    '<div style="text-align:center;padding:20px;color:#7f8c8d">Fetching routes…</div>';
+
+  const body = {
+    mode:        activeMode,
+    origin:      document.getElementById('origin-input').value.trim(),
+    destination: document.getElementById('dest-input').value.trim(),
+  };
+  if (origCoords) body.orig_coords = origCoords;
+  if (destCoords) body.dest_coords = destCoords;
+
+  try {
+    const resp = await fetch('/api/route', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      showError(data.error);
+    } else if (data.routes && data.routes.length) {
+      renderRouteCards(data.routes);
+      drawAllRoutes(data.routes);
+      // Auto-highlight first card
+      highlightRoute(data.routes[0].id);
+    } else {
+      showError('No routes found.');
+    }
+  } catch (e) {
+    showError('Network error: ' + e.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🔍 Find Safe Routes';
+}
+
+function showError(msg) {
+  document.getElementById('route-results').innerHTML =
+    `<div class="flash-message">${msg}</div>`;
+}
+
+
+// ── Route card rendering ──────────────────────────────────────────────────────
+
+function safetyColor(score) {
+  if (score >= 80) return '#27ae60';
+  if (score >= 60) return '#f39c12';
+  return '#e74c3c';
+}
+
+function renderRouteCards(routes) {
+  const container = document.getElementById('route-results');
+  container.innerHTML = '';
+
+  routes.forEach(route => {
+    const card = document.createElement('div');
+    card.className  = 'route-card';
+    card.dataset.id = route.id;
+    card.style.borderLeftColor = route.color;
+
+    // ── Header row: colored line dot + name ──────────────────────────────
+    const isTransfer = (route.line || '').includes('+');
+    let headerHTML = '';
+
+    if (route.type === 'transit') {
+      if (isTransfer) {
+        // Two-line combo
+        const [la, lb] = (route.line || '').split('+');
+        headerHTML = `
+          <div class="route-line-header">
+            <span class="line-dot" style="background:${route.color}"></span>
+            <span class="line-dot secondary" style="background:${route.secondary_color || '#999'}"></span>
+            <span class="route-title">${escHtml(route.name)}</span>
+          </div>
+          <div class="route-subtitle">${escHtml(route.subtitle || '')}</div>`;
+      } else {
+        headerHTML = `
+          <div class="route-line-header">
+            <span class="line-dot" style="background:${route.color}"></span>
+            <span class="route-title">${escHtml(route.name)}</span>
+            <span class="line-subtitle-badge">${escHtml(route.subtitle || '')}</span>
+          </div>`;
+      }
+    } else {
+      headerHTML = `<div class="route-title">${escHtml(route.name)}</div>`;
+    }
+
+    // ── Stats row ────────────────────────────────────────────────────────
+    const statsHTML = `
+      <div class="route-stats">
+        <span>⏱ ${escHtml(route.time)}</span>
+        <span>📏 ${escHtml(route.distance)}</span>
+      </div>`;
+
+    // ── Safety badge ─────────────────────────────────────────────────────
+    const sc = route.safety_score || 0;
+    const safetyHTML = `
+      <div class="route-safety" style="color:${safetyColor(sc)}">
+        🛡️ Safety Score: ${sc}/100
+      </div>`;
+
+    // ── Station count / hazards ───────────────────────────────────────────
+    const infoHTML = route.station_count
+      ? `<div class="route-stations-count">🚉 ${route.station_count} station(s) · ${escHtml(route.hazards_flagged || '')}</div>`
+      : `<div class="route-stations-count">${escHtml(route.hazards_flagged || '')}</div>`;
+
+    // ── Leg breakdown for transit ────────────────────────────────────────
+    let legsHTML = '';
+    if (route.type === 'transit' && route.segments) {
+      const legItems = route.segments.map(seg => {
+        if (seg.type === 'walk') {
+          return `<div class="leg-row walk-leg">
+            <span class="leg-icon">🚶</span>
+            <span class="leg-desc">${escHtml(seg.label || 'Walk')}</span>
+          </div>`;
+        } else if (seg.type === 'train') {
+          return `<div class="leg-row jeep-leg" style="color:${seg.color || '#333'}">
+            <span class="leg-icon">🚇</span>
+            <span class="leg-desc">${escHtml(seg.label || 'Train')}</span>
+          </div>`;
+        } else if (seg.type === 'jeepney') {
+          return `<div class="leg-row jeep-leg" style="color:#e67e22">
+            <span class="leg-icon">🚌</span>
+            <span class="leg-desc">${escHtml(seg.label || 'Jeepney')}</span>
+          </div>`;
+        } else if (seg.type === 'bus') {
+          return `<div class="leg-row jeep-leg" style="color:#16a085">
+            <span class="leg-icon">🚌</span>
+            <span class="leg-desc">${escHtml(seg.label || 'Bus')}</span>
+          </div>`;
         }
-        function setupAutocomplete(inputId) {
-            const input = document.getElementById(inputId);
+        return '';
+      }).join('');
+      if (legItems) {
+        legsHTML = `<div class="jeepney-legs">${legItems}</div>`;
+      }
+    }
 
-            const dropdown = document.createElement('div');
-            dropdown.className = 'autocomplete-dropdown';
-            dropdown.id = inputId + '-dropdown';
-            input.parentElement.appendChild(dropdown);
+    card.innerHTML = headerHTML + statsHTML + safetyHTML + infoHTML + legsHTML;
 
-            let debounceTimer = null;
+    // Hover: bring this route's layers to front, dim others
+    card.addEventListener('mouseenter', () => highlightRoute(route.id));
+    card.addEventListener('mouseleave', () => highlightRoute(activeRouteId));
+    card.addEventListener('click',      () => {
+      activeRouteId = route.id;
+      highlightRoute(route.id);
+      fitRoute(route.id);
+      document.querySelectorAll('.route-card').forEach(c =>
+        c.classList.toggle('selected', c.dataset.id == route.id));
+    });
 
-            input.addEventListener('input', function () {
-                clearTimeout(debounceTimer);
-                const query = input.value.trim();
-                dropdown.innerHTML = '';
-                dropdown.style.display = 'none';
-                if (query.length < 3) return;
+    container.appendChild(card);
+  });
+}
 
-                debounceTimer = setTimeout(async () => {
-                    try {
-                        const res = await fetch(`/api/suggest?q=${encodeURIComponent(query)}`);
-                        const results = await res.json();
-                        if (!results.length) return;
 
-                        results.forEach(place => {
-                            const item = document.createElement('div');
-                            item.className = 'autocomplete-item';
-                            item.textContent = place.display_name;
-                            item.addEventListener('mousedown', function (e) {
-                                e.preventDefault();
-                                input.value = `${parseFloat(place.lat).toFixed(6)}, ${parseFloat(place.lon).toFixed(6)}`;
-                                dropdown.innerHTML = '';
-                                dropdown.style.display = 'none';
-                                sendDrawCommand(
-                                    parseFloat(place.lat),
-                                    parseFloat(place.lon),
-                                    inputId === 'origin' ? 'origin' : 'destination'
-                                );
-                            });
-                            dropdown.appendChild(item);
-                        });
-                        dropdown.style.display = 'block';
-                    } catch (e) {
-                        console.error('Autocomplete fetch failed:', e);
-                    }
-                }, 350);
-            });
+// ── Map drawing ───────────────────────────────────────────────────────────────
 
-            input.addEventListener('blur', () => {
-                setTimeout(() => {
-                    dropdown.innerHTML = '';
-                    dropdown.style.display = 'none';
-                }, 150);
-            });
+function drawAllRoutes(routes) {
+  routes.forEach(route => {
+    const layers = [];
+    
+    if (route.type === 'transit' && route.segments) {
+      route.segments.forEach((seg, idx) => {
+        // Draw the polyline for this segment
+        if (seg.type === 'train') {
+          const coordSets = Array.isArray(seg.coords[0]) && Array.isArray(seg.coords[0][0])
+            ? seg.coords : [seg.coords];
+          coordSets.forEach(cs => {
+            if (cs && cs.length >= 2) {
+              layers.push(L.polyline(cs, {
+                color: seg.color || route.color, weight: 6, opacity: 0.9,
+                dashArray: '12, 5',
+              }).addTo(map));
+            }
+          });
+          // Station pins
+          (seg.stations || []).forEach((st, i) => {
+            const isEnd = (i === 0 || i === seg.stations.length - 1);
+            layers.push(L.circleMarker([st.lat, st.lon], {
+              radius: isEnd ? 8 : 5,
+              color: seg.color || route.color,
+              fillColor: isEnd ? (seg.color || route.color) : 'white',
+              fillOpacity: 1, weight: 2,
+            }).addTo(map).bindPopup(st.name));
+          });
+        } else if (seg.type === 'jeepney' && seg.coords && seg.coords.length >= 2) {
+          layers.push(L.polyline(seg.coords, {
+            color: seg.color || '#e67e22', weight: 5, opacity: 0.88,
+          }).addTo(map));
+        } else if (seg.type === 'walk' && seg.coords && seg.coords.length >= 2) {
+          layers.push(L.polyline(seg.coords, {
+            color: '#555', weight: 4, opacity: 0.8,
+            dashArray: '10, 10',
+          }).addTo(map));
         }
 
-        setupAutocomplete('origin');
-        setupAutocomplete('destination');
-    </script>
+        // ── ADD TRANSFER MARKERS ──
+        // If this is NOT the first segment, place a marker at the start of this segment
+        // to indicate "Board Here" or "Transfer Here"
+        if (idx > 0 && seg.coords && seg.coords.length > 0) {
+            let startPt = seg.coords[0];
+            // Handle nested coords for train
+            if (seg.type === 'train' && Array.isArray(startPt) && Array.isArray(startPt[0])) {
+                startPt = startPt[0];
+            }
+            
+            let iconChar = '🔄';
+            if (seg.type === 'train') iconChar = '🚇';
+            if (seg.type === 'jeepney') iconChar = '🚌';
+            if (seg.type === 'bus') iconChar = '🚍';
+            if (seg.type === 'walk') iconChar = '🚶';
+
+            layers.push(L.marker(startPt, {
+                icon: transferIcon(iconChar),
+                zIndexOffset: 1000
+            }).addTo(map).bindTooltip(seg.label || "Transfer"));
+        }
+      });
+    } else if (route.coords && route.coords.length >= 2) {
+      layers.push(L.polyline(route.coords, {
+        color: route.color, weight: 5, opacity: 0.85,
+      }).addTo(map));
+    }
+
+    routeLayers.push({routeId: route.id, layers});
+  });
+
+  // Fit map to all routes
+  const allCoords = routes.flatMap(r => r.coords || []);
+  if (allCoords.length) {
+    map.fitBounds(L.latLngBounds(allCoords), {padding: [40, 40]});
+  }
+}
+
+
+// ── Route highlight on hover ──────────────────────────────────────────────────
+//  The hovered card's route layers are brought to the FRONT and fully opaque.
+//  All other routes are dimmed to 0.18 opacity (still visible, not hidden).
+
+function highlightRoute(routeId) {
+  routeLayers.forEach(group => {
+    const isActive = group.routeId === routeId || routeId === null;
+    group.layers.forEach(layer => {
+      if (layer.setStyle) {
+        layer.setStyle({opacity: isActive ? 0.9 : 0.18,
+                        fillOpacity: isActive ? 1 : 0.18});
+      }
+      if (isActive && layer.bringToFront) layer.bringToFront();
+    });
+  });
+
+  // Highlight the card
+  document.querySelectorAll('.route-card').forEach(c => {
+    c.classList.toggle('highlighted', c.dataset.id == routeId);
+  });
+}
+
+function fitRoute(routeId) {
+  const group = routeLayers.find(g => g.routeId === routeId);
+  if (!group) return;
+  const bounds = [];
+  group.layers.forEach(l => {
+    if (l.getLatLngs) {
+      const flat = l.getLatLngs();
+      (Array.isArray(flat[0]) ? flat.flat() : flat).forEach(p => {
+        if (p.lat) bounds.push([p.lat, p.lng]);
+      });
+    } else if (l.getLatLng) {
+      const p = l.getLatLng();
+      bounds.push([p.lat, p.lng]);
+    }
+  });
+  if (bounds.length) map.fitBounds(L.latLngBounds(bounds), {padding: [50, 50]});
+}
+
+function escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+
 </body>
-
 </html>

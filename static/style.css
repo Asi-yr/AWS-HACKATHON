@@ -1,7 +1,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 
 :root {
-    --mode-color: #3498db;
+    --mode-color: #2980b9;
 }
 
 body { background-color: #f4f7f6; color: #333; overflow: hidden; height: 100vh; width: 100vw; }
@@ -18,178 +18,210 @@ body { background-color: #f4f7f6; color: #333; overflow: hidden; height: 100vh; 
 .app-container { display: flex; height: 100vh; width: 100vw; }
 
 /* ── Sidebar ───────────────────────────────────────────────────────────────── */
-.sidebar { width: 350px; background: white; padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); z-index: 10; display: flex; flex-direction: column; overflow-y: auto; }
+.sidebar {
+    width: 350px; background: white; padding: 20px;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1); z-index: 10;
+    display: flex; flex-direction: column; overflow-y: auto;
+}
 .header { margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
-.header h2 { color: #2c3e50; font-size: 24px; }
-.user-info { font-size: 12px; color: #7f8c8d; }
+.header h2 { color: #2c3e50; font-size: 22px; }
+.user-info { font-size: 12px; color: #7f8c8d; margin-top: 4px; }
 .user-info a { color: #e74c3c; text-decoration: none; }
 
 /* ── Form controls ─────────────────────────────────────────────────────────── */
-.controls input { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 5px; }
+.controls input {
+    width: 100%; padding: 10px; margin-bottom: 0;
+    border: 1px solid #ddd; border-radius: 5px;
+}
 .controls input:focus { border-color: #2980b9; outline: none; }
-.input-label { display: block; font-size: 13px; font-weight: bold; color: #34495e; margin-bottom: 5px; margin-top: 10px; }
+.input-label { display: block; font-size: 13px; font-weight: bold; color: #34495e; margin-bottom: 5px; margin-top: 12px; }
 
-.btn-primary { width: 100%; background: #2980b9; color: white; padding: 12px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold; transition: 0.3s; margin-top: 14px; }
-.btn-primary:hover { background: #1a5276; }
-.btn-primary:disabled { background: #95a5a6; cursor: not-allowed; }
+.btn-primary {
+    width: 100%; background: #2980b9; color: white;
+    padding: 12px; border: none; border-radius: 5px;
+    cursor: pointer; font-size: 15px; font-weight: bold;
+    transition: background 0.2s, transform 0.1s; margin-top: 16px;
+}
+.btn-primary:hover:not(:disabled) { background: #1a5276; transform: translateY(-1px); }
+.btn-primary:disabled { background: #bdc3c7; cursor: not-allowed; }
 
 /* ── Input with locate icon ────────────────────────────────────────────────── */
-.input-with-icon { position: relative; width: 100%; margin-bottom: 15px; }
-.input-with-icon input { margin-bottom: 0 !important; padding-right: 40px !important; }
-.locate-me-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; font-size: 18px; cursor: pointer; transition: 0.2s; }
+.input-with-icon { position: relative; width: 100%; margin-bottom: 0; margin-top: 0; }
+.input-with-icon input { padding-right: 40px; }
+.locate-me-btn {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    background: transparent; border: none; font-size: 17px; cursor: pointer; transition: 0.2s;
+}
 .locate-me-btn:hover { transform: translateY(-50%) scale(1.2); }
 
-/* ── Transport mode selector ───────────────────────────────────────────────── */
+/* ── Transport mode tiles (4 only) ────────────────────────────────────────── */
 .mode-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 6px;
-    margin-bottom: 15px;
-    margin-top: 10px;
+    margin-top: 8px;
+    margin-bottom: 0;
 }
 
 .mode-tile {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
     padding: 10px 4px;
-    border: 1.5px solid #e0e0e0;
-    border-radius: 8px;
-    background: #fafafa;
-    cursor: pointer;
+    border: 1.5px solid #e0e0e0; border-radius: 8px;
+    background: #fafafa; cursor: pointer;
     transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.1s;
-    gap: 4px;
-    min-height: 70px;
+    gap: 4px; min-height: 68px;
 }
-
 .mode-tile:hover {
-    border-color: var(--mode-color, #2980b9);
+    border-color: var(--mode-color);
     background: #f0f8ff;
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(0,0,0,0.08);
 }
-
 .mode-tile.active {
-    border-color: var(--mode-color, #2980b9);
+    border-color: var(--mode-color);
     border-width: 2px;
     background: #eaf4fd;
     box-shadow: 0 0 0 3px rgba(41, 128, 185, 0.12);
 }
-
-.mode-icon  { font-size: 24px; line-height: 1; }
-.mode-name  { font-size: 12px; font-weight: 700; color: #2c3e50; text-align: center; }
-
-/* ── Route cards ───────────────────────────────────────────────────────────── */
-.route-results { margin-top: 20px; }
-
-.route-card {
-    background: #fdfdfd;
-    border: 1px solid #eee;
-    border-left: 5px solid #ccc;
-    padding: 15px;
-    margin-bottom: 12px;
-    border-radius: 6px;
-    transition: box-shadow 0.2s, transform 0.15s;
-    cursor: default;
-}
-.route-card:hover {
-    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-    transform: translateY(-2px);
-}
-
-.route-title { font-weight: bold; font-size: 15px; margin-bottom: 5px; }
-.route-stats { font-size: 13px; color: #555; display: flex; justify-content: space-between; margin-bottom: 8px; }
-.route-safety { font-size: 12px; font-weight: 600; color: #555; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #eee; }
-
-/* ── Transit card ──────────────────────────────────────────────────────────── */
-.transit-card { background: #f6f9ff; }
-
-.transit-legs {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin: 8px 0 6px;
-    padding: 8px 10px;
-    background: #f0f4fb;
-    border-radius: 6px;
-    font-size: 12px;
-}
-
-.leg-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-}
-
-.walk-leg  { color: #7f8c8d; }
-.train-leg { font-weight: 600; }
-
-.leg-icon  { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
-.leg-desc  { line-height: 1.4; }
+.mode-icon  { font-size: 22px; line-height: 1; }
+.mode-name  { font-size: 11px; font-weight: 700; color: #2c3e50; text-align: center; }
 
 /* ── Flash messages ────────────────────────────────────────────────────────── */
-.flash-message { background-color: #f8d7da; color: #721c24; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 14px; border: 1px solid #f5c6cb; }
+.flash-message {
+    background-color: #f8d7da; color: #721c24;
+    padding: 10px; margin: 8px 0; border-radius: 5px;
+    font-size: 13px; border: 1px solid #f5c6cb;
+}
 
 /* ── Map area ──────────────────────────────────────────────────────────────── */
 .map-area { flex-grow: 1; height: 100%; background-color: #e5e3df; position: relative; }
 
 /* ── Map overlay controls ──────────────────────────────────────────────────── */
 .map-overlay-controls {
-    position: absolute;
-    top: 135px;
-    left: 10px;
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    position: absolute; top: 135px; left: 10px; z-index: 1000;
+    display: flex; align-items: center; gap: 10px;
 }
-
 #pinpoint-btn {
-    width: 34px; height: 34px;
-    background: white; border: 2px solid rgba(0,0,0,0.2); border-radius: 4px;
-    cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; background: white;
+    border: 2px solid rgba(0,0,0,0.2); border-radius: 4px;
+    cursor: pointer; font-size: 16px; display: flex;
+    align-items: center; justify-content: center;
     box-shadow: 0 1px 5px rgba(0,0,0,0.4); transition: 0.2s;
 }
 #pinpoint-btn:hover  { background: #f4f4f4; }
 #pinpoint-btn.active { background: #2980b9; color: white; border-color: #1a5276; }
-
 .pick-status-label {
     background: rgba(0,0,0,0.8); color: white;
     padding: 6px 12px; border-radius: 4px; font-size: 12px;
     display: none; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
-/* ── Autocomplete dropdown ─────────────────────────────────────────────────── */
-.autocomplete-dropdown {
-    display: none;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: white;
-    border: 1px solid #ddd;
-    border-top: none;
-    border-radius: 0 0 6px 6px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    z-index: 9999;
-    max-height: 220px;
-    overflow-y: auto;
-}
+/* ── Route results section ─────────────────────────────────────────────────── */
+.route-results { margin-top: 16px; }
 
-.autocomplete-item {
-    padding: 9px 12px;
-    font-size: 13px;
+/* ── Route card — base ─────────────────────────────────────────────────────── */
+.route-card {
+    background: #fdfdfd;
+    border: 1.5px solid #eee;
+    border-left: 5px solid #ccc;
+    padding: 13px 14px;
+    margin-bottom: 10px;
+    border-radius: 7px;
     cursor: pointer;
-    border-bottom: 1px solid #f0f0f0;
-    line-height: 1.4;
+    transition: box-shadow 0.18s, transform 0.18s, opacity 0.15s, border-color 0.15s;
+}
+.route-card:hover,
+.route-card.highlighted {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.11);
+    transform: translateY(-2px);
+    border-color: #c8d8e8;
+}
+.route-card.selected {
+    border-left-width: 6px;
+    background: #f5faff;
 }
 
-.autocomplete-item:hover {
-    background: #eaf4fd;
-    color: #2980b9;
+/* ── Transit line header ───────────────────────────────────────────────────── */
+.route-line-header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 3px;
 }
 
-.autocomplete-item:last-child {
-    border-bottom: none;
+/* Colored circle dot — mirrors the image-1 style */
+.line-dot {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
+.line-dot.secondary {
+    margin-left: -6px;   /* slight overlap for combo routes */
+    border: 2px solid white;
+}
+
+.route-title {
+    font-weight: 700;
+    font-size: 15px;
+    color: #2c3e50;
+}
+.line-subtitle-badge {
+    font-size: 11px;
+    color: #7f8c8d;
+    background: #f0f3f4;
+    border-radius: 10px;
+    padding: 2px 7px;
+    font-weight: 600;
+    margin-left: 2px;
+}
+.route-subtitle {
+    font-size: 12px;
+    color: #95a5a6;
+    margin-bottom: 5px;
+    margin-left: 23px;
+}
+
+/* ── Stats, safety, stations ───────────────────────────────────────────────── */
+.route-stats {
+    font-size: 13px; color: #555;
+    display: flex; justify-content: space-between;
+    margin-bottom: 6px;
+    margin-top: 5px;
+}
+.route-safety { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+.route-stations-count { font-size: 11px; color: #7f8c8d; margin-top: 4px; }
+
+/* ── Leg breakdown rows ─────────────────────────────────────────────────────── */
+.jeepney-legs {
+    display: flex; flex-direction: column; gap: 3px;
+    margin: 7px 0 2px; padding: 7px 9px;
+    background: #f7f9fb; border-radius: 6px; font-size: 11.5px;
+}
+.leg-row { display: flex; align-items: center; gap: 6px; }
+.walk-leg { color: #7f8c8d; }
+.jeep-leg { font-weight: 600; }
+.leg-icon { font-size: 13px; flex-shrink: 0; }
+.leg-desc { line-height: 1.35; }
+
+/* ── Transit sub-toggle ─────────────────────────────────────────────────────── */
+.transit-subtoggle {
+    display: none;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 6px;
+    animation: fadeIn 0.15s ease;
+}
+.transit-subtoggle.visible { display: grid; }
+.sub-tile {
+    display: flex; align-items: center; justify-content: center;
+    gap: 5px; padding: 8px 4px;
+    border: 1.5px solid #e0e0e0; border-radius: 7px;
+    background: #fafafa; cursor: pointer; font-size: 12px; font-weight: 700;
+    color: #2c3e50; transition: border-color 0.15s, background 0.15s;
+}
+.sub-tile:hover   { background: #eaf4fd; border-color: var(--mode-color); }
+.sub-tile.active  { background: #eaf4fd; border-color: var(--mode-color); border-width: 2px; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }

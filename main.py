@@ -322,6 +322,101 @@ def _draw_multimodal_route(route, m):
     route_layer.add_to(m)
 
 
+def _draw_transit_route(route, m):
+    """
+    Draw a transit route card (type='transit').
+
+    Segment types:
+      'walk'    → dashed grey  — OSRM foot (sidewalks, footbridges, crossings)
+      'train'   → dashed colour + filled circle station pins
+      'jeepney' → solid orange  — jeepney connector to/from station
+
+    Each segment carries 'stations' so pins appear at the exact OSM coords.
+    """
+    route_layer = folium.FeatureGroup(name=route['name'])
+    line_color  = route.get('color', '#8e44ad')
+
+    for seg in route.get('segments', []):
+        seg_type = seg.get('type')
+        coords   = seg.get('coords', [])
+
+        # ── Walk leg ──────────────────────────────────────────────────────────
+        if seg_type == 'walk':
+            if len(coords) >= 2:
+                folium.PolyLine(
+                    locations=coords,
+                    color='#7f8c8d',
+                    weight=3,
+                    opacity=0.85,
+                    dash_array='8 5',
+                    tooltip=seg.get('label', 'Walk'),
+                ).add_to(route_layer)
+            # Board/alight marker at the walk endpoint nearest a station
+            lbl = seg.get('label', '')
+            if coords:
+                pin_coord = coords[-1] if 'To ' in lbl or 'Walk to' in lbl else coords[0]
+                folium.CircleMarker(
+                    location=pin_coord,
+                    radius=6,
+                    color='#7f8c8d',
+                    weight=2,
+                    fill=True,
+                    fill_color='#ecf0f1',
+                    fill_opacity=1.0,
+                    tooltip=lbl,
+                ).add_to(route_layer)
+
+        # ── Jeepney connector leg ─────────────────────────────────────────────
+        elif seg_type == 'jeepney':
+            if len(coords) >= 2:
+                folium.PolyLine(
+                    locations=coords,
+                    color=seg.get('color', '#e67e22'),
+                    weight=5,
+                    opacity=0.88,
+                    tooltip=seg.get('label', 'Jeepney connector'),
+                ).add_to(route_layer)
+
+        # ── Train leg ─────────────────────────────────────────────────────────
+        elif seg_type == 'train':
+            seg_color    = seg.get('color', line_color)
+            seg_stations = seg.get('stations', [])
+
+            # Track polyline(s)
+            for track_seg in coords:
+                if len(track_seg) >= 2:
+                    folium.PolyLine(
+                        locations=track_seg,
+                        color=seg_color,
+                        weight=6,
+                        opacity=0.9,
+                        dash_array='12 5',
+                        tooltip=seg.get('label', 'Train'),
+                    ).add_to(route_layer)
+
+            # Station pins — every stop gets a circle; terminals are bigger
+            for idx, st in enumerate(seg_stations):
+                is_terminal = (idx == 0 or idx == len(seg_stations) - 1)
+                folium.CircleMarker(
+                    location=[st['lat'], st['lon']],
+                    radius=9 if is_terminal else 5,
+                    color=seg_color,
+                    weight=2,
+                    fill=True,
+                    fill_color='#ffffff',
+                    fill_opacity=1.0,
+                    tooltip=f"{'🔴 ' if is_terminal else '⚪ '}{st['name']}",
+                    popup=folium.Popup(
+                        f"<b>{st['name']}</b>"
+                        + ("<br><i>Board here</i>" if idx == 0 else
+                           "<br><i>Alight here</i>" if is_terminal else ""),
+                        max_width=180,
+                    ),
+                ).add_to(route_layer)
+
+    route_layer.add_to(m)
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route('/', methods=['GET', 'POST'])
@@ -364,14 +459,15 @@ def home():
                     m.fit_bounds([start_coord, end_coord])
 
                 for route in routes_data:
-                    if route.get('type') == 'train':
-                        _draw_train_route(route, m)
+                    rtype = route.get('type', '')
+                    if rtype in ('transit', 'train'):
+                        _draw_transit_route(route, m)
                     elif route.get('type') == 'jeepney':
                         _draw_jeepney_route(route, m)
                     elif route.get('type') == 'bus':
                         _draw_bus_route(route, m)
-                    elif route.get('type') == 'multimodal':     # ADD THIS CHECK
-                        _draw_multimodal_route(route, m)        # ADD THIS CALL
+                    elif route.get('type') == 'multimodal':
+                        _draw_multimodal_route(route, m)
                     else:
                         _draw_road_route(route, m)
 
@@ -451,40 +547,55 @@ def reverse_geocode_api():
     except Exception:
         return jsonify({"address": f"{lat}, {lon}"})
 
+@app.route('/api/nearby', methods=['GET'])
+def get_nearby_api():
+    try:
+        lat = float(request.args.get('lat'))
+        lon = float(request.args.get('lon'))
+        radius = float(request.args.get('radius', 800))
+        from navigation import get_nearby_transit
+        results = get_nearby_transit(lat, lon, radius)
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
+@app.route('/api/route', methods=['POST'])
 @app.route('/api/routes', methods=['POST'])
 def get_routes():
-    data          = request.json
-    origin_text   = data.get('origin')
-    dest_text     = data.get('destination')
-    commuter_type = data.get('commuterType')
-    orig_coords   = data.get('originCoords')
-    dest_coords   = data.get('destCoords')
+    data = request.json
+    # Handle both direct text input or coordinates
+    origin_text = data.get('origin')
+    dest_text = data.get('destination')
+    commuter_type = data.get('mode') or data.get('commuterType') or 'car'
+    
+    # Check for coordinates first (from map clicks/pins)
+    orig_coords = data.get('orig_coords') or data.get('originCoords')
+    dest_coords = data.get('dest_coords') or data.get('destCoords')
 
     if orig_coords:
-        orig_lon, orig_lat = float(orig_coords['lon']), float(orig_coords['lat'])
+        orig_lon = float(orig_coords.get('lon', orig_coords.get('lng', 0)))
+        orig_lat = float(orig_coords.get('lat', 0))
     else:
         orig_lon, orig_lat = geocode_location(origin_text)
 
     if dest_coords:
-        dest_lon, dest_lat = float(dest_coords['lon']), float(dest_coords['lat'])
+        dest_lon = float(dest_coords.get('lon', dest_coords.get('lng', 0)))
+        dest_lat = float(dest_coords.get('lat', 0))
     else:
         dest_lon, dest_lat = geocode_location(dest_text)
 
     if not orig_lon or not dest_lon:
         return jsonify({"error": "Location not found."}), 400
 
+    # Calculate the route
     nav_response = get_navigation_data(
         orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, []
     )
+    
     if "error" in nav_response:
         return jsonify({"error": nav_response["error"]}), 400
 
-    # Response shape per route:
-    #   coords    -> list of track/road segments (polylines)
-    #   stations  -> ordered [{lat,lon,name}] for train station pins
     return jsonify(nav_response)
-
 
 if __name__ == '__main__':
     app.run(debug=True)
