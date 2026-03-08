@@ -9,6 +9,9 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
+{{ typhoon_banner | safe }}
+{{ night_banner | safe }}
+{{ weather_banner | safe }}
 
 <div class="app-container">
 
@@ -21,6 +24,9 @@
       <h2>🛡️ SafeRouteAI</h2>
       <div class="user-info">
         Logged in as <strong>{{ username }}</strong> &nbsp;·&nbsp;
+        <a href="/settings">Settings</a> &nbsp;·&nbsp;
+        <a href="/community">Reports</a> &nbsp;·&nbsp;
+        <a href="/history">History</a> &nbsp;·&nbsp;
         <a href="/logout">Logout</a>
       </div>
     </div>
@@ -39,14 +45,14 @@
       <!-- Origin -->
       <label class="input-label">📍 Origin</label>
       <div class="input-with-icon">
-        <input id="origin-input" type="text" placeholder="Starting point or address…" autocomplete="off" />
+        <input id="origin-input" type="text" placeholder="Starting point or address…" autocomplete="off" value="{{ prefill_origin | default('') }}" />
         <button class="locate-me-btn" id="locate-origin-btn" title="Use my current location">📡</button>
       </div>
 
       <!-- Destination -->
       <label class="input-label">🏁 Destination</label>
       <div class="input-with-icon">
-        <input id="dest-input" type="text" placeholder="Where are you going?" autocomplete="off" />
+        <input id="dest-input" type="text" placeholder="Where are you going?" autocomplete="off" value="{{ prefill_destination | default('') }}" />
         <button class="locate-me-btn" id="locate-dest-btn" title="Pin destination on map">📌</button>
       </div>
 
@@ -125,28 +131,57 @@ let routeLayers = [];     // [{routeId, layers:[…]}, …]
 let activeRouteId = null;
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
-const mkIcon = (color, sym) => L.divIcon({
-  className: '',
-  html: `<div style="
-    background:${color};color:white;font-size:16px;
-    width:32px;height:32px;border-radius:50%;
-    display:flex;align-items:center;justify-content:center;
-    box-shadow:0 2px 6px rgba(0,0,0,.35);border:2px solid white;">
-    ${sym}</div>`,
-  iconSize: [32, 32], iconAnchor: [16, 16],
-});
+// SVG-based markers — no emoji, renders consistently on all platforms
 
-// Small white circle icon for transfer points (boarding/alighting)
-const transferIcon = (iconStr) => L.divIcon({
-  className: '',
-  html: `<div style="
-    background:white; color:#444; font-size:12px;
-    width:20px; height:20px; border-radius:50%;
-    display:flex; align-items:center; justify-content:center;
-    box-shadow:0 1px 3px rgba(0,0,0,0.4); border:2px solid #666;">
-    ${iconStr}</div>`,
-  iconSize: [20, 20], iconAnchor: [10, 10],
-});
+function mkPin(color, letter) {
+  // Teardrop map pin shape in pure SVG
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="38" viewBox="0 0 28 38">
+    <path d="M14 0C6.27 0 0 6.27 0 14c0 9.63 14 24 14 24S28 23.63 28 14C28 6.27 21.73 0 14 0z"
+          fill="${color}" stroke="white" stroke-width="2"/>
+    <text x="14" y="19" text-anchor="middle" dominant-baseline="middle"
+          font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="white">${letter}</text>
+  </svg>`;
+  return L.divIcon({
+    className: '',
+    html: svg,
+    iconSize: [28, 38],
+    iconAnchor: [14, 38],
+    popupAnchor: [0, -38],
+  });
+}
+
+function mkDot(color, letter) {
+  // Smaller round marker for transit stops / overlays
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 26 26">
+    <circle cx="13" cy="13" r="12" fill="${color}" stroke="white" stroke-width="2"/>
+    <text x="13" y="13" text-anchor="middle" dominant-baseline="middle"
+          font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="white">${letter}</text>
+  </svg>`;
+  return L.divIcon({
+    className: '',
+    html: svg,
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    popupAnchor: [0, -14],
+  });
+}
+
+// Legacy alias used elsewhere in the code
+const mkIcon = (color, sym) => mkDot(color, sym.replace(/[^A-Za-z0-9]/g, '').charAt(0) || '?');
+
+// Small transfer marker
+const transferIcon = (typeStr) => {
+  const letters = { train: 'T', jeepney: 'J', bus: 'B', walk: 'W' };
+  const colors  = { train: '#8e44ad', jeepney: '#e67e22', bus: '#16a085', walk: '#7f8c8d' };
+  const letter  = letters[typeStr] || '?';
+  const color   = colors[typeStr]  || '#555';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+    <circle cx="10" cy="10" r="9" fill="${color}" stroke="white" stroke-width="1.5"/>
+    <text x="10" y="10" text-anchor="middle" dominant-baseline="middle"
+          font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="white">${letter}</text>
+  </svg>`;
+  return L.divIcon({ className: '', html: svg, iconSize: [20, 20], iconAnchor: [10, 10] });
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -169,13 +204,13 @@ async function fetchAndDrawNearby(lat, lon) {
         nearbyLayers.push(circle);
         
         data.forEach(stop => {
-            let iconStr = '📍';
-            if (stop.type === 'jeepney') iconStr = '🚌';
-            if (stop.type === 'bus') iconStr = '🚍';
-            if (stop.type === 'train') iconStr = '🚇';
+            const typeLetters = { jeepney: 'J', bus: 'B', train: 'T' };
+            const typeColors  = { jeepney: '#e67e22', bus: '#16a085', train: '#8e44ad' };
+            const letter = typeLetters[stop.type] || 'S';
+            const color  = typeColors[stop.type]  || stop.color || '#555';
             
             const marker = L.marker([stop.lat, stop.lon], {
-                icon: mkIcon(stop.color, iconStr)
+                icon: mkDot(color, letter)
             }).addTo(map).bindTooltip(`<b>${stop.route_name}</b><br>${stop.name}<br>Distance: ${Math.round(stop.dist)}m`);
             
             nearbyLayers.push(marker);
@@ -188,31 +223,58 @@ function clearNearby() {
     nearbyLayers = [];
 }
 
-function setOrigin(lat, lon, label) {
+async function reverseGeocode(lat, lon) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, {
+      headers: { 'Accept-Language': 'en', 'User-Agent': 'SafeRouteAI/1.0' }
+    });
+    const data = await res.json();
+    if (data && data.address) {
+      const a = data.address;
+      const parts = [a.road || a.pedestrian || a.path, a.suburb || a.village || a.neighbourhood, a.city || a.town || a.municipality].filter(Boolean);
+      return parts.length >= 2 ? parts.join(', ') : data.display_name.split(',').slice(0,3).join(',').trim();
+    }
+  } catch(e) {}
+  return null;
+}
+
+async function setOrigin(lat, lon, label) {
   origCoords = {lat, lon};
-  document.getElementById('origin-input').value = label || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  const input = document.getElementById('origin-input');
+  if (label) {
+    input.value = label;
+  } else {
+    input.value = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    reverseGeocode(lat, lon).then(name => { if (name) input.value = name; });
+  }
   if (origMarker) map.removeLayer(origMarker);
-  origMarker = L.marker([lat, lon], {icon: mkIcon('#2980b9', '📍')})
+  origMarker = L.marker([lat, lon], {icon: mkPin('#2980b9', 'A')})
     .addTo(map).bindPopup('Origin').openPopup();
   
   clearNearby();
   fetchAndDrawNearby(lat, lon);
   if (destCoords) fetchAndDrawNearby(destCoords.lat, destCoords.lon);
-  
+  loadSafetyOverlay();
   checkEnableButton();
 }
 
-function setDest(lat, lon, label) {
+async function setDest(lat, lon, label) {
   destCoords = {lat, lon};
-  document.getElementById('dest-input').value = label || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  const input = document.getElementById('dest-input');
+  if (label) {
+    input.value = label;
+  } else {
+    input.value = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    reverseGeocode(lat, lon).then(name => { if (name) input.value = name; });
+  }
   if (destMarker) map.removeLayer(destMarker);
-  destMarker = L.marker([lat, lon], {icon: mkIcon('#e74c3c', '🏁')})
+  destMarker = L.marker([lat, lon], {icon: mkPin('#e74c3c', 'B')})
     .addTo(map).bindPopup('Destination').openPopup();
     
   clearNearby();
   fetchAndDrawNearby(lat, lon);
   if (origCoords) fetchAndDrawNearby(origCoords.lat, origCoords.lon);
-  
+  loadSafetyOverlay();
   checkEnableButton();
 }
 
@@ -320,14 +382,106 @@ function endPinPick() {
 }
 
 map.on('click', e => {
-  if (!pinTarget) return;
   const {lat, lng} = e.latlng;
-  if (pinTarget === 'origin') setOrigin(lat, lng);
-  else                        setDest(lat, lng);
-  endPinPick();
+  // If pinpoint mode is active, set origin/dest
+  if (pinTarget) {
+    if (pinTarget === 'origin') setOrigin(lat, lng);
+    else                        setDest(lat, lng);
+    endPinPick();
+    return;
+  }
+  // Otherwise, if report mode button is active, open the report panel
+  if (typeof _reportModeActive !== 'undefined' && _reportModeActive) {
+    if (typeof openReportPanel === 'function') openReportPanel(lat, lng);
+  }
 });
 
-// ── Input change listeners (just validate, NOT auto-search) ───────────────────
+// ── Autocomplete (live location search + map flyTo) ──────────────────────────
+function setupAutocomplete(inputId, onSelect) {
+  const input = document.getElementById(inputId);
+  let dropdown = null, debounceTimer = null;
+
+  function removeDropdown() { if (dropdown) { dropdown.remove(); dropdown = null; } }
+
+  function showDropdown(items) {
+    removeDropdown();
+    if (!items.length) return;
+    dropdown = document.createElement('div');
+    dropdown.style.cssText = 'position:fixed;z-index:99999;background:#fff;border:1px solid #ddd;border-top:none;border-radius:0 0 8px 8px;box-shadow:0 6px 16px rgba(0,0,0,0.13);max-height:240px;overflow-y:auto;';
+    const rect = input.getBoundingClientRect();
+    dropdown.style.top   = rect.bottom + 'px';
+    dropdown.style.left  = rect.left + 'px';
+    dropdown.style.width = rect.width + 'px';
+    document.body.appendChild(dropdown);
+
+    items.forEach(item => {
+      const parts = item.display_name.split(',');
+      const short = parts.slice(0,3).join(',').trim();
+      const rest  = parts.length > 3 ? parts.slice(3).join(',').trim() : '';
+      const div   = document.createElement('div');
+      div.style.cssText = 'padding:10px 13px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0;line-height:1.35;display:flex;align-items:flex-start;gap:8px;';
+      div.innerHTML = `<span style="font-size:15px;flex-shrink:0">📍</span><div><div style="font-weight:600;color:#2c3e50">${escHtml(short)}</div>${rest ? `<div style="font-size:11px;color:#999">${escHtml(rest)}</div>` : ''}</div>`;
+      div.addEventListener('mouseenter', () => div.style.background = '#f0f7ff');
+      div.addEventListener('mouseleave', () => div.style.background = '');
+      div.addEventListener('mousedown', e => {
+        e.preventDefault();
+        input.value = short;
+        onSelect({ lat: parseFloat(item.lat), lon: parseFloat(item.lon), label: short });
+        removeDropdown();
+      });
+      dropdown.appendChild(div);
+    });
+  }
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (!q) { onSelect(null); removeDropdown(); checkEnableButton(); return; }
+    checkEnableButton();
+    clearTimeout(debounceTimer);
+    if (q.length < 3) { removeDropdown(); return; }
+    debounceTimer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/suggest?q=${encodeURIComponent(q)}`);
+        showDropdown((await res.json()).slice(0, 6));
+      } catch(e) { removeDropdown(); }
+    }, 300);
+  });
+
+  input.addEventListener('keydown', e => {
+    if (!dropdown) return;
+    const items = Array.from(dropdown.children);
+    let idx = items.findIndex(d => d.dataset.active);
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (idx >= 0) { items[idx].style.background=''; delete items[idx].dataset.active; } idx = Math.min(idx+1, items.length-1); items[idx].style.background='#f0f7ff'; items[idx].dataset.active='1'; }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (idx >= 0) { items[idx].style.background=''; delete items[idx].dataset.active; } idx = Math.max(idx-1, 0); items[idx].style.background='#f0f7ff'; items[idx].dataset.active='1'; }
+    else if (e.key === 'Enter' && idx >= 0) { e.preventDefault(); items[idx].dispatchEvent(new MouseEvent('mousedown')); }
+    else if (e.key === 'Escape') removeDropdown();
+  });
+  input.addEventListener('blur', () => setTimeout(removeDropdown, 160));
+}
+
+setupAutocomplete('origin-input', result => {
+  if (result) {
+    origCoords = { lat: result.lat, lon: result.lon };
+    map.flyTo([result.lat, result.lon], 15, { animate: true, duration: 0.8 });
+    if (origMarker) map.removeLayer(origMarker);
+    origMarker = L.marker([result.lat, result.lon], {icon: mkPin('#2980b9', 'A')}).addTo(map).bindPopup('Origin').openPopup();
+    clearNearby(); fetchAndDrawNearby(result.lat, result.lon); loadSafetyOverlay();
+  } else { origCoords = null; if (origMarker) { map.removeLayer(origMarker); origMarker = null; } }
+  checkEnableButton();
+});
+
+setupAutocomplete('dest-input', result => {
+  if (result) {
+    destCoords = { lat: result.lat, lon: result.lon };
+    map.flyTo([result.lat, result.lon], 15, { animate: true, duration: 0.8 });
+    if (destMarker) map.removeLayer(destMarker);
+    destMarker = L.marker([result.lat, result.lon], {icon: mkPin('#e74c3c', 'B')}).addTo(map).bindPopup('Destination').openPopup();
+    clearNearby(); fetchAndDrawNearby(result.lat, result.lon); loadSafetyOverlay();
+  } else { destCoords = null; if (destMarker) { map.removeLayer(destMarker); destMarker = null; } }
+  checkEnableButton();
+});
+
+// ── Input change listeners ────────────────────────────────────────────────────
 document.getElementById('origin-input').addEventListener('input', () => {
   if (!document.getElementById('origin-input').value.trim()) origCoords = null;
   checkEnableButton();
@@ -368,8 +522,9 @@ async function findRoutes() {
     } else if (data.routes && data.routes.length) {
       renderRouteCards(data.routes);
       drawAllRoutes(data.routes);
-      // Auto-highlight first card
       highlightRoute(data.routes[0].id);
+      // Draw safety overlays for the searched area
+      drawAreaSafetyOverlay(body.orig_coords || null, body.dest_coords || null, data.routes[0]);
     } else {
       showError('No routes found.');
     }
@@ -403,21 +558,32 @@ function renderRouteCards(routes) {
     const card = document.createElement('div');
     card.className  = 'route-card';
     card.dataset.id = route.id;
-    card.style.borderLeftColor = route.color;
+    // Left border reflects safety score, not route line color
+    card.style.borderLeftColor = route.score_color || route.color;
 
     // ── Header row: colored line dot + name ──────────────────────────────
     const isTransfer = (route.line || '').includes('+');
     let headerHTML = '';
 
+    // Mode badge shown on every card regardless of route type
+    const modeBadge = route.mode_label ? `
+      <span style="
+        background:${route.mode_label_color || '#7f8c8d'};
+        color:white;font-size:10px;font-weight:700;
+        padding:2px 8px;border-radius:10px;
+        margin-left:6px;white-space:nowrap;
+        font-family:Arial,sans-serif;vertical-align:middle;">
+        ${escHtml(route.mode_label)}
+      </span>` : '';
+
     if (route.type === 'transit') {
       if (isTransfer) {
-        // Two-line combo
-        const [la, lb] = (route.line || '').split('+');
         headerHTML = `
           <div class="route-line-header">
             <span class="line-dot" style="background:${route.color}"></span>
             <span class="line-dot secondary" style="background:${route.secondary_color || '#999'}"></span>
             <span class="route-title">${escHtml(route.name)}</span>
+            ${modeBadge}
           </div>
           <div class="route-subtitle">${escHtml(route.subtitle || '')}</div>`;
       } else {
@@ -426,10 +592,16 @@ function renderRouteCards(routes) {
             <span class="line-dot" style="background:${route.color}"></span>
             <span class="route-title">${escHtml(route.name)}</span>
             <span class="line-subtitle-badge">${escHtml(route.subtitle || '')}</span>
+            ${modeBadge}
           </div>`;
       }
     } else {
-      headerHTML = `<div class="route-title">${escHtml(route.name)}</div>`;
+      headerHTML = `
+        <div class="route-line-header">
+          <span class="line-dot" style="background:${route.color}"></span>
+          <span class="route-title">${escHtml(route.name)}</span>
+          ${modeBadge}
+        </div>`;
     }
 
     // ── Stats row ────────────────────────────────────────────────────────
@@ -440,11 +612,25 @@ function renderRouteCards(routes) {
       </div>`;
 
     // ── Safety badge ─────────────────────────────────────────────────────
+    // ── Safety badge ─────────────────────────────────────────────────────────
     const sc = route.safety_score || 0;
+    let warningLines = '';
+    if (route.night_warning)    warningLines += `<div class="route-warning night-warning">🌙 ${escHtml(route.night_warning)}</div>`;
+    if (route.weather_warning)  warningLines += `<div class="route-warning weather-warning">🌦️ ${escHtml(route.weather_warning)}</div>`;
+    if (route.flood_warning)    warningLines += `<div class="route-warning flood-warning">🌊 ${escHtml(route.flood_warning)}</div>`;
+    if (route.report_warnings && route.report_warnings.length) {
+        route.report_warnings.forEach(w => {
+            warningLines += `<div class="route-warning report-warning">⚠️ ${escHtml(w)}</div>`;
+        });
+    }
+    if (route.crime_warning) warningLines += `<div class="route-warning report-warning">🚨 ${escHtml(route.crime_warning)}</div>`;
+    const fareDisp = route.fare ? route.fare.display : '';
     const safetyHTML = `
       <div class="route-safety" style="color:${safetyColor(sc)}">
         🛡️ Safety Score: ${sc}/100
-      </div>`;
+        ${fareDisp ? `<span class="fare-badge">💸 ${escHtml(fareDisp)}</span>` : ''}
+      </div>
+      ${warningLines}`;
 
     // ── Station count / hazards ───────────────────────────────────────────
     const infoHTML = route.station_count
@@ -552,14 +738,10 @@ function drawAllRoutes(routes) {
                 startPt = startPt[0];
             }
             
-            let iconChar = '🔄';
-            if (seg.type === 'train') iconChar = '🚇';
-            if (seg.type === 'jeepney') iconChar = '🚌';
-            if (seg.type === 'bus') iconChar = '🚍';
-            if (seg.type === 'walk') iconChar = '🚶';
+            let segType = seg.type;
 
             layers.push(L.marker(startPt, {
-                icon: transferIcon(iconChar),
+                icon: transferIcon(segType),
                 zIndexOffset: 1000
             }).addTo(map).bindTooltip(seg.label || "Transfer"));
         }
@@ -624,7 +806,351 @@ function fitRoute(routeId) {
 function escHtml(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-</script>
+// ══════════════════════════════════════════════════════════════════════════════
+//  SAFETY RISK OVERLAY — colored circles for each active community report
+// ══════════════════════════════════════════════════════════════════════════════
 
+let safetyOverlayLayers = [];
+
+/**
+ * Fetch all active reports from the server and draw danger zones on the map.
+ * Each report type gets:
+ *   - A filled circle (radius based on report type severity)
+ *   - A pulsing border for high-severity types
+ *   - A popup with report details + confirm button
+ */
+async function loadSafetyOverlay() {
+    try {
+        const resp = await fetch('/api/safety?lat=14.5995&lon=120.9842');
+        const data = await resp.json();
+        drawSafetyOverlay(data.reports || []);
+    } catch(e) {
+        console.warn('Safety overlay load failed:', e);
+    }
+}
+
+const OVERLAY_MIN_ZOOM = 14;  // reports only visible when zoomed in enough
+
+function drawSafetyOverlay(reports) {
+    // Clear old overlay
+    safetyOverlayLayers.forEach(l => map.removeLayer(l));
+    safetyOverlayLayers = [];
+
+    // Don't draw anything if zoomed too far out
+    if (map.getZoom() < OVERLAY_MIN_ZOOM) return;
+
+    // Severity radius map (meters)
+    const RADIUS = {
+        flooding:      350,
+        crime:         300,
+        harassment:    250,
+        accident:      200,
+        dark_area:     280,
+        road_damage:   150,
+        heavy_traffic: 200,
+        road_closed:   150,
+        construction:  180,
+        safe_spot:     200,
+        police_visible:200,
+    };
+    const FILL_OPACITY = {
+        flooding:      0.28,
+        crime:         0.30,
+        harassment:    0.28,
+        accident:      0.25,
+        dark_area:     0.20,
+        road_damage:   0.18,
+        heavy_traffic: 0.18,
+        road_closed:   0.22,
+        construction:  0.18,
+        safe_spot:     0.18,
+        police_visible:0.18,
+    };
+
+    reports.forEach(r => {
+        const radius     = RADIUS[r.type]  || 200;
+        const fillOp     = FILL_OPACITY[r.type] || 0.20;
+        const isPositive = (r.type === 'safe_spot' || r.type === 'police_visible');
+        const isHigh     = (r.type === 'flooding' || r.type === 'crime' || r.type === 'harassment');
+
+        // Danger / safe zone circle
+        const circle = L.circle([r.lat, r.lon], {
+            radius:       radius,
+            color:        r.color,
+            weight:       isHigh ? 2.5 : 1.5,
+            fillColor:    r.color,
+            fillOpacity:  fillOp,
+            dashArray:    isPositive ? null : (isHigh ? null : '6 4'),
+        }).addTo(map);
+
+        // Popup with confirm/upvote button
+        const verifiedBadge = r.verified
+            ? `<span style="background:#27ae60;color:white;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:bold;">VERIFIED (${r.confirmations})</span>`
+            : `<span style="color:#888;font-size:11px;">${r.confirmations} report(s) — click Verify to confirm</span>`;
+        const popupHtml = `
+            <div style="min-width:190px;font-family:Arial,sans-serif;">
+              <div style="font-weight:700;font-size:13px;margin-bottom:4px;
+                          padding:4px 8px;background:${r.color}22;border-radius:4px;
+                          border-left:3px solid ${r.color};">
+                ${escHtml(r.label)}
+              </div>
+              ${r.description ? `<div style="font-size:12px;color:#555;margin-bottom:4px;">${escHtml(r.description)}</div>` : ''}
+              <div style="font-size:11px;color:#888;margin-bottom:6px;">${escHtml(r.reported_at)}</div>
+              <div style="margin-bottom:8px;">${verifiedBadge}</div>
+              <button onclick="confirmReport(${r.id})" style="
+                  background:${r.color};color:white;border:none;padding:6px 12px;
+                  border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;
+                  width:100%;">
+                Verify Report
+              </button>
+              <div id="conf-msg-${r.id}" style="font-size:11px;margin-top:5px;"></div>
+            </div>`;
+        circle.bindPopup(popupHtml, {maxWidth: 230});
+
+        // Small colored dot marker at center — uses first letter of type
+        const typeInitial = (r.label || r.type || '?').charAt(0).toUpperCase();
+        const iconMarker = L.marker([r.lat, r.lon], {
+            icon: mkDot(r.color, typeInitial),
+            interactive: true,
+            zIndexOffset: 500,
+        }).addTo(map);
+        iconMarker.bindPopup(popupHtml, {maxWidth: 230});
+
+        safetyOverlayLayers.push(circle, iconMarker);
+    });
+}
+
+async function confirmReport(reportId) {
+    const msgEl = document.getElementById('conf-msg-' + reportId);
+    try {
+        const resp = await fetch('/api/reports/confirm', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({report_id: reportId}),
+        });
+        const data = await resp.json();
+        if (msgEl) {
+            msgEl.textContent = data.ok ? 'Confirmed: ' + data.message : 'Error: ' + data.message;
+            msgEl.style.color = data.ok ? '#27ae60' : '#c0392b';
+        }
+        if (data.ok) setTimeout(loadSafetyOverlay, 1000);
+    } catch(e) {
+        if (msgEl) msgEl.textContent = '❌ Error confirming.';
+    }
+}
+async function drawAreaSafetyOverlay(origCoords, destCoords, route = null) {
+    safetyOverlayLayers.forEach(l => map.removeLayer(l));
+    safetyOverlayLayers = [];
+    const drawnCrimeAreas = new Set(); // deduplicate crime circles
+
+    const points = [];
+    if (origCoords) points.push(origCoords);
+    if (destCoords) points.push(destCoords);
+
+    // Sample points along the route path (up to 6 midpoints)
+    if (route) {
+        const coords = [];
+        if (route.segments) {
+            route.segments.forEach(seg => {
+                if (seg.coords) {
+                    const flat = Array.isArray(seg.coords[0]) && Array.isArray(seg.coords[0][0])
+                        ? seg.coords.flat() : seg.coords;
+                    coords.push(...flat);
+                }
+            });
+        }
+        if (!coords.length && route.coords) coords.push(...route.coords);
+        if (coords.length > 2) {
+            const SAMPLE_EVERY = Math.max(1, Math.floor(coords.length / 6));
+            for (let i = SAMPLE_EVERY; i < coords.length - 1; i += SAMPLE_EVERY) {
+                const c = coords[i];
+                const lat = Array.isArray(c) ? c[0] : c.lat;
+                const lon = Array.isArray(c) ? c[1] : (c.lon || c.lng);
+                points.push({ lat, lon });
+            }
+        }
+    }
+
+    if (!points.length) return;
+
+    for (const pt of points) {
+        const lat = pt.lat;
+        const lon = pt.lon || pt.lng;
+        try {
+            const resp = await fetch(`/api/safety?lat=${lat}&lon=${lon}`);
+            const data = await resp.json();
+
+            // ── Flood circle (only when raining) ────────────────────────────
+            const rainActive = data.weather && ['light_rain','rain','heavy_rain','storm'].includes(data.weather.risk_level);
+            if (data.flood && data.flood.risk_level !== 'none' && rainActive) {
+                const floodColors = { low:'#f39c12', moderate:'#e67e22', high:'#e74c3c' };
+                const floodRadii  = { low:400, moderate:600, high:900 };
+                const risk   = data.flood.risk_level;
+                const color  = floodColors[risk] || '#e74c3c';
+                const radius = floodRadii[risk] || 500;
+                const floodCircle = L.circle([lat, lon], {
+                    radius, color, weight:2, fillColor:color, fillOpacity:0.18, dashArray:'6 4'
+                }).addTo(map);
+                const label = L.marker([lat, lon], {
+                    icon: L.divIcon({
+                        className:'',
+                        html:`<div style="background:${color};color:white;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:bold;white-space:nowrap;font-family:Arial,sans-serif;box-shadow:0 2px 4px rgba(0,0,0,0.3);">Flood: ${risk.charAt(0).toUpperCase()+risk.slice(1)}</div>`,
+                        iconSize:[null,null], iconAnchor:[40,-6]
+                    }), interactive:false, zIndexOffset:600
+                }).addTo(map);
+                floodCircle.bindPopup(`<div style="font-family:Arial,sans-serif;min-width:160px;">
+                    <div style="font-weight:bold;color:${color};margin-bottom:4px;">Flood Risk: ${risk.toUpperCase()}</div>
+                    <div style="font-size:12px;">${data.flood.label}</div>
+                    <div style="font-size:11px;color:#888;margin-top:4px;">Source: Project NOAH</div>
+                </div>`, { maxWidth:200 });
+                safetyOverlayLayers.push(floodCircle, label);
+            }
+
+            // ── Community report circles (additive) ─────────────────────────
+            if (data.reports && data.reports.length) {
+                appendSafetyOverlay(data.reports);
+            }
+
+            // ── Crime circle (high risk only, one circle per unique area) ────
+            // Only show for confirmed HIGH risk, not moderate, to avoid
+            // plastering the map with red circles over normal urban areas.
+            const crimeAreaKey = data.crime && data.crime.area ? data.crime.area : null;
+            if (data.crime && data.crime.risk_level === 'high'
+                && crimeAreaKey && !drawnCrimeAreas.has(crimeAreaKey)) {
+                drawnCrimeAreas.add(crimeAreaKey);
+                const ccolor = '#e74c3c';
+                const cCircle = L.circle([lat, lon], {
+                    radius: 600, color: ccolor, weight: 2,
+                    fillColor: ccolor, fillOpacity: 0.12, dashArray: '5 5'
+                }).addTo(map);
+                const cLabel = L.marker([lat, lon], {
+                    icon: L.divIcon({
+                        className: '',
+                        html: `<div style="background:${ccolor};color:white;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:bold;white-space:nowrap;font-family:Arial,sans-serif;box-shadow:0 2px 4px rgba(0,0,0,0.3);">⚠️ High Crime Area</div>`,
+                        iconSize: [null, null], iconAnchor: [60, -6]
+                    }), interactive: false, zIndexOffset: 601
+                }).addTo(map);
+                cCircle.bindPopup(`<div style="font-family:Arial,sans-serif;min-width:160px;">
+                    <div style="font-weight:bold;color:${ccolor};margin-bottom:4px;">🚨 High Crime Risk</div>
+                    <div style="font-size:12px;">${data.crime.area || 'This area'}</div>
+                    <div style="font-size:11px;color:#555;margin-top:4px;">${data.crime.summary || 'Stay alert and on well-lit streets.'}</div>
+                </div>`, { maxWidth: 200 });
+                safetyOverlayLayers.push(cCircle, cLabel);
+            }
+
+            // ── Weather circle (severe only) ─────────────────────────────────
+            if (data.weather && ['heavy_rain','storm','rain'].includes(data.weather.risk_level)) {
+                const wColor  = data.weather.color || '#2980b9';
+                const wCircle = L.circle([lat, lon], {
+                    radius:1200, color:wColor, weight:1.5, fillColor:wColor, fillOpacity:0.08, dashArray:'4 6'
+                }).addTo(map);
+                wCircle.bindPopup(`<div style="font-family:Arial,sans-serif;">
+                    <div style="font-weight:bold;color:${wColor};margin-bottom:4px;">Weather: ${data.weather.description}</div>
+                    <div style="font-size:12px;">${data.weather.temp_c}°C — Wind: ${data.weather.wind_kph} km/h</div>
+                </div>`, { maxWidth:180 });
+                safetyOverlayLayers.push(wCircle);
+            }
+
+        } catch(e) {
+            console.warn('Area safety overlay failed for', pt, e);
+        }
+    }
+}
+
+    function appendSafetyOverlay(reports) {
+      const RADIUS = { flooding:350, crime:300, harassment:250, accident:200, dark_area:280, road_damage:150, heavy_traffic:200, road_closed:150, construction:180, safe_spot:200, police_visible:200 };
+      const FILL_OPACITY = { flooding:0.28, crime:0.30, harassment:0.28, accident:0.25, dark_area:0.20, road_damage:0.18, heavy_traffic:0.18, road_closed:0.22, construction:0.18, safe_spot:0.18, police_visible:0.18 };
+      reports.forEach(r => {
+        const radius = RADIUS[r.type] || 200;
+        const fillOp = FILL_OPACITY[r.type] || 0.20;
+        const isPositive = (r.type === 'safe_spot' || r.type === 'police_visible');
+        const isHigh = (r.type === 'flooding' || r.type === 'crime' || r.type === 'harassment');
+        const circle = L.circle([r.lat, r.lon], {
+          radius, color:r.color, weight:isHigh?2.5:1.5,
+          fillColor:r.color, fillOpacity:fillOp,
+          dashArray:isPositive?null:(isHigh?null:'6 4'),
+        }).addTo(map);
+        const verifiedBadge = r.verified
+          ? `<span style="background:#27ae60;color:white;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:bold;">VERIFIED (${r.confirmations})</span>`
+          : `<span style="color:#888;font-size:11px;">${r.confirmations} report(s)</span>`;
+        const popupHtml = `<div style="min-width:190px;font-family:Arial,sans-serif;">
+          <div style="font-weight:700;font-size:13px;margin-bottom:4px;padding:4px 8px;background:${r.color}22;border-radius:4px;border-left:3px solid ${r.color};">${escHtml(r.label)}</div>
+          ${r.description?`<div style="font-size:12px;color:#555;margin-bottom:4px;">${escHtml(r.description)}</div>`:''}
+          <div style="font-size:11px;color:#888;margin-bottom:6px;">${escHtml(r.reported_at)}</div>
+          <div style="margin-bottom:8px;">${verifiedBadge}</div>
+          <button onclick="confirmReport(${r.id})" style="background:${r.color};color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;width:100%;">Verify Report</button>
+          <div id="conf-msg-${r.id}" style="font-size:11px;margin-top:5px;"></div>
+        </div>`;
+        circle.bindPopup(popupHtml, {maxWidth:230});
+        const iconMarker = L.marker([r.lat, r.lon], {
+          icon:mkDot(r.color,(r.label||r.type||'?').charAt(0).toUpperCase()),
+          interactive:true, zIndexOffset:500
+        }).addTo(map);
+        iconMarker.bindPopup(popupHtml, {maxWidth:230});
+        safetyOverlayLayers.push(circle, iconMarker);
+      });
+    }
+
+// Load safety overlay on page start (only draws if zoom >= OVERLAY_MIN_ZOOM)
+loadSafetyOverlay();
+
+// ── Show/hide reports based on zoom level ─────────────────────────────────
+map.on('zoomend', function () {
+    const zoom = map.getZoom();
+    if (zoom < OVERLAY_MIN_ZOOM) {
+        // Hide all overlay layers when zoomed out
+        safetyOverlayLayers.forEach(l => map.removeLayer(l));
+    } else {
+        // Re-add existing layers if they were hidden
+        safetyOverlayLayers.forEach(l => {
+            if (!map.hasLayer(l)) l.addTo(map);
+        });
+        // Also refresh from server when zooming in, in case new reports exist
+        loadSafetyOverlay();
+    }
+});
+
+// ── History prefill: set active mode tile from URL params ─────────────────
+(function() {
+  var prefillMode = {{ (prefill_mode | default("")) | tojson }};
+  if (!prefillMode) return;
+
+  // Map mode string to tile data-mode + optional submode
+  var tileMode = prefillMode;
+  var subMode  = null;
+  var transitSubmodes = ['train', 'lrt1', 'lrt2', 'mrt3', 'jeepney', 'bus'];
+  if (transitSubmodes.indexOf(prefillMode) !== -1) {
+    tileMode = 'transit';
+    subMode  = prefillMode;
+  }
+
+  // Activate the correct main tile
+  document.querySelectorAll('.mode-tile').forEach(function(t) {
+    t.classList.remove('active');
+    if (t.dataset.mode === tileMode) t.classList.add('active');
+  });
+  activeMode = prefillMode;
+
+  // Activate sub-tile if needed
+  if (subMode) {
+    document.querySelectorAll('.sub-tile').forEach(function(t) {
+      t.classList.remove('active');
+      if (t.dataset.submode === subMode) t.classList.add('active');
+    });
+    activeSubMode = subMode;
+    document.getElementById('transit-sub').classList.add('visible');
+  }
+
+  // Enable find-routes button if both fields are filled
+  var orig = document.getElementById('origin-input').value.trim();
+  var dest = document.getElementById('dest-input').value.trim();
+  if (orig && dest) {
+    document.getElementById('find-routes-btn').disabled = false;
+  }
+})();
+
+</script>
+{{ report_panel | safe }}
+{{ reports_map_js | safe }}
 </body>
 </html>

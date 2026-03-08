@@ -5,7 +5,28 @@ from branca.element import Element
 from folium import plugins
 import requests
 import folium
+from risk_monitor.user_data       import (
+    init_user_tables, get_user_settings, save_user_settings,
+    save_route_history, get_route_history, clear_route_history,
+    get_user_profile, save_user_profile, change_password,
+    extract_settings_from_form, get_settings_page_html, get_history_page_html,
+)
 
+
+from risk_monitor.features         import (
+    get_typhoon_signal, get_banner_html,
+    get_night_banner_html, enrich_routes_with_scores,
+    attach_fares, apply_night_safety,
+)
+from risk_monitor.weather          import get_weather_risk, get_weather_banner_html
+from risk_monitor.noah             import get_flood_risk_at, get_flood_warning_html, add_noah_flood_layer
+from risk_monitor.community_reports import (
+    init_report_tables, submit_report, confirm_report,
+    get_all_active_reports, get_reports_map_js, get_report_panel_html,
+    get_area_safety_penalty, apply_reports_to_routes, REPORT_TYPES,
+)
+
+from risk_monitor.crime_data import get_crime_risk_for_area, apply_crime_to_routes  # ← ADD THIS
 USE_MYSQL = False
 
 if USE_MYSQL:
@@ -16,6 +37,8 @@ else:
     chDB_perf = nsql()
 
 chDB_perf.init_db()
+init_user_tables(chDB_perf)
+init_report_tables(chDB_perf)
 app = Flask(__name__)
 app.secret_key = 'saferoute_super_secret_key'
 
@@ -427,6 +450,11 @@ def home():
     routes_data = []
     m = get_base_map()
 
+    # Pre-fill from history "Use Again" GET params
+    prefill_origin      = request.args.get('origin', '')
+    prefill_destination = request.args.get('destination', '')
+    prefill_mode        = request.args.get('commuterType', 'commute')
+
     if request.method == 'POST':
         origin_text   = request.form.get('origin')
         dest_text     = request.form.get('destination')
@@ -472,11 +500,73 @@ def home():
                         _draw_road_route(route, m)
 
                 if routes_data:
+                    # ── Safety enrichment pipeline ────────────────────────────
+                    enrich_routes_with_scores(routes_data)
+                    apply_night_safety(routes_data, commuter_type)
+                    attach_fares(routes_data, commuter_type)
+
+                    # Weather risk
+                    weather = get_weather_risk(orig_lat, orig_lon)
+                    from risk_monitor.weather import apply_weather_to_routes
+                    apply_weather_to_routes(routes_data, weather, commuter_type)
+
+                    # Flood risk (NOAH)
+                    flood = get_flood_risk_at(orig_lat, orig_lon)
+                    from risk_monitor.noah import apply_flood_to_routes
+                    apply_flood_to_routes(routes_data, flood, weather)
+
+                    # Community reports penalty
+                    apply_reports_to_routes(
+                        routes_data, chDB_perf,
+                        orig_lat, orig_lon, dest_lat, dest_lon,
+                    )
+
+                    # Add NOAH flood layer to map
+                    add_noah_flood_layer(m)
                     folium.LayerControl().add_to(m)
 
-    map_html = m.get_root().render()
-    return render_template('index.html', user=session['user'], map_html=map_html, routes=routes_data)
+                    # Save history
+                    if 'user' in session:
+                        save_route_history(
+                            chDB_perf, session['user'],
+                            origin_text, dest_text, commuter_type, len(routes_data)
+                        )
 
+    # ── Banners & report data for template ───────────────────────────────────
+    typhoon        = get_typhoon_signal()
+    typhoon_banner = get_banner_html(typhoon)
+    _commuter_type_for_banner = request.form.get('commuterType', 'commute') if request.method == 'POST' else 'commute'
+    night_banner   = get_night_banner_html(_commuter_type_for_banner)
+
+    # Use geocoded coords if available from this POST, otherwise default Manila
+    try:
+        weather_loc = (orig_lat, orig_lon)
+    except NameError:
+        weather_loc = (14.5995, 120.9842)
+    weather        = get_weather_risk(*weather_loc)
+    weather_banner = get_weather_banner_html(weather, _commuter_type_for_banner)
+
+    active_reports = get_all_active_reports(chDB_perf, limit=50)
+    reports_map_js = get_reports_map_js(active_reports)
+    report_panel   = get_report_panel_html()
+
+    map_html = m.get_root().render()
+    return render_template(
+        'index.html',
+        user=session['user'],
+        username=session['user'],
+        map_html=map_html,
+        routes=routes_data,
+        typhoon_banner=typhoon_banner,
+        night_banner=night_banner,
+        weather_banner=weather_banner,
+        reports_map_js=reports_map_js,
+        report_panel=report_panel,
+        active_reports=active_reports,
+        prefill_origin=prefill_origin,
+        prefill_destination=prefill_destination,
+        prefill_mode=prefill_mode,
+    )
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -591,11 +681,223 @@ def get_routes():
     nav_response = get_navigation_data(
         orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, []
     )
-    
+
     if "error" in nav_response:
         return jsonify({"error": nav_response["error"]}), 400
 
+    routes = nav_response.get("routes", [])
+    if routes:
+        from risk_monitor.features import (
+            rank_routes, enrich_routes_with_scores,
+            attach_fares, apply_night_safety,
+        )
+        from risk_monitor.weather import apply_weather_to_routes
+        from risk_monitor.noah   import apply_flood_to_routes
+
+        routes = rank_routes(routes, commuter_type)
+        enrich_routes_with_scores(routes)
+        apply_night_safety(routes, commuter_type)
+        attach_fares(routes, commuter_type)
+
+        weather = get_weather_risk(orig_lat, orig_lon)
+        apply_weather_to_routes(routes, weather, commuter_type)
+
+        flood = get_flood_risk_at(orig_lat, orig_lon)
+        apply_flood_to_routes(routes, flood, weather)
+
+        apply_reports_to_routes(
+            routes, chDB_perf,
+            orig_lat, orig_lon, dest_lat, dest_lon,
+        )
+        crime = get_crime_risk_for_area(orig_lat, orig_lon, origin_text or "")
+        apply_crime_to_routes(routes, crime, commuter_type)
+
+        # Save to route history
+        if 'user' in session:
+            orig_label = origin_text or f"{orig_lat:.5f}, {orig_lon:.5f}"
+            dest_label = dest_text   or f"{dest_lat:.5f}, {dest_lon:.5f}"
+            save_route_history(
+                chDB_perf, session['user'],
+                orig_label, dest_label, commuter_type, len(routes)
+            )
+
+        nav_response["routes"] = routes
+
     return jsonify(nav_response)
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  COMMUNITY REPORTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/report', methods=['POST'])
+def report():
+    if 'user' not in session:
+        return ('Unauthorized', 401)
+    try:
+        rtype = request.form.get('report_type', '')
+        lat   = float(request.form.get('lat', 0))
+        lon   = float(request.form.get('lon', 0))
+        desc  = request.form.get('description', '')
+        result = submit_report(chDB_perf, session['user'], rtype, lat, lon, desc)
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or \
+           request.content_type == 'application/x-www-form-urlencoded':
+            return jsonify(result)
+        flash(result['message'])
+        return redirect(url_for('home'))
+    except Exception as e:
+        return jsonify({'ok': False, 'message': str(e)}), 400
+
+
+@app.route('/api/reports', methods=['GET'])
+def api_reports():
+    reports = get_all_active_reports(chDB_perf, limit=100)
+    return jsonify(reports)
+
+
+@app.route('/api/reports/confirm', methods=['POST'])
+def api_confirm_report():
+    if 'user' not in session:
+        return jsonify({'ok': False, 'message': 'Login required'}), 401
+    report_id = request.json.get('report_id')
+    result = confirm_report(chDB_perf, int(report_id), session['user'])
+    return jsonify(result)
+
+
+@app.route('/api/report-types', methods=['GET'])
+def api_report_types():
+    from risk_monitor.community_reports import get_report_type_options_for_api
+    return jsonify(get_report_type_options_for_api())
+
+
+@app.route('/community', methods=['GET'])
+def community():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    reports = get_all_active_reports(chDB_perf, limit=50)
+    weather = get_weather_risk(14.5995, 120.9842)
+    return render_template(
+        'community.html',
+        user=session['user'],
+        username=session['user'],
+        reports=reports,
+        weather=weather,
+        REPORT_TYPES=REPORT_TYPES,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  USER SETTINGS + HISTORY
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/settings', methods=['GET', 'POST'])
+def settings():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    flash_msg = ''
+    if request.method == 'POST':
+        settings_data = extract_settings_from_form(request.form)
+        save_user_settings(chDB_perf, session['user'], settings_data)
+        if request.form.get('display_name') is not None:
+            save_user_profile(
+                chDB_perf, session['user'],
+                request.form.get('display_name', ''),
+                request.form.get('email', ''),
+            )
+        flash_msg = 'Settings saved.'
+    user_settings = get_user_settings(chDB_perf, session['user'])
+    profile       = get_user_profile(chDB_perf, session['user'])
+    return get_settings_page_html(user_settings, profile, flash_msg)
+
+
+@app.route('/history')
+def history():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    hist = get_route_history(chDB_perf, session['user'])
+    return get_history_page_html(hist, session['user'])
+
+
+@app.route('/history/clear', methods=['POST'])
+def history_clear():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    clear_route_history(chDB_perf, session['user'])
+    flash('History cleared.')
+    return redirect(url_for('history'))
+
+
+@app.route('/account/password', methods=['POST'])
+def change_password_route():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    result = change_password(
+        chDB_perf, session['user'],
+        request.form.get('old_password', ''),
+        request.form.get('new_password', ''),
+    )
+    flash(result['message'])
+    return redirect(url_for('settings'))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SAFETY API
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/safety', methods=['GET'])
+def api_safety():
+    """Returns weather, flood, and community report risk for a location."""
+    try:
+        lat = float(request.args.get('lat', 14.5995))
+        lon = float(request.args.get('lon', 120.9842))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid coordinates'}), 400
+
+    weather = get_weather_risk(lat, lon)
+    flood   = get_flood_risk_at(lat, lon)
+    penalty = get_area_safety_penalty(chDB_perf, lat, lon)
+    reports = get_all_active_reports(chDB_perf, limit=50)
+
+    crime = get_crime_risk_for_area(lat, lon, "")
+
+    return jsonify({
+        'weather': {
+            'risk_level':  weather.get('risk_level'),
+            'description': weather.get('description'),
+            'temp_c':      weather.get('temp_c'),
+            'wind_kph':    weather.get('wind_kph'),
+            'rain_mm':     weather.get('rain_mm'),
+            'color':       weather.get('color'),
+        },
+        'flood': {
+            'risk_level': flood.get('risk_level'),
+            'label':      flood.get('label'),
+            'color':      flood.get('color'),
+            'penalty':    flood.get('penalty'),
+        },
+        'crime': {
+            'risk_level': crime.get('risk_level'),
+            'area':       crime.get('area'),
+            'warning':    crime.get('warning'),
+            'penalty':    crime.get('penalty'),
+        },
+        'community_penalty': penalty,
+        'reports': [
+            {
+                'id':            r['id'],
+                'type':          r['report_type'],
+                'icon':          r['icon'],
+                'label':         r['label'],
+                'color':         r['color'],
+                'lat':           r['lat'],
+                'lon':           r['lon'],
+                'description':   r['description'],
+                'confirmations': r['confirmations'],
+                'verified':      r['verified'],
+                'reported_at':   r['reported_at'],
+            }
+            for r in reports
+        ],
+    })
 
 if __name__ == '__main__':
     app.run(debug=True)

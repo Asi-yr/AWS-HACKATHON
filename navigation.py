@@ -421,14 +421,14 @@ def _fetch_osrm_foot(orig_lon, orig_lat, dest_lon, dest_lat):
     headers = {'User-Agent': 'SafeRouteAI/1.0 (contact@saferoute.local)'}
     
     # 1. Try FOSSGIS first
-    url_fossgis = f"https://routing.openstreetmap.de/routed-foot/route/v1/driving/{orig_lon},{orig_lat};{dest_lon},{dest_lat}?overview=full&geometries=geojson"
+    url_fossgis = f"https://routing.openstreetmap.de/routed-foot/route/v1/driving/{orig_lon},{orig_lat};{dest_lon},{dest_lat}?overview=full&geometries=geojson&alternatives=true"
     try:
         r = requests.get(url_fossgis, headers=headers, timeout=6).json()
         if r.get('code') == 'Ok' and r.get('routes'): return r
     except Exception: pass
 
     # 2. Fallback to standard OSRM foot
-    url_standard = f"https://router.project-osrm.org/route/v1/foot/{orig_lon},{orig_lat};{dest_lon},{dest_lat}?overview=full&geometries=geojson"
+    url_standard = f"https://router.project-osrm.org/route/v1/foot/{orig_lon},{orig_lat};{dest_lon},{dest_lat}?overview=full&geometries=geojson&alternatives=true"
     try:
         r = requests.get(url_standard, headers=headers, timeout=6).json()
         if r.get('code') == 'Ok' and r.get('routes'): return r
@@ -439,21 +439,29 @@ def _fetch_osrm_foot(orig_lon, orig_lat, dest_lon, dest_lat):
 def get_walk_route(orig_lon, orig_lat, dest_lon, dest_lat):
     r = _fetch_osrm_foot(orig_lon, orig_lat, dest_lon, dest_lat)
     if r:
-        route = r["routes"][0]
-        coords = [[pt[1], pt[0]] for pt in route["geometry"]["coordinates"]]
-        return {"routes":[{
-            "id": 0,
-            "name": "Walking Route",
-            "type": "walk",
-            "color": "#2ecc71",
-            "time": f"{int(route['duration'] / 60)} mins",
-            "distance": f"{round(route['distance'] / 1000, 1)} km",
-            "coords": coords,
-            "segments": [],
-            "stations": [],
-            "safety_score": 90,
-            "hazards_flagged": "Pedestrian paths only",
-        }]}
+        walk_colors = ["#2ecc71", "#27ae60", "#1abc9c"]
+        walk_names  = ["Walking Route", "Alternative Walk", "Scenic Walk"]
+        routes_out  = []
+        for i, route in enumerate(r["routes"][:3]):
+            coords = [[pt[1], pt[0]] for pt in route["geometry"]["coordinates"]]
+            routes_out.append({
+                "id":              i,
+                "name":            walk_names[i] if i < len(walk_names) else f"Walk Option {i+1}",
+                "type":            "walk",
+                "color":           walk_colors[i] if i < len(walk_colors) else "#2ecc71",
+                "time":            f"{int(route['duration'] / 60)} mins",
+                "distance":        f"{round(route['distance'] / 1000, 1)} km",
+                "coords":          coords,
+                "segments":        [],
+                "stations":        [],
+                "safety_score":    90,
+                "hazards_flagged": "Pedestrian paths only",
+            })
+        if routes_out:
+            routes_out[0]["mode_label"] = "Only Route" if len(routes_out) == 1 else "Fastest"
+            if len(routes_out) > 1: routes_out[1]["mode_label"] = "Alternative"
+            if len(routes_out) > 2: routes_out[2]["mode_label"] = "Scenic"
+        return {"routes": routes_out}
     return {"error": "Could not calculate walking route."}
 
 

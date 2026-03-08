@@ -225,3 +225,32 @@ body { background-color: #f4f7f6; color: #333; overflow: hidden; height: 100vh; 
 .sub-tile:hover   { background: #eaf4fd; border-color: var(--mode-color); }
 .sub-tile.active  { background: #eaf4fd; border-color: var(--mode-color); border-width: 2px; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Safety risk overlay / warning cards ────────────────────────────────────── */
+.route-warning {
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-bottom: 3px;
+    margin-top: 2px;
+    line-height: 1.4;
+}
+.night-warning    { background: #2c3e5018; color: #2c3e50; border-left: 3px solid #2c3e50; }
+.weather-warning  { background: #2980b918; color: #1a5276; border-left: 3px solid #2980b9; }
+.flood-warning    { background: #1a527618; color: #1a5276; border-left: 3px solid #1a5276; }
+.report-warning   { background: #e74c3c18; color: #922b21; border-left: 3px solid #e74c3c; }
+
+.fare-badge {
+    font-size: 12px;
+    font-weight: 700;
+    color: #27ae60;
+    margin-left: 10px;
+    background: #eafaf1;
+    border-radius: 10px;
+    padding: 2px 8px;
+}
+
+/* ── Community reports nav link ──────────────────────────────────────────────── */
+.user-info a { color: #2980b9; text-decoration: none; }
+.user-info a:hover { text-decoration: underline; }
