@@ -26,7 +26,9 @@ from risk_monitor.community_reports import (
     get_area_safety_penalty, apply_reports_to_routes, REPORT_TYPES,
 )
 
-from risk_monitor.crime_data import get_crime_risk_for_area, apply_crime_to_routes  # ← ADD THIS
+from risk_monitor.crime_data import get_crime_risk_for_area  # used by home() POST path
+from rss import build_rss
+from risk_monitor.incidents import get_active_incidents, apply_incidents_to_routes, get_incidents_map_data
 USE_MYSQL = False
 
 if USE_MYSQL:
@@ -450,10 +452,10 @@ def home():
     routes_data = []
     m = get_base_map()
 
-    # Pre-fill from history "Use Again" GET params
+    # ── Prefill from GET params (history "Use Again") ─────────────────────
     prefill_origin      = request.args.get('origin', '')
     prefill_destination = request.args.get('destination', '')
-    prefill_mode        = request.args.get('commuterType', 'commute')
+    prefill_mode        = request.args.get('commuterType', '')
 
     if request.method == 'POST':
         origin_text   = request.form.get('origin')
@@ -520,6 +522,11 @@ def home():
                         routes_data, chDB_perf,
                         orig_lat, orig_lon, dest_lat, dest_lon,
                     )
+
+                    # Crime zone risk (static JSON + community report bump)
+                    from risk_monitor.crime_data import apply_crime_to_routes, get_crime_risk_with_reports
+                    crime = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
+                    apply_crime_to_routes(routes_data, crime, commuter_type)
 
                     # Add NOAH flood layer to map
                     add_noah_flood_layer(m)
@@ -694,7 +701,23 @@ def get_routes():
         from risk_monitor.weather import apply_weather_to_routes
         from risk_monitor.noah   import apply_flood_to_routes
 
-        routes = rank_routes(routes, commuter_type)
+        # rank_routes labels and pads road/walk routes to 3.
+        # Skip for transit/jeepney/bus/train — they return a single
+        # carefully-built segmented route that must not be padded with
+        # raw OSRM driving detours.
+        _is_transit = commuter_type.lower().strip() in (
+            'transit', 'jeepney', 'bus', 'train',
+            'lrt1', 'lrt-1', 'lrt2', 'lrt-2',
+            'mrt3', 'mrt-3', 'mrt7', 'pnr', 'commute',
+        )
+        if not _is_transit:
+            routes = rank_routes(routes, commuter_type)
+        else:
+            # Just assign id/mode_label so the frontend renders correctly
+            for i, r in enumerate(routes):
+                r.setdefault('id', i)
+                r.setdefault('mode_label', 'Route' if len(routes) > 1 else 'Best Route')
+                r.setdefault('mode_label_color', '#e67e22')
         enrich_routes_with_scores(routes)
         apply_night_safety(routes, commuter_type)
         attach_fares(routes, commuter_type)
@@ -709,8 +732,56 @@ def get_routes():
             routes, chDB_perf,
             orig_lat, orig_lon, dest_lat, dest_lon,
         )
-        crime = get_crime_risk_for_area(orig_lat, orig_lon, origin_text or "")
-        apply_crime_to_routes(routes, crime, commuter_type)
+
+        # Crime risk: origin + destination endpoints
+        from risk_monitor.crime_data import (
+            get_crime_risk_with_reports, apply_crime_both_ends,
+            scan_route_crime_zones, apply_route_crime_to_routes,
+        )
+        orig_crime = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
+        dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
+
+        # Scan each route's actual path for intermediate crime zones
+        for route in routes:
+            # Collect flat waypoint list from route geometry
+            wps = []
+            if route.get("segments"):
+                for seg in route["segments"]:
+                    c = seg.get("coords", [])
+                    # train segments have nested lists [[lat,lon],...]
+                    if c and isinstance(c[0], list) and isinstance(c[0][0], list):
+                        for sub in c:
+                            wps.extend(sub)
+                    else:
+                        wps.extend(c)
+            if not wps and route.get("coords"):
+                wps = route["coords"]
+            route["route_crime_zones"] = scan_route_crime_zones(wps)
+
+        apply_crime_both_ends(routes, orig_crime, dest_crime, commuter_type)
+        apply_route_crime_to_routes(routes, commuter_type)
+
+        # ── Real-time incidents (GDACS, NDRRMC, ReliefWeb) ────────────────
+        try:
+            active_incidents = get_active_incidents()
+            apply_incidents_to_routes(
+                routes, active_incidents,
+                orig_lat, orig_lon, dest_lat, dest_lon,
+            )
+            nav_response["incidents"] = get_incidents_map_data(active_incidents)
+        except Exception as _ie:
+            print(f"[incidents] pipeline error: {_ie}")
+            nav_response["incidents"] = []
+
+        # ── Color each route by safety score ──────────────────────────────
+        def _safety_to_color(score):
+            if score >= 80: return '#27ae60'   # green
+            if score >= 65: return '#f39c12'   # amber
+            if score >= 50: return '#e67e22'   # orange
+            return '#e74c3c'                   # red
+
+        for route in routes:
+            route['color'] = _safety_to_color(route.get('safety_score', 75))
 
         # Save to route history
         if 'user' in session:
@@ -723,11 +794,41 @@ def get_routes():
 
         nav_response["routes"] = routes
 
+        # ── Include resolved coordinates so frontend can place A/B markers ─
+        nav_response["orig_lat"]  = orig_lat
+        nav_response["orig_lon"]  = orig_lon
+        nav_response["dest_lat"]  = dest_lat
+        nav_response["dest_lon"]  = dest_lon
+        nav_response["orig_text"] = origin_text or ""
+        nav_response["dest_text"] = dest_text   or ""
+
+        # ── Attach live banners to API response ───────────────────────────
+        from risk_monitor.weather import get_weather_banner_html as _wbh
+        from risk_monitor.noah   import get_flood_warning_html  as _fwh
+        nav_response["weather_banner"] = _wbh(weather, commuter_type)
+        nav_response["flood_banner"]   = _fwh(flood)
+        nav_response["weather_risk"]   = weather.get("risk_level", "clear")
+        nav_response["flood_risk"]     = flood.get("risk_level",   "none")
+
     return jsonify(nav_response)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  COMMUNITY REPORTS
 # ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/incidents')
+def api_incidents():
+    """
+    Real-time incident feed for the map overlay.
+    Returns active incidents from GDACS, NDRRMC, and ReliefWeb.
+    Cached for 10 minutes server-side — safe to poll on page load.
+    """
+    try:
+        incidents = get_active_incidents()
+        return jsonify(get_incidents_map_data(incidents))
+    except Exception as e:
+        return jsonify([])
+
 
 @app.route('/report', methods=['POST'])
 def report():
@@ -898,6 +999,46 @@ def api_safety():
             for r in reports
         ],
     })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  RSS FEED
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/rss')
+def rss_feed():
+    """
+    Combined RSS 2.0 feed of community reports + weather/typhoon alerts.
+
+    Query params:
+        lat, lon   — coordinates for weather risk (default: Manila)
+        type       — "all" (default) | "reports" | "weather"
+    """
+    from flask import Response, request as _req
+    try:
+        lat       = float(_req.args.get('lat', 14.5995))
+        lon       = float(_req.args.get('lon', 120.9842))
+    except (TypeError, ValueError):
+        lat, lon  = 14.5995, 120.9842
+
+    feed_type = _req.args.get('type', 'all')
+    if feed_type not in ('all', 'reports', 'weather'):
+        feed_type = 'all'
+
+    reports = get_all_active_reports(chDB_perf, limit=100)
+    typhoon = get_typhoon_signal()
+    weather = get_weather_risk(lat, lon)
+
+    xml_str = build_rss(
+        reports=reports,
+        typhoon=typhoon,
+        weather=weather,
+        lat=lat,
+        lon=lon,
+        feed_type=feed_type,
+    )
+
+    return Response(xml_str, mimetype='application/rss+xml; charset=utf-8')
 
 if __name__ == '__main__':
     app.run(debug=True)

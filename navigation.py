@@ -382,7 +382,7 @@ _ROUTE_COLORS = {
 def _osrm_road_route(orig_lon, orig_lat, dest_lon, dest_lat, mode_label, colors):
     url = (
         f"{_OSRM_BASE}/{orig_lon},{orig_lat};{dest_lon},{dest_lat}"
-        f"?overview=full&geometries=geojson&alternatives=true&steps=true"
+        f"?overview=full&geometries=geojson&alternatives=3&steps=true"
     )
     try:
         r = requests.get(url, headers={'User-Agent': 'SafeRouteAI'}, timeout=10).json()
@@ -421,14 +421,14 @@ def _fetch_osrm_foot(orig_lon, orig_lat, dest_lon, dest_lat):
     headers = {'User-Agent': 'SafeRouteAI/1.0 (contact@saferoute.local)'}
     
     # 1. Try FOSSGIS first
-    url_fossgis = f"https://routing.openstreetmap.de/routed-foot/route/v1/driving/{orig_lon},{orig_lat};{dest_lon},{dest_lat}?overview=full&geometries=geojson&alternatives=true"
+    url_fossgis = f"https://routing.openstreetmap.de/routed-foot/route/v1/driving/{orig_lon},{orig_lat};{dest_lon},{dest_lat}?overview=full&geometries=geojson&alternatives=3"
     try:
         r = requests.get(url_fossgis, headers=headers, timeout=6).json()
         if r.get('code') == 'Ok' and r.get('routes'): return r
     except Exception: pass
 
     # 2. Fallback to standard OSRM foot
-    url_standard = f"https://router.project-osrm.org/route/v1/foot/{orig_lon},{orig_lat};{dest_lon},{dest_lat}?overview=full&geometries=geojson&alternatives=true"
+    url_standard = f"https://router.project-osrm.org/route/v1/foot/{orig_lon},{orig_lat};{dest_lon},{dest_lat}?overview=full&geometries=geojson&alternatives=3"
     try:
         r = requests.get(url_standard, headers=headers, timeout=6).json()
         if r.get('code') == 'Ok' and r.get('routes'): return r

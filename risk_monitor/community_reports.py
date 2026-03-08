@@ -38,19 +38,20 @@ _PHT = timezone(timedelta(hours=8))
 
 REPORT_TYPES = {
     # Safety hazards
-    "flooding":      {"label": "Flooding",          "icon": "🌊", "expiry_hours": 3,  "base_penalty": 30, "color": "#1a5276", "category": "hazard"},
-    "dark_area":     {"label": "Dark / Unlit Area",  "icon": "🌑", "expiry_hours": 12, "base_penalty": 15, "color": "#2c3e50", "category": "safety"},
-    "crime":         {"label": "Crime / Snatching",  "icon": "🚨", "expiry_hours": 6,  "base_penalty": 25, "color": "#c0392b", "category": "safety"},
-    "harassment":    {"label": "Harassment",          "icon": "⚠️", "expiry_hours": 6,  "base_penalty": 20, "color": "#e74c3c", "category": "safety"},
-    "road_damage":   {"label": "Road Damage",         "icon": "🕳️", "expiry_hours": 24, "base_penalty": 10, "color": "#e67e22", "category": "hazard"},
-    "accident":      {"label": "Accident",            "icon": "💥", "expiry_hours": 2,  "base_penalty": 20, "color": "#e74c3c", "category": "hazard"},
+    "flooding":      {"label": "Flooding",           "icon": "🌊", "expiry_hours": 3,  "base_penalty": 30, "color": "#1a5276", "category": "hazard"},
+    "fire":          {"label": "Fire / Blaze",        "icon": "🔥", "expiry_hours": 2,  "base_penalty": 45, "color": "#c0392b", "category": "hazard"},
+    "dark_area":     {"label": "Dark / Unlit Area",   "icon": "🌑", "expiry_hours": 12, "base_penalty": 15, "color": "#2c3e50", "category": "safety"},
+    "crime":         {"label": "Crime / Snatching",   "icon": "🚨", "expiry_hours": 6,  "base_penalty": 25, "color": "#c0392b", "category": "safety"},
+    "harassment":    {"label": "Harassment",           "icon": "⚠️", "expiry_hours": 6,  "base_penalty": 20, "color": "#e74c3c", "category": "safety"},
+    "road_damage":   {"label": "Road Damage",          "icon": "🕳️", "expiry_hours": 24, "base_penalty": 10, "color": "#e67e22", "category": "hazard"},
+    "accident":      {"label": "Accident",             "icon": "💥", "expiry_hours": 2,  "base_penalty": 20, "color": "#e74c3c", "category": "hazard"},
     # Traffic
-    "heavy_traffic": {"label": "Heavy Traffic",       "icon": "🚗", "expiry_hours": 1,  "base_penalty": 10, "color": "#f39c12", "category": "traffic"},
-    "road_closed":   {"label": "Road Closed",         "icon": "🚧", "expiry_hours": 6,  "base_penalty": 20, "color": "#e67e22", "category": "traffic"},
-    "construction":  {"label": "Construction",        "icon": "🏗️", "expiry_hours": 48, "base_penalty": 8,  "color": "#d35400", "category": "traffic"},
+    "heavy_traffic": {"label": "Heavy Traffic",        "icon": "🚗", "expiry_hours": 1,  "base_penalty": 10, "color": "#f39c12", "category": "traffic"},
+    "road_closed":   {"label": "Road Closed",          "icon": "🚧", "expiry_hours": 6,  "base_penalty": 20, "color": "#e67e22", "category": "traffic"},
+    "construction":  {"label": "Construction",         "icon": "🏗️", "expiry_hours": 48, "base_penalty": 8,  "color": "#d35400", "category": "traffic"},
     # Community info
-    "safe_spot":     {"label": "Safe Spot / Well-Lit","icon": "✅", "expiry_hours": 24, "base_penalty": -10,"color": "#27ae60", "category": "positive"},
-    "police_visible":{"label": "Police Visible",      "icon": "👮", "expiry_hours": 2,  "base_penalty": -8, "color": "#2980b9", "category": "positive"},
+    "safe_spot":     {"label": "Safe Spot / Well-Lit", "icon": "✅", "expiry_hours": 24, "base_penalty": -10,"color": "#27ae60", "category": "positive"},
+    "police_visible":{"label": "Police Visible",       "icon": "👮", "expiry_hours": 2,  "base_penalty": -8, "color": "#2980b9", "category": "positive"},
 }
 
 # How far (in degrees, ~111km per degree) a report affects nearby routes
@@ -447,6 +448,18 @@ def apply_reports_to_routes(
             r["score_color"]  = get_score_color(r["safety_score"])
             r["score_label"]  = get_score_label(r["safety_score"])
         r["report_warnings"] = warnings
+
+        # Separate fire warning — shown prominently with alternative route hint
+        fire_reports = [rep for rep in all_nearby if rep["report_type"] == "fire"]
+        if fire_reports:
+            fr = fire_reports[0]
+            conf = f" ({fr['confirmations']} confirmed)" if fr["verified"] else ""
+            r["fire_warning"] = (
+                f"Active fire reported nearby{conf}. "
+                "This route passes through a hazard zone — an alternative route is strongly recommended."
+            )
+        else:
+            r["fire_warning"] = ""
 
     return routes
 

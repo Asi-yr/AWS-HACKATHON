@@ -9,9 +9,14 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
-{{ typhoon_banner | safe }}
-{{ night_banner | safe }}
-{{ weather_banner | safe }}
+<!-- ── Banner layer — always above the Leaflet map (which is isolated at z-index:0) ── -->
+<div id="banner-layer" style="position:fixed;top:0;left:0;right:0;z-index:100000;pointer-events:none;">
+  <div style="pointer-events:auto;">
+    {{ typhoon_banner | safe }}
+    {{ night_banner | safe }}
+    {{ weather_banner | safe }}
+  </div>
+</div>
 
 <div class="app-container">
 
@@ -27,6 +32,7 @@
         <a href="/settings">Settings</a> &nbsp;·&nbsp;
         <a href="/community">Reports</a> &nbsp;·&nbsp;
         <a href="/history">History</a> &nbsp;·&nbsp;
+        <a href="/rss" target="_blank" title="Subscribe to safety alerts RSS feed" style="color:#e67e22;font-weight:bold;">📡 RSS</a> &nbsp;·&nbsp;
         <a href="/logout">Logout</a>
       </div>
     </div>
@@ -91,6 +97,23 @@
     <!-- Route results -->
     <div class="route-results" id="route-results"></div>
 
+    <!-- ── Data Sources Panel ───────────────────────────────────────────── -->
+    <div id="data-sources-panel" style="margin:12px 8px 8px;padding:10px 12px;background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;font-size:11px;color:#555;">
+        <div style="font-weight:bold;color:#2c3e50;margin-bottom:7px;font-size:12px;">📡 Live Data Sources</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;">
+            <a href="https://www.gdacs.org/" target="_blank" style="background:#1a5276;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">GDACS</a>
+            <a href="https://www.ndrrmc.gov.ph/" target="_blank" style="background:#922b21;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">NDRRMC</a>
+            <a href="https://reliefweb.int/" target="_blank" style="background:#1e8bc3;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">UN OCHA</a>
+            <a href="https://noah.up.edu.ph/" target="_blank" style="background:#117a65;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">NOAH Floods</a>
+            <a href="https://open-meteo.com/" target="_blank" style="background:#1f618d;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">Open-Meteo</a>
+            <a href="https://bagong.pagasa.dost.gov.ph/" target="_blank" style="background:#6c3483;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">PAGASA</a>
+        </div>
+        <div style="color:#888;font-size:10px;line-height:1.5;">
+            Incidents refresh every 10 min · Weather every search · Crime zones from PNP data · Community reports peer-verified
+        </div>
+        <div id="incident-status" style="margin-top:6px;font-size:10px;color:#888;">Checking for active incidents...</div>
+    </div>
+
   </div><!-- /sidebar -->
 
   <!-- ════════════════════════════════════════════════════════════════════ -->
@@ -129,6 +152,9 @@ let origMarker  = null;
 let destMarker  = null;
 let routeLayers = [];     // [{routeId, layers:[…]}, …]
 let activeRouteId = null;
+let allRoutes = [];           // full route list from last search
+let lastOrigCoords = null;    // orig coords from last search
+let lastDestCoords = null;    // dest coords from last search
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 // SVG-based markers — no emoji, renders consistently on all platforms
@@ -287,9 +313,13 @@ function checkEnableButton() {
 function clearRoutes() {
   routeLayers.forEach(r => r.layers.forEach(l => map.removeLayer(l)));
   routeLayers = [];
-  nearbyLayers.forEach(l => map.removeLayer(l)); // Also clear detection circles when route is found
+  nearbyLayers.forEach(l => map.removeLayer(l));
   nearbyLayers = [];
   activeRouteId = null;
+  allRoutes = [];
+  hasActiveRoute = false;
+  ++_overlayGeneration;   // cancel any in-flight async safety fetch
+  clearCrimeOverlay();    // remove all crime/flood circles
 }
 
 // ── Mode selector ─────────────────────────────────────────────────────────────
@@ -520,11 +550,38 @@ async function findRoutes() {
     if (data.error) {
       showError(data.error);
     } else if (data.routes && data.routes.length) {
+      allRoutes = data.routes;
+
+      // ── Always place A/B markers using server-resolved coordinates ──────
+      // This covers: manual text input, autocomplete, AND history "Use Again"
+      // (where origCoords/destCoords may still be null on page load)
+      if (data.orig_lat && data.orig_lon) {
+        origCoords = { lat: data.orig_lat, lon: data.orig_lon };
+        if (origMarker) map.removeLayer(origMarker);
+        origMarker = L.marker([data.orig_lat, data.orig_lon], { icon: mkPin('#2980b9', 'A') })
+          .addTo(map).bindPopup('Origin');
+        // Also update the input field if it was just a coordinate string
+        const origInput = document.getElementById('origin-input');
+        if (!origInput.value.trim() && data.orig_text) origInput.value = data.orig_text;
+      }
+      if (data.dest_lat && data.dest_lon) {
+        destCoords = { lat: data.dest_lat, lon: data.dest_lon };
+        if (destMarker) map.removeLayer(destMarker);
+        destMarker = L.marker([data.dest_lat, data.dest_lon], { icon: mkPin('#e74c3c', 'B') })
+          .addTo(map).bindPopup('Destination');
+        const destInput = document.getElementById('dest-input');
+        if (!destInput.value.trim() && data.dest_text) destInput.value = data.dest_text;
+      }
+
+      lastOrigCoords = origCoords;
+      lastDestCoords = destCoords;
       renderRouteCards(data.routes);
       drawAllRoutes(data.routes);
       highlightRoute(data.routes[0].id);
-      // Draw safety overlays for the searched area
-      drawAreaSafetyOverlay(body.orig_coords || null, body.dest_coords || null, data.routes[0]);
+      // Draw safety overlays for the first (default selected) route
+      drawAreaSafetyOverlay(lastOrigCoords, lastDestCoords, data.routes[0]);
+      // Update live weather/flood banners from API response
+      updateLiveBanners(data);
     } else {
       showError('No routes found.');
     }
@@ -539,6 +596,30 @@ async function findRoutes() {
 function showError(msg) {
   document.getElementById('route-results').innerHTML =
     `<div class="flash-message">${msg}</div>`;
+}
+
+// ── Live banner updater — replaces server-rendered banners after AJAX search ──
+function updateLiveBanners(data) {
+  const bannerLayer = document.getElementById('banner-layer');
+  if (!bannerLayer) return;
+
+  // Remove any previously injected dynamic banners
+  document.querySelectorAll('.dynamic-weather-banner, .dynamic-flood-banner').forEach(el => el.remove());
+
+  if (data.weather_banner) {
+    const div = document.createElement('div');
+    div.className = 'dynamic-weather-banner';
+    div.style.pointerEvents = 'auto';
+    div.innerHTML = data.weather_banner;
+    bannerLayer.querySelector('div').appendChild(div);
+  }
+  if (data.flood_banner) {
+    const div = document.createElement('div');
+    div.className = 'dynamic-flood-banner';
+    div.style.pointerEvents = 'auto';
+    div.innerHTML = data.flood_banner;
+    bannerLayer.querySelector('div').appendChild(div);
+  }
 }
 
 
@@ -624,6 +705,20 @@ function renderRouteCards(routes) {
         });
     }
     if (route.crime_warning) warningLines += `<div class="route-warning report-warning">🚨 ${escHtml(route.crime_warning)}</div>`;
+    if (route.fire_warning)  warningLines += `<div class="route-warning report-warning" style="background:#c0392b18;color:#7b241c;border-left:3px solid #c0392b;">🔥 ${escHtml(route.fire_warning)}</div>`;
+
+    // Real-time incident warnings from GDACS/NDRRMC
+    if (route.incident_warnings && route.incident_warnings.length) {
+        route.incident_warnings.forEach(w => {
+            warningLines += `<div class="route-warning report-warning" style="background:#f9ebea;color:#7b241c;border-left:3px solid #e74c3c;">${escHtml(w)}</div>`;
+        });
+    }
+    // Avoid recommended banner (active fire on route)
+    if (route.avoid_recommended) {
+        warningLines += `<div style="margin-top:6px;background:#c0392b;color:#fff;padding:6px 10px;border-radius:5px;font-size:12px;font-weight:bold;text-align:center;">
+            🔥 AVOID RECOMMENDED — Active incident on this route
+        </div>`;
+    }
     const fareDisp = route.fare ? route.fare.display : '';
     const safetyHTML = `
       <div class="route-safety" style="color:${safetyColor(sc)}">
@@ -680,6 +775,8 @@ function renderRouteCards(routes) {
       fitRoute(route.id);
       document.querySelectorAll('.route-card').forEach(c =>
         c.classList.toggle('selected', c.dataset.id == route.id));
+      // Instantly swap crime zone circles for the selected route — no async fetch
+      drawRouteZoneOverlay(route);
     });
 
     container.appendChild(card);
@@ -689,10 +786,20 @@ function renderRouteCards(routes) {
 
 // ── Map drawing ───────────────────────────────────────────────────────────────
 
+// ── Safety color helper (mirrors backend) ─────────────────────────────────────
+function safetyLineColor(score) {
+  if (score >= 80) return '#27ae60';   // green  — safe
+  if (score >= 65) return '#f39c12';   // amber  — caution
+  if (score >= 50) return '#e67e22';   // orange — moderate risk
+  return '#e74c3c';                    // red    — high risk
+}
+
 function drawAllRoutes(routes) {
   routes.forEach(route => {
     const layers = [];
-    
+    // Use safety-score colour for all polylines; fallback to route.color if score missing
+    const lineColor = safetyLineColor(route.safety_score || 75);
+
     if (route.type === 'transit' && route.segments) {
       route.segments.forEach((seg, idx) => {
         // Draw the polyline for this segment
@@ -702,7 +809,7 @@ function drawAllRoutes(routes) {
           coordSets.forEach(cs => {
             if (cs && cs.length >= 2) {
               layers.push(L.polyline(cs, {
-                color: seg.color || route.color, weight: 6, opacity: 0.9,
+                color: lineColor, weight: 6, opacity: 0.9,
                 dashArray: '12, 5',
               }).addTo(map));
             }
@@ -712,14 +819,14 @@ function drawAllRoutes(routes) {
             const isEnd = (i === 0 || i === seg.stations.length - 1);
             layers.push(L.circleMarker([st.lat, st.lon], {
               radius: isEnd ? 8 : 5,
-              color: seg.color || route.color,
-              fillColor: isEnd ? (seg.color || route.color) : 'white',
+              color: lineColor,
+              fillColor: isEnd ? lineColor : 'white',
               fillOpacity: 1, weight: 2,
             }).addTo(map).bindPopup(st.name));
           });
         } else if (seg.type === 'jeepney' && seg.coords && seg.coords.length >= 2) {
           layers.push(L.polyline(seg.coords, {
-            color: seg.color || '#e67e22', weight: 5, opacity: 0.88,
+            color: lineColor, weight: 5, opacity: 0.88,
           }).addTo(map));
         } else if (seg.type === 'walk' && seg.coords && seg.coords.length >= 2) {
           layers.push(L.polyline(seg.coords, {
@@ -729,26 +836,21 @@ function drawAllRoutes(routes) {
         }
 
         // ── ADD TRANSFER MARKERS ──
-        // If this is NOT the first segment, place a marker at the start of this segment
-        // to indicate "Board Here" or "Transfer Here"
         if (idx > 0 && seg.coords && seg.coords.length > 0) {
             let startPt = seg.coords[0];
-            // Handle nested coords for train
             if (seg.type === 'train' && Array.isArray(startPt) && Array.isArray(startPt[0])) {
                 startPt = startPt[0];
             }
-            
-            let segType = seg.type;
-
             layers.push(L.marker(startPt, {
-                icon: transferIcon(segType),
+                icon: transferIcon(seg.type),
                 zIndexOffset: 1000
             }).addTo(map).bindTooltip(seg.label || "Transfer"));
         }
       });
     } else if (route.coords && route.coords.length >= 2) {
+      // Road/car/motorcycle route — thicker for first (best) route
       layers.push(L.polyline(route.coords, {
-        color: route.color, weight: 5, opacity: 0.85,
+        color: lineColor, weight: route.id === 0 ? 7 : 5, opacity: 0.85,
       }).addTo(map));
     }
 
@@ -760,6 +862,9 @@ function drawAllRoutes(routes) {
   if (allCoords.length) {
     map.fitBounds(L.latLngBounds(allCoords), {padding: [40, 40]});
   }
+
+  // Draw fire/incident overlays for all active reports on the routes
+  drawIncidentOverlays(routes);
 }
 
 
@@ -807,10 +912,155 @@ function escHtml(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 // ══════════════════════════════════════════════════════════════════════════════
+//  REAL-TIME INCIDENT OVERLAYS (fire, road_closed, flooding, accident)
+//  These are drawn on top of routes and warn users to avoid the area.
+// ══════════════════════════════════════════════════════════════════════════════
+
+let incidentLayers = [];
+
+function clearIncidentOverlays() {
+    incidentLayers.forEach(l => { try { map.removeLayer(l); } catch(e) {} });
+    incidentLayers = [];
+}
+
+// Incident type config — covers both community reports and real-time sources
+const INCIDENT_CFG = {
+    fire:        { color: '#c0392b', icon: '🔥', radius: 500,  label: 'Active Fire' },
+    flood:       { color: '#1a5276', icon: '🌊', radius: 600,  label: 'Flooding' },
+    flooding:    { color: '#1a5276', icon: '🌊', radius: 600,  label: 'Flooding' },
+    earthquake:  { color: '#784212', icon: '🌍', radius: 4000, label: 'Earthquake' },
+    landslide:   { color: '#6e2f1a', icon: '⛰️', radius: 400,  label: 'Landslide' },
+    hazmat:      { color: '#7d3c98', icon: '☣️', radius: 450,  label: 'Hazmat' },
+    road_closed: { color: '#e67e22', icon: '🚧', radius: 180,  label: 'Road Closed' },
+    accident:    { color: '#e74c3c', icon: '💥', radius: 220,  label: 'Accident' },
+    other:       { color: '#7f8c8d', icon: '⚠️', radius: 300,  label: 'Incident' },
+};
+
+const SOURCE_BADGES = {
+    'GDACS':           { label: 'GDACS',          bg: '#1a5276', url: 'https://www.gdacs.org/' },
+    'NDRRMC':          { label: 'NDRRMC',          bg: '#922b21', url: 'https://www.ndrrmc.gov.ph/' },
+    'ReliefWeb / UN OCHA': { label: 'UN OCHA',    bg: '#1e8bc3', url: 'https://reliefweb.int/' },
+    'Community':       { label: 'Community Report',bg: '#d35400', url: '' },
+};
+
+function _sourceBadgeHtml(source) {
+    const s = SOURCE_BADGES[source] || { label: source || 'Report', bg: '#7f8c8d', url: '' };
+    const link = s.url ? `href="${s.url}" target="_blank"` : '';
+    return `<a ${link} style="display:inline-block;background:${s.bg};color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;text-decoration:none;font-weight:bold;">${s.label}</a>`;
+}
+
+async function drawIncidentOverlays(routes) {
+    clearIncidentOverlays();
+
+    // ── 1. Real-time incidents from GDACS / NDRRMC / ReliefWeb ────────────
+    try {
+        const incResp = await fetch('/api/incidents');
+        const realInc = await incResp.json();
+        if (Array.isArray(realInc)) {
+            realInc.forEach(inc => _drawOneIncident(inc, true));
+        }
+    } catch(e) { console.warn('Real-time incident fetch failed:', e); }
+
+    // ── 2. Community reports (fire, flooding, road_closed, accident) ───────
+    try {
+        const repResp = await fetch('/api/reports');
+        const reports = await repResp.json();
+        if (Array.isArray(reports)) {
+            reports.forEach(r => {
+                if (!INCIDENT_CFG[r.type]) return;
+                _drawOneIncident({
+                    id:          'community_' + (r.id || r.lat),
+                    type:        r.type,
+                    title:       INCIDENT_CFG[r.type].label,
+                    description: r.description || '',
+                    lat:         r.lat,
+                    lon:         r.lon,
+                    radius_m:    INCIDENT_CFG[r.type].radius,
+                    severity:    'moderate',
+                    color:       INCIDENT_CFG[r.type].color,
+                    source:      'Community',
+                    source_url:  '',
+                    reported_at: r.reported_at || '',
+                }, false);
+            });
+        }
+    } catch(e) { console.warn('Community report overlay failed:', e); }
+
+    // ── 3. Inline incidents attached to routes by the backend ─────────────
+    if (routes) {
+        routes.forEach(route => {
+            if (route.avoid_recommended && route.fire_warning) {
+                // Already rendered on the route card — no extra map pin needed
+            }
+        });
+    }
+}
+
+function _drawOneIncident(inc, isRealtime) {
+    if (!inc.lat || !inc.lon) return;
+    const cfg     = INCIDENT_CFG[inc.type] || INCIDENT_CFG.other;
+    const color   = inc.color || cfg.color;
+    const radius  = inc.radius_m || cfg.radius;
+    const icon    = cfg.icon;
+
+    const circle = L.circle([inc.lat, inc.lon], {
+        radius,
+        color,
+        weight:      isRealtime ? 2.5 : 2,
+        fillColor:   color,
+        fillOpacity: isRealtime ? 0.18 : 0.14,
+        dashArray:   isRealtime ? null : '6 4',
+    }).addTo(map);
+
+    const severityColors = { low:'#f39c12', moderate:'#e67e22', high:'#e74c3c', critical:'#6c1a1a' };
+    const sevColor = severityColors[inc.severity] || color;
+
+    const popupHtml = `
+        <div style="font-family:Arial,sans-serif;min-width:200px;max-width:260px;">
+            <div style="font-weight:bold;color:${color};font-size:14px;margin-bottom:4px;">
+                ${icon} ${escHtml(inc.title || cfg.label)}
+            </div>
+            ${inc.severity ? `<div style="display:inline-block;background:${sevColor};color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;margin-bottom:6px;font-weight:bold;">${inc.severity.toUpperCase()}</div>` : ''}
+            ${inc.description ? `<div style="font-size:12px;color:#444;margin-bottom:6px;">${escHtml(inc.description)}</div>` : ''}
+            <div style="margin-bottom:6px;">${_sourceBadgeHtml(inc.source)}</div>
+            ${inc.reported_at ? `<div style="font-size:10px;color:#aaa;">Reported: ${escHtml(inc.reported_at)}</div>` : ''}
+            <div style="margin-top:8px;background:#fdf2f2;padding:6px 8px;border-radius:4px;font-size:11px;color:#7b241c;font-weight:bold;border-left:3px solid ${color};">
+                ⚠️ Routes through this area may be affected. Check alternate options.
+            </div>
+        </div>`;
+
+    circle.bindPopup(popupHtml, { maxWidth: 270 });
+    circle.bindTooltip(`<span style="font-size:11px;font-weight:bold;">${icon} ${escHtml(inc.title || cfg.label)}</span>`,
+        { permanent: false, direction: 'top' });
+
+    incidentLayers.push(circle);
+}
+
+// ── Route safety legend ───────────────────────────────────────────────────────
+(function addSafetyLegend() {
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function() {
+        const div = L.DomUtil.create('div', '');
+        div.style.cssText = 'background:white;padding:8px 12px;border-radius:6px;'
+            + 'box-shadow:0 1px 5px rgba(0,0,0,0.3);font-size:11px;font-family:Arial,sans-serif;'
+            + 'line-height:1.8;min-width:140px;';
+        div.innerHTML = '<div style="font-weight:bold;margin-bottom:4px;color:#333;">🛡️ Route Safety</div>'
+            + '<span style="color:#27ae60;">●</span> Safe (80–100)<br>'
+            + '<span style="color:#f39c12;">●</span> Caution (65–79)<br>'
+            + '<span style="color:#e67e22;">●</span> Moderate Risk (50–64)<br>'
+            + '<span style="color:#e74c3c;">●</span> High Risk (&lt;50)';
+        return div;
+    };
+    legend.addTo(map);
+})();
+
+// ══════════════════════════════════════════════════════════════════════════════
 //  SAFETY RISK OVERLAY — colored circles for each active community report
 // ══════════════════════════════════════════════════════════════════════════════
 
-let safetyOverlayLayers = [];
+let safetyOverlayLayers = [];   // community reports — zoom-toggled
+let routeCrimeLayers    = [];   // route crime areas — NEVER auto-cleared on zoom
+let hasActiveRoute      = false; // true after a route search
 
 /**
  * Fetch all active reports from the server and draw danger zones on the map.
@@ -938,122 +1188,196 @@ async function confirmReport(reportId) {
         if (msgEl) msgEl.textContent = '❌ Error confirming.';
     }
 }
-async function drawAreaSafetyOverlay(origCoords, destCoords, route = null) {
-    safetyOverlayLayers.forEach(l => map.removeLayer(l));
-    safetyOverlayLayers = [];
-    const drawnCrimeAreas = new Set(); // deduplicate crime circles
+// ── Crime zone overlay — drawn synchronously from pre-computed route data ─────
+// Uses route.route_crime_zones (set by backend scan_route_crime_zones) plus
+// route.orig_crime / route.dest_crime for endpoint circles.
+// No async fetches needed — instant swap when clicking route cards.
 
-    const points = [];
-    if (origCoords) points.push(origCoords);
-    if (destCoords) points.push(destCoords);
+let _overlayGeneration = 0;   // incremented on each new overlay draw to cancel stale async ops
 
-    // Sample points along the route path (up to 6 midpoints)
-    if (route) {
-        const coords = [];
-        if (route.segments) {
-            route.segments.forEach(seg => {
-                if (seg.coords) {
-                    const flat = Array.isArray(seg.coords[0]) && Array.isArray(seg.coords[0][0])
-                        ? seg.coords.flat() : seg.coords;
-                    coords.push(...flat);
-                }
-            });
+function clearCrimeOverlay() {
+    routeCrimeLayers.forEach(l => { try { map.removeLayer(l); } catch(e) {} });
+    routeCrimeLayers = [];
+}
+
+function drawRouteZoneOverlay(route) {
+    clearCrimeOverlay();
+    if (!route) return;
+
+    const drawn = new Set(); // deduplicate by zone name
+
+    const popup = (color, icon, risk, name, summary) =>
+        `<div style="font-family:Arial,sans-serif;min-width:160px;">
+            <div style="font-weight:bold;color:${color};margin-bottom:4px;">${icon} ${risk.charAt(0).toUpperCase()+risk.slice(1)} Crime Risk</div>
+            <div style="font-size:12px;font-weight:600;">${escHtml(name || 'This area')}</div>
+            <div style="font-size:11px;color:#555;margin-top:4px;">${escHtml(summary || 'Stay alert and on well-lit streets.')}</div>
+            <div style="font-size:10px;color:#aaa;margin-top:4px;">Source: SafeRoute crime data</div>
+        </div>`;
+
+    // Draw the actual bounding-box rectangle for a zone that has coords.
+    // For road corridors like EDSA (21 km × 0.7 km) a circle is useless —
+    // the bbox IS the zone shape.
+    function addZoneShape(risk, name, summary, coords) {
+        const key = name || `${coords}`;
+        if (drawn.has(key)) return;
+        drawn.add(key);
+
+        const isHigh  = risk === 'high';
+        const color   = isHigh ? '#e74c3c' : '#e67e22';
+        const fillOp  = isHigh ? 0.15 : 0.10;
+        const icon    = isHigh ? '🚨' : '⚠️';
+
+        // coords = [lat_min, lat_max, lon_min, lon_max]
+        const bounds = [[coords[0], coords[2]], [coords[1], coords[3]]];
+
+        const rect = L.rectangle(bounds, {
+            color, weight: isHigh ? 1.5 : 1,
+            fillColor: color, fillOpacity: fillOp,
+            dashArray: isHigh ? null : '6 4',
+            interactive: true,
+        }).addTo(map);
+
+        rect.bindTooltip(
+            `<span style="font-size:11px;font-weight:bold;">${icon} ${escHtml(name || (isHigh ? 'High Crime Area' : 'Moderate Crime Area'))}</span>`,
+            { sticky: true, direction: 'top' }
+        );
+        rect.bindPopup(popup(color, icon, risk, name, summary), { maxWidth: 240 });
+        routeCrimeLayers.push(rect);
+    }
+
+    // For origin/destination endpoints we only have a point, not a bbox —
+    // draw a modest circle (radius ≈ 200m) to indicate the area.
+    function addEndpointCircle(lat, lon, risk, name, summary) {
+        const key = name || `${lat.toFixed(4)},${lon.toFixed(4)}`;
+        if (drawn.has(key)) return;
+        drawn.add(key);
+
+        const isHigh = risk === 'high';
+        const color  = isHigh ? '#e74c3c' : '#e67e22';
+        const icon   = isHigh ? '🚨' : '⚠️';
+
+        const circle = L.circle([lat, lon], {
+            radius: 220, color, weight: isHigh ? 2 : 1.5,
+            fillColor: color, fillOpacity: isHigh ? 0.18 : 0.12,
+            dashArray: isHigh ? null : '6 4',
+        }).addTo(map);
+
+        circle.bindTooltip(
+            `<span style="font-size:11px;font-weight:bold;">${icon} ${escHtml(name || (isHigh ? 'High Crime Area' : 'Moderate Crime Area'))}</span>`,
+            { sticky: true, direction: 'top' }
+        );
+        circle.bindPopup(popup(color, icon, risk, name, summary), { maxWidth: 240 });
+        routeCrimeLayers.push(circle);
+    }
+
+    // 1. Zones along the route path (from backend scan_route_crime_zones)
+    const routeZones = route.route_crime_zones || [];
+    routeZones.forEach(zone => {
+        if (!['high', 'moderate'].includes(zone.risk)) return;
+        const c = zone.coords; // [lat_min, lat_max, lon_min, lon_max]
+        if (c && c.length === 4) {
+            // Skip whole-line corridor zones (MRT3 line, LRT1 line, EDSA, C5, etc.)
+            // that span >5km — individual station-level zones are drawn instead.
+            const latSpanM = Math.abs(c[1] - c[0]) * 111000;
+            const lonSpanM = Math.abs(c[3] - c[2]) * 111000 * Math.cos(((c[0]+c[1])/2) * Math.PI / 180);
+            if (Math.max(latSpanM, lonSpanM) > 5000) return;
+
+            addZoneShape(zone.risk, zone.name, zone.summary, c);
         }
-        if (!coords.length && route.coords) coords.push(...route.coords);
-        if (coords.length > 2) {
-            const SAMPLE_EVERY = Math.max(1, Math.floor(coords.length / 6));
-            for (let i = SAMPLE_EVERY; i < coords.length - 1; i += SAMPLE_EVERY) {
-                const c = coords[i];
-                const lat = Array.isArray(c) ? c[0] : c.lat;
-                const lon = Array.isArray(c) ? c[1] : (c.lon || c.lng);
-                points.push({ lat, lon });
-            }
+    });
+
+    // 2. Origin endpoint (point only — use small circle)
+    if (route.orig_crime && ['high', 'moderate'].includes(route.orig_crime.risk_level)) {
+        const oc = route.orig_crime;
+        if (lastOrigCoords) {
+            addEndpointCircle(
+                lastOrigCoords.lat, lastOrigCoords.lon || lastOrigCoords.lng,
+                oc.risk_level, oc.area, oc.summary
+            );
         }
     }
 
-    if (!points.length) return;
-
-    for (const pt of points) {
-        const lat = pt.lat;
-        const lon = pt.lon || pt.lng;
-        try {
-            const resp = await fetch(`/api/safety?lat=${lat}&lon=${lon}`);
-            const data = await resp.json();
-
-            // ── Flood circle (only when raining) ────────────────────────────
-            const rainActive = data.weather && ['light_rain','rain','heavy_rain','storm'].includes(data.weather.risk_level);
-            if (data.flood && data.flood.risk_level !== 'none' && rainActive) {
-                const floodColors = { low:'#f39c12', moderate:'#e67e22', high:'#e74c3c' };
-                const floodRadii  = { low:400, moderate:600, high:900 };
-                const risk   = data.flood.risk_level;
-                const color  = floodColors[risk] || '#e74c3c';
-                const radius = floodRadii[risk] || 500;
-                const floodCircle = L.circle([lat, lon], {
-                    radius, color, weight:2, fillColor:color, fillOpacity:0.18, dashArray:'6 4'
-                }).addTo(map);
-                const label = L.marker([lat, lon], {
-                    icon: L.divIcon({
-                        className:'',
-                        html:`<div style="background:${color};color:white;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:bold;white-space:nowrap;font-family:Arial,sans-serif;box-shadow:0 2px 4px rgba(0,0,0,0.3);">Flood: ${risk.charAt(0).toUpperCase()+risk.slice(1)}</div>`,
-                        iconSize:[null,null], iconAnchor:[40,-6]
-                    }), interactive:false, zIndexOffset:600
-                }).addTo(map);
-                floodCircle.bindPopup(`<div style="font-family:Arial,sans-serif;min-width:160px;">
-                    <div style="font-weight:bold;color:${color};margin-bottom:4px;">Flood Risk: ${risk.toUpperCase()}</div>
-                    <div style="font-size:12px;">${data.flood.label}</div>
-                    <div style="font-size:11px;color:#888;margin-top:4px;">Source: Project NOAH</div>
-                </div>`, { maxWidth:200 });
-                safetyOverlayLayers.push(floodCircle, label);
-            }
-
-            // ── Community report circles (additive) ─────────────────────────
-            if (data.reports && data.reports.length) {
-                appendSafetyOverlay(data.reports);
-            }
-
-            // ── Crime circle (high risk only, one circle per unique area) ────
-            // Only show for confirmed HIGH risk, not moderate, to avoid
-            // plastering the map with red circles over normal urban areas.
-            const crimeAreaKey = data.crime && data.crime.area ? data.crime.area : null;
-            if (data.crime && data.crime.risk_level === 'high'
-                && crimeAreaKey && !drawnCrimeAreas.has(crimeAreaKey)) {
-                drawnCrimeAreas.add(crimeAreaKey);
-                const ccolor = '#e74c3c';
-                const cCircle = L.circle([lat, lon], {
-                    radius: 600, color: ccolor, weight: 2,
-                    fillColor: ccolor, fillOpacity: 0.12, dashArray: '5 5'
-                }).addTo(map);
-                const cLabel = L.marker([lat, lon], {
-                    icon: L.divIcon({
-                        className: '',
-                        html: `<div style="background:${ccolor};color:white;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:bold;white-space:nowrap;font-family:Arial,sans-serif;box-shadow:0 2px 4px rgba(0,0,0,0.3);">⚠️ High Crime Area</div>`,
-                        iconSize: [null, null], iconAnchor: [60, -6]
-                    }), interactive: false, zIndexOffset: 601
-                }).addTo(map);
-                cCircle.bindPopup(`<div style="font-family:Arial,sans-serif;min-width:160px;">
-                    <div style="font-weight:bold;color:${ccolor};margin-bottom:4px;">🚨 High Crime Risk</div>
-                    <div style="font-size:12px;">${data.crime.area || 'This area'}</div>
-                    <div style="font-size:11px;color:#555;margin-top:4px;">${data.crime.summary || 'Stay alert and on well-lit streets.'}</div>
-                </div>`, { maxWidth: 200 });
-                safetyOverlayLayers.push(cCircle, cLabel);
-            }
-
-            // ── Weather circle (severe only) ─────────────────────────────────
-            if (data.weather && ['heavy_rain','storm','rain'].includes(data.weather.risk_level)) {
-                const wColor  = data.weather.color || '#2980b9';
-                const wCircle = L.circle([lat, lon], {
-                    radius:1200, color:wColor, weight:1.5, fillColor:wColor, fillOpacity:0.08, dashArray:'4 6'
-                }).addTo(map);
-                wCircle.bindPopup(`<div style="font-family:Arial,sans-serif;">
-                    <div style="font-weight:bold;color:${wColor};margin-bottom:4px;">Weather: ${data.weather.description}</div>
-                    <div style="font-size:12px;">${data.weather.temp_c}°C — Wind: ${data.weather.wind_kph} km/h</div>
-                </div>`, { maxWidth:180 });
-                safetyOverlayLayers.push(wCircle);
-            }
-
-        } catch(e) {
-            console.warn('Area safety overlay failed for', pt, e);
+    // 3. Destination endpoint (point only — use small circle)
+    if (route.dest_crime && ['high', 'moderate'].includes(route.dest_crime.risk_level)) {
+        const dc = route.dest_crime;
+        if (lastDestCoords) {
+            addEndpointCircle(
+                lastDestCoords.lat, lastDestCoords.lon || lastDestCoords.lng,
+                dc.risk_level, dc.area, dc.summary
+            );
         }
+    }
+}
+
+// Legacy async overlay — used only on initial page load for community reports + weather/flood.
+// No longer called on route card clicks.
+async function drawAreaSafetyOverlay(origCoords, destCoords, route = null) {
+    // Always clear crime layers first
+    clearCrimeOverlay();
+    if (!hasActiveRoute) {
+        safetyOverlayLayers.forEach(l => map.removeLayer(l));
+        safetyOverlayLayers = [];
+    }
+    hasActiveRoute = true;
+
+    // Draw crime zones synchronously from route data
+    if (route) drawRouteZoneOverlay(route);
+
+    // Async: fetch community reports + weather/flood for origin only (once per search)
+    if (!origCoords) return;
+    const gen = ++_overlayGeneration;
+    try {
+        const lat = origCoords.lat;
+        const lon = origCoords.lon || origCoords.lng;
+        const resp = await fetch(`/api/safety?lat=${lat}&lon=${lon}`);
+        if (gen !== _overlayGeneration) return; // stale — a newer search started
+        const data = await resp.json();
+
+        // Community report circles
+        if (data.reports && data.reports.length) {
+            appendSafetyOverlay(data.reports);
+        }
+
+        // Flood circle (only when raining)
+        const rainActive = data.weather && ['light_rain','rain','heavy_rain','storm'].includes(data.weather.risk_level);
+        if (data.flood && data.flood.risk_level !== 'none' && rainActive) {
+            const floodColors = { low:'#f39c12', moderate:'#e67e22', high:'#e74c3c' };
+            const floodRadii  = { low:400, moderate:600, high:900 };
+            const risk   = data.flood.risk_level;
+            const color  = floodColors[risk] || '#e74c3c';
+            const radius = floodRadii[risk]  || 500;
+            const floodCircle = L.circle([lat, lon], {
+                radius, color, weight:2, fillColor:color, fillOpacity:0.18, dashArray:'6 4'
+            }).addTo(map);
+            const floodLabel = L.marker([lat, lon], {
+                icon: L.divIcon({
+                    className:'saferoute-label',
+                    html:`<div class="sr-area-label" style="background:${color};">Flood: ${risk.charAt(0).toUpperCase()+risk.slice(1)}</div>`,
+                    iconSize:[120, 24], iconAnchor:[60, 30],
+                }), interactive:false, zIndexOffset:600,
+            }).addTo(map);
+            floodCircle.bindPopup(`<div style="font-family:Arial,sans-serif;min-width:160px;">
+                <div style="font-weight:bold;color:${color};margin-bottom:4px;">Flood Risk: ${risk.toUpperCase()}</div>
+                <div style="font-size:12px;">${data.flood.label || ''}</div>
+                <div style="font-size:11px;color:#888;margin-top:4px;">Source: Project NOAH</div>
+            </div>`, { maxWidth:200 });
+            routeCrimeLayers.push(floodCircle, floodLabel);
+        }
+
+        // Weather circle (severe only)
+        if (data.weather && ['heavy_rain','storm','rain'].includes(data.weather.risk_level)) {
+            const wColor = data.weather.color || '#2980b9';
+            const wCircle = L.circle([lat, lon], {
+                radius:1200, color:wColor, weight:1.5, fillColor:wColor, fillOpacity:0.08, dashArray:'4 6'
+            }).addTo(map);
+            wCircle.bindPopup(`<div style="font-family:Arial,sans-serif;">
+                <div style="font-weight:bold;color:${wColor};margin-bottom:4px;">Weather: ${data.weather.description}</div>
+                <div style="font-size:12px;">${data.weather.temp_c}°C — Wind: ${data.weather.wind_kph} km/h</div>
+            </div>`, { maxWidth:180 });
+            routeCrimeLayers.push(wCircle);
+        }
+    } catch(e) {
+        console.warn('Safety overlay fetch failed:', e);
     }
 }
 
@@ -1094,26 +1418,42 @@ async function drawAreaSafetyOverlay(origCoords, destCoords, route = null) {
 // Load safety overlay on page start (only draws if zoom >= OVERLAY_MIN_ZOOM)
 loadSafetyOverlay();
 
-// ── Show/hide reports based on zoom level ─────────────────────────────────
+// ── Show/hide community reports based on zoom, never touch route crime layers ──
 map.on('zoomend', function () {
     const zoom = map.getZoom();
     if (zoom < OVERLAY_MIN_ZOOM) {
-        // Hide all overlay layers when zoomed out
+        // Hide community report circles only — crime area labels stay visible
         safetyOverlayLayers.forEach(l => map.removeLayer(l));
     } else {
-        // Re-add existing layers if they were hidden
+        // Re-show community report circles
         safetyOverlayLayers.forEach(l => {
             if (!map.hasLayer(l)) l.addTo(map);
         });
-        // Also refresh from server when zooming in, in case new reports exist
-        loadSafetyOverlay();
+        // Only reload generic overlay if no route is active
+        // (avoids overwriting route-specific crime data)
+        if (!hasActiveRoute) loadSafetyOverlay();
     }
+    // routeCrimeLayers are NEVER removed on zoom — they stay until next search
 });
 
 // ── History prefill: set active mode tile from URL params ─────────────────
 (function() {
-  var prefillMode = {{ (prefill_mode | default("")) | tojson }};
-  if (!prefillMode) return;
+  var prefillMode   = {{ (prefill_mode | default("")) | tojson }};
+  var prefillOrigin = {{ (prefill_origin | default("")) | tojson }};
+  var prefillDest   = {{ (prefill_destination | default("")) | tojson }};
+
+  // Populate input fields from prefill values
+  if (prefillOrigin) {
+    document.getElementById('origin-input').value = prefillOrigin;
+  }
+  if (prefillDest) {
+    document.getElementById('dest-input').value = prefillDest;
+  }
+
+  if (!prefillMode) {
+    checkEnableButton();
+    return;
+  }
 
   // Map mode string to tile data-mode + optional submode
   var tileMode = prefillMode;
@@ -1138,17 +1478,51 @@ map.on('zoomend', function () {
       if (t.dataset.submode === subMode) t.classList.add('active');
     });
     activeSubMode = subMode;
-    document.getElementById('transit-sub').classList.add('visible');
+    document.getElementById('transit-subtoggle').classList.add('visible');
   }
 
-  // Enable find-routes button if both fields are filled
-  var orig = document.getElementById('origin-input').value.trim();
-  var dest = document.getElementById('dest-input').value.trim();
-  if (orig && dest) {
-    document.getElementById('find-routes-btn').disabled = false;
+  // Enable button if both fields are filled
+  checkEnableButton();
+
+  // Auto-trigger the search if both origin and destination are set
+  if (prefillOrigin && prefillDest) {
+    // Short delay to let map finish initialising
+    setTimeout(function() {
+      document.getElementById('find-routes-btn').disabled = false;
+      findRoutes();
+    }, 800);
   }
 })();
 
+// ── Poll incident status on page load ────────────────────────────────────────
+(function pollIncidentStatus() {
+    const statusEl = document.getElementById('incident-status');
+    if (!statusEl) return;
+    fetch('/api/incidents')
+        .then(r => r.json())
+        .then(data => {
+            if (!Array.isArray(data) || data.length === 0) {
+                statusEl.textContent = '✅ No active incidents in Philippines';
+                statusEl.style.color = '#27ae60';
+            } else {
+                const fires = data.filter(d => d.type === 'fire').length;
+                const floods = data.filter(d => d.type === 'flood').length;
+                const parts = [];
+                if (fires)  parts.push(`🔥 ${fires} fire${fires>1?'s':''}`);
+                if (floods) parts.push(`🌊 ${floods} flood${floods>1?'s':''}`);
+                const others = data.length - fires - floods;
+                if (others > 0) parts.push(`⚠️ ${others} other`);
+                statusEl.textContent = `Active: ${parts.join(' · ')} · Click map circles for details`;
+                statusEl.style.color = '#c0392b';
+                statusEl.style.fontWeight = 'bold';
+                // Draw them on the map immediately
+                drawIncidentOverlays(null);
+            }
+        })
+        .catch(() => {
+            statusEl.textContent = 'Incident feed unavailable';
+        });
+})();
 </script>
 {{ report_panel | safe }}
 {{ reports_map_js | safe }}

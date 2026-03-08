@@ -8,17 +8,41 @@ Scrapes recent crime news for a given Philippine area using DuckDuckGo
 structured crime risk level. Result is cached to disk for 6 hours so
 it does not fire on every single route request.
 
-Nothing runs on import. All logic is in pure functions.
+Key improvements vs. previous version:
+  - Coordinate-based zone detection (bounding boxes in crime_zones.json)
+    so routes passing THROUGH high-risk areas are flagged even when the
+    user's typed text doesn't mention them.
+  - Route-path scanning: samples waypoints along the decoded polyline and
+    checks each sample against the coordinate zones. Returns the WORST
+    zone hit and the list of unique risk zones crossed.
+  - Text matching now uses multi-alias matching (e.g. "sta. cruz" ↔
+    "santa cruz") and sub-word boundary detection, so short zone names
+    like "paco" no longer match "francisco".
+  - Anti-spam guard: only zones whose coordinate box actually overlaps
+    the route are flagged — prevents flooding the UI with unrelated
+    high-risk alerts.
+  - City-level names are still supported as fallbacks, but specific
+    barangay/street/zone names always win (unchanged from previous logic).
 
-Integration in main.py (add 3 lines — see bottom of this file):
-    from risk_monitor.crime_data import get_crime_risk_for_area, apply_crime_to_routes, get_crime_warning_html
+Integration in main.py (no changes needed if already wired):
+    from risk_monitor.crime_data import (
+        get_crime_risk_for_area, apply_crime_to_routes,
+        get_crime_risk_with_reports, scan_route_crime_zones,
+        apply_route_crime_to_routes,
+    )
 
     Inside get_routes(), after apply_reports_to_routes(...):
-        crime = get_crime_risk_for_area(orig_lat, orig_lon, origin_text or "")
-        apply_crime_to_routes(routes, crime, commuter_type)
+        crime = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
+        dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
 
-    Inside home(), pass to render_template:
-        crime_banner=get_crime_warning_html(crime)   # optional top banner
+        # NEW: scan the actual path for crime zones
+        for route in routes:
+            waypoints = route.get("waypoints") or route.get("geometry_coords") or []
+            route_zones = scan_route_crime_zones(waypoints)
+            route["route_crime_zones"] = route_zones
+
+        apply_crime_both_ends(routes, crime, dest_crime, commuter_type)
+        apply_route_crime_to_routes(routes, commuter_type)   # uses route_crime_zones
 
 No new pip packages needed — uses ddgs, requests, BeautifulSoup, and
 google-genai, all of which are already in requirements.txt via llm.py.
@@ -31,9 +55,9 @@ import time
 from datetime import datetime, timezone, timedelta
 
 # ── Cache config ──────────────────────────────────────────────────────────────
-_CACHE_DIR      = "transit_data"          # same folder llm.py uses
+_CACHE_DIR      = "transit_data"
 _CACHE_PREFIX   = "crime_"
-_CACHE_TTL_SEC  = 6 * 3600               # 6 hours — crime news doesn't refresh faster
+_CACHE_TTL_SEC  = 6 * 3600
 
 # ── Risk config ───────────────────────────────────────────────────────────────
 _CRIME_COLORS = {
@@ -46,15 +70,14 @@ _CRIME_COLORS = {
 
 _CRIME_PENALTY = {
     "none":     0,
-    "low":      8,
-    "moderate": 18,
-    "high":     28,
+    "low":      5,
+    "moderate": 12,
+    "high":     20,
 }
 
-# Per-risk, per-commuter-group warnings
 _CRIME_WARNINGS = {
     "high": {
-        "walk":       "🚨 High crime risk in this area — avoid walking alone, stay on busy lit streets.",
+        "walk":       "🚨 High crime risk along this route — avoid walking alone, stay on busy lit streets.",
         "bike":       "🚨 High crime risk — snatching incidents reported. Lock bike, stay alert.",
         "motorcycle": "🚨 High crime risk — holdups reported. Avoid stopping in dark spots.",
         "commute":    "🚨 High crime risk near this route — keep bags close, stay aware.",
@@ -80,6 +103,21 @@ _CRIME_WARNINGS = {
 }
 
 _PHT = timezone(timedelta(hours=8))
+
+# Community-report bump config
+_REPORT_BUMP_RADIUS  = 0.005   # ~550 m in decimal degrees
+_REPORT_CRIME_TYPES  = {"crime", "harassment"}
+
+# City-level zone names — specific district/barangay matches always beat these
+_CITY_LEVEL_ZONES = {
+    "manila", "quezon city", "caloocan", "makati", "pasay", "taguig",
+    "mandaluyong", "marikina", "pasig", "paranaque", "las pinas",
+    "muntinlupa", "san juan", "navotas", "malabon", "valenzuela",
+    "pateros", "metro manila", "rizal", "bulacan", "cavite", "laguna",
+}
+
+# Risk level ordering for comparisons
+_RISK_ORDER = {"none": 0, "low": 1, "moderate": 2, "high": 3}
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -130,10 +168,15 @@ def _group_commuter(commuter_type: str) -> str:
 
 def _area_from_coords(lat: float, lon: float) -> str:
     """
-    Rough label for a Metro Manila coordinate so the cache key and
-    search query are meaningful without a live reverse-geocode call.
+    Rough label for a Metro Manila coordinate without a live reverse-geocode call.
+    Returns the most specific matching zone name (prefers barangay over city).
     """
-    # Bounding boxes for major Metro Manila cities (lat_min, lat_max, lon_min, lon_max)
+    # First try coordinate zones from JSON (most specific)
+    coord_zone = _coord_zone_lookup(lat, lon)
+    if coord_zone and coord_zone.get("name"):
+        return coord_zone["name"]
+
+    # Fall back to broad city bounding boxes
     _CITIES = [
         ("Manila",          14.56, 14.62, 120.96, 121.01),
         ("Quezon City",     14.62, 14.76, 121.00, 121.12),
@@ -193,58 +236,264 @@ def _crime_error(msg: str, area: str = "") -> dict:
     }
 
 
-# ── Static crime zone fallback (used when Gemini API key is not configured) ───
-# Based on PNP public crime statistics and known high-incident areas in Metro Manila.
-# ── Static crime zones — loaded from crime_zones.json ────────────────────────
-# Edit crime_zones.json directly to update areas without touching this file.
-
+# ── Zone JSON loader ──────────────────────────────────────────────────────────
 import pathlib as _pathlib
 
 _ZONES_JSON_PATH = _pathlib.Path(__file__).parent.parent / "crime_zones.json"
-# Falls back to same directory if not found one level up
 if not _ZONES_JSON_PATH.exists():
     _ZONES_JSON_PATH = _pathlib.Path(__file__).parent / "crime_zones.json"
 
+_ZONES_CACHE: list = []
+_ZONES_LOAD_TIME: float = 0.0
+_ZONES_TTL: float = 300.0   # reload JSON every 5 min in case of edits
+
 
 def _load_crime_zones() -> list:
-    """Load zones list from crime_zones.json. Returns [] on any error."""
+    """Load zones list from crime_zones.json, with a short in-memory cache."""
+    global _ZONES_CACHE, _ZONES_LOAD_TIME
+    now = time.time()
+    if _ZONES_CACHE and (now - _ZONES_LOAD_TIME) < _ZONES_TTL:
+        return _ZONES_CACHE
     try:
         with open(_ZONES_JSON_PATH, 'r', encoding='utf-8') as _f:
             data = json.load(_f)
-        return data.get("zones", [])
+        _ZONES_CACHE = data.get("zones", [])
+        _ZONES_LOAD_TIME = now
+        return _ZONES_CACHE
     except Exception:
-        return []
+        return _ZONES_CACHE or []
 
 
-def _static_crime_lookup(area: str):
+# ── Coordinate-based zone lookup ──────────────────────────────────────────────
+
+def _coord_zone_lookup(lat: float, lon: float) -> dict | None:
     """
-    Returns a crime result by matching area against crime_zones.json.
-    Uses whole-word matching and picks the most specific (longest) match.
-    Returns None if no match.
-    """
-    import re as _re
-    area_lower  = area.lower().strip()
-    zones       = _load_crime_zones()
+    Returns the most specific crime zone whose bounding box contains (lat, lon).
+    Zones with coords defined always beat zones without.
+    Among multiple hits, the one with the smallest area (most specific) wins.
 
-    best_name    = None
-    best_risk    = None
-    best_summary = None
+    A zone's coords field must be [lat_min, lat_max, lon_min, lon_max].
+    Zones without coords are skipped here (handled by text lookup).
+    """
+    zones = _load_crime_zones()
+    best = None
+    best_area = float("inf")
 
     for zone in zones:
-        key = zone.get("name", "").lower().strip()
-        if not key:
+        coords = zone.get("coords")
+        if not coords or len(coords) != 4:
             continue
-        # Whole-word/phrase boundary match
-        pattern = r'(?<![a-z])' + _re.escape(key) + r'(?![a-z])'
-        if _re.search(pattern, area_lower):
-            if best_name is None or len(key) > len(best_name):
-                best_name    = key
-                best_risk    = zone.get("risk", "none")
-                best_summary = zone.get("summary", "")
+        lat_min, lat_max, lon_min, lon_max = coords
+        if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+            box_area = (lat_max - lat_min) * (lon_max - lon_min)
+            if box_area < best_area:
+                best = zone
+                best_area = box_area
 
-    if best_name:
-        return _crime_result(best_risk, best_summary, area)
+    return best
+
+
+# ── Text-based zone lookup ────────────────────────────────────────────────────
+
+def _static_crime_lookup(area: str) -> dict | None:
+    """
+    Returns a crime result by matching area against crime_zones.json zone names.
+
+    Matching rules:
+      1. Whole-word boundary match only (e.g. "paco" won't match "francisco").
+      2. Checks all aliases in the "aliases" list field if present.
+      3. Specific barangay/street matches always beat city-level matches.
+      4. Among same specificity, longer (more specific) name wins.
+
+    Returns None if no match.
+    """
+    area_lower = area.lower().strip()
+    zones      = _load_crime_zones()
+
+    specific_best = None   # (key, risk, summary, match_len)
+    city_best     = None
+
+    for zone in zones:
+        # Build all candidate names to match against
+        names_to_try = [zone.get("name", "").lower().strip()]
+        for alias in zone.get("aliases", []):
+            names_to_try.append(alias.lower().strip())
+
+        matched_key = None
+        match_len   = 0
+        for candidate in names_to_try:
+            if not candidate:
+                continue
+            pattern = r'(?<![a-z0-9])' + re.escape(candidate) + r'(?![a-z0-9])'
+            if re.search(pattern, area_lower):
+                if len(candidate) > match_len:
+                    matched_key = candidate
+                    match_len   = len(candidate)
+
+        if not matched_key:
+            continue
+
+        risk    = zone.get("risk", "none")
+        summary = zone.get("summary", "")
+        entry   = (matched_key, risk, summary, match_len)
+
+        primary_name = zone.get("name", "").lower().strip()
+        if primary_name in _CITY_LEVEL_ZONES:
+            if city_best is None or match_len > city_best[3]:
+                city_best = entry
+        else:
+            if specific_best is None or match_len > specific_best[3]:
+                specific_best = entry
+
+    winner = specific_best or city_best
+    if winner:
+        return _crime_result(winner[1], winner[2], area)
     return None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ROUTE PATH SCANNING  (the main new feature)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _decode_polyline(encoded: str) -> list[tuple[float, float]]:
+    """Google Encoded Polyline decoder → list of (lat, lon) tuples."""
+    coords = []
+    index = 0
+    lat = lon = 0
+    while index < len(encoded):
+        for is_lon in (False, True):
+            result = shift = 0
+            while True:
+                b = ord(encoded[index]) - 63
+                index += 1
+                result |= (b & 0x1F) << shift
+                shift += 5
+                if b < 0x20:
+                    break
+            delta = ~(result >> 1) if result & 1 else result >> 1
+            if is_lon:
+                lon += delta
+            else:
+                lat += delta
+        coords.append((lat / 1e5, lon / 1e5))
+    return coords
+
+
+def _sample_waypoints(waypoints: list, max_samples: int = 60) -> list[tuple[float, float]]:
+    """
+    Normalise route geometry to a list of (lat, lon) tuples, then thin it to
+    at most max_samples evenly spaced points so we don't hammer the zone lookup.
+
+    Accepts:
+      - List of [lat, lon] or (lat, lon) pairs          ← navigation.py format
+      - Encoded polyline string                          ← ORS/OSRM format
+      - List of dicts with 'lat'/'lon' or 'latitude'/'longitude' keys
+    """
+    if not waypoints:
+        return []
+
+    # Decode encoded polyline string
+    if isinstance(waypoints, str):
+        points = _decode_polyline(waypoints)
+    else:
+        points = []
+        for wp in waypoints:
+            if isinstance(wp, (list, tuple)) and len(wp) >= 2:
+                points.append((float(wp[0]), float(wp[1])))
+            elif isinstance(wp, dict):
+                lat = wp.get("lat") or wp.get("latitude") or wp.get("y")
+                lon = wp.get("lon") or wp.get("lng") or wp.get("longitude") or wp.get("x")
+                if lat is not None and lon is not None:
+                    points.append((float(lat), float(lon)))
+
+    if len(points) <= max_samples:
+        return points
+
+    step = len(points) / max_samples
+    return [points[int(i * step)] for i in range(max_samples)]
+
+
+def scan_route_crime_zones(waypoints) -> list[dict]:
+    """
+    Scans waypoints along a route and returns a deduplicated list of crime zone
+    dicts for every distinct zone the route passes through.
+
+    Each returned dict has:
+        name, risk, summary, color, coords  (and optional aliases)
+
+    Only zones with bounding box coords defined in crime_zones.json are checked.
+    Zones of risk 'none' are omitted.
+
+    Anti-spam: a zone is only included once even if the route crosses its
+    bounding box multiple times, and consecutive duplicate detections are
+    collapsed.
+
+    Args:
+        waypoints: route geometry in any format accepted by _sample_waypoints()
+
+    Returns:
+        List of zone dicts, sorted worst-risk-first.
+    """
+    if not waypoints:
+        return []
+
+    samples = _sample_waypoints(waypoints, max_samples=80)
+    if not samples:
+        return []
+
+    zones       = _load_crime_zones()
+    coord_zones = [z for z in zones if z.get("coords") and len(z["coords"]) == 4]
+
+    seen_names: set[str] = set()
+    found: list[dict]    = []
+
+    for lat, lon in samples:
+        best      = None
+        best_area = float("inf")
+
+        for zone in coord_zones:
+            lat_min, lat_max, lon_min, lon_max = zone["coords"]
+            if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+                box_area = (lat_max - lat_min) * (lon_max - lon_min)
+                # Prefer smallest (most specific) box
+                if box_area < best_area:
+                    best      = zone
+                    best_area = box_area
+
+        if best is None:
+            continue
+
+        risk = best.get("risk", "none")
+        if risk == "none":
+            continue
+
+        name = best.get("name", "")
+        if name in seen_names:
+            continue
+
+        seen_names.add(name)
+        found.append({
+            "name":    name,
+            "risk":    risk,
+            "summary": best.get("summary", ""),
+            "color":   _CRIME_COLORS.get(risk, "#7f8c8d"),
+            "coords":  best["coords"],
+            "hit_lat": lat,   # actual route point that triggered this zone
+            "hit_lon": lon,
+        })
+
+    # Sort worst first
+    found.sort(key=lambda z: -_RISK_ORDER.get(z["risk"], 0))
+    return found
+
+
+def get_worst_route_risk(route_zones: list[dict]) -> str:
+    """Returns the worst risk level string from a list of scanned zones."""
+    worst = 0
+    for z in route_zones:
+        worst = max(worst, _RISK_ORDER.get(z.get("risk", "none"), 0))
+    levels = {v: k for k, v in _RISK_ORDER.items()}
+    return levels.get(worst, "none")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -255,51 +504,51 @@ def get_crime_risk_for_area(lat: float, lon: float, area_hint: str = "") -> dict
     """
     Returns a structured crime risk assessment for the given coordinates.
 
-    Uses disk cache (6 hrs). On cache miss, scrapes DuckDuckGo news and
-    runs Gemini to classify the risk level.
+    Priority order:
+      1. Coordinate zone lookup (bounding boxes in crime_zones.json)
+      2. Text match against area_hint in crime_zones.json
+      3. Disk cache (for previously LLM-resolved areas)
+      4. LLM web scrape + Gemini classification
 
     Args:
-        lat:        latitude of origin
-        lon:        longitude of origin
-        area_hint:  optional text label (e.g. the origin text the user typed).
-                    Falls back to a coordinate-based city label if blank.
+        lat:        latitude
+        lon:        longitude
+        area_hint:  optional user-typed text label (origin/destination)
 
     Returns:
-        {
-          "ok":         bool,
-          "risk_level": str,   # "none", "low", "moderate", "high"
-          "summary":    str,
-          "area":       str,
-          "label":      str,
-          "color":      str,
-          "penalty":    int,
-          "fetched_at": str,
-          "error":      str or None,
-        }
+        {ok, risk_level, summary, area, label, color, penalty, fetched_at, error}
     """
-    # Resolve area name
-    area_hint_clean = area_hint.strip() if area_hint else ""
-    # If hint looks like raw coordinates (no letters), ignore it
-    import re as _re
-    area = area_hint_clean if area_hint_clean and _re.search(r'[a-zA-Z]', area_hint_clean) else _area_from_coords(lat, lon)
-    cache_key = area.lower()
+    area_hint_clean = (area_hint or "").strip()
 
-    # 1. Cache hit?
+    # 1. Coordinate lookup — most reliable for known zones
+    coord_result = _coord_zone_lookup(lat, lon)
+    if coord_result:
+        zone_name = coord_result.get("name", "")
+        area_label = area_hint_clean or zone_name
+        return _crime_result(
+            coord_result.get("risk", "none"),
+            coord_result.get("summary", ""),
+            area_label,
+        )
+
+    # 2. Text match against area hint
+    area = area_hint_clean if area_hint_clean and re.search(r'[a-zA-Z]', area_hint_clean) else _area_from_coords(lat, lon)
+
+    static = _static_crime_lookup(area)
+    if static:
+        return static
+
+    # 3. Disk cache
+    cache_key = area.lower()
     cached = _load_cache(cache_key)
     if cached:
         return cached
 
-    # 2. Web scrape — fall back to static table if API key missing
+    # 4. LLM fallback
     try:
         from llm import search_transport_info, scrape_url, context_model
     except (ImportError, ValueError):
-        # Gemini API key not configured — use static crime zone table instead
-        static = _static_crime_lookup(area)
-        if static:
-            _save_cache(cache_key, static)
-            return static
-        # Area not in static table — return safe default
-        return _crime_result("none", "No static crime data for this area.", area)
+        return _crime_result("none", "No crime data available for this area.", area)
 
     query = f"crime snatching holdup robbery {area} Philippines 2025"
     try:
@@ -313,15 +562,13 @@ def get_crime_risk_for_area(lat: float, lon: float, area_hint: str = "") -> dict
         if url:
             web_data += scrape_url(url) + "\n"
 
-    web_data = web_data[:6000]   # keep token usage sane
+    web_data = web_data[:6000]
 
-    # 3. LLM classification
     sysinstruct = (
         "You are a crime risk analyst for Philippine commuter safety. "
         "Given recent news snippets about a specific area, output ONLY raw JSON with no "
         "markdown, no backticks, no preamble. "
-        'Schema: {"risk_level": "none|low|moderate|high", "summary": "one sentence max 20 words", "penalty": 0}. '
-        "Penalty mapping: none=0, low=8, moderate=18, high=28. "
+        'Schema: {"risk_level": "none|low|moderate|high", "summary": "one sentence max 20 words"}. '
         "Use 'none' only if there are zero crime-related news hits. "
         "Use 'low' for isolated older incidents. "
         "Use 'moderate' for recent but not widespread crime. "
@@ -331,28 +578,21 @@ def get_crime_risk_for_area(lat: float, lon: float, area_hint: str = "") -> dict
 
     try:
         raw = context_model(
-            context,
-            sysinstruct,
-            rthoughts=False,
-            thinking_budget=512,
+            context, sysinstruct,
+            rthoughts=False, thinking_budget=512,
             model="gemini-2.5-flash-lite",
         )
-        clean = re.sub(r'```json|```', '', raw).strip()
+        clean  = re.sub(r'```json|```', '', raw).strip()
         parsed = json.loads(clean)
-
-        risk    = parsed.get("risk_level", "none")
-        summary = parsed.get("summary", "")
-
-        # Sanity-check the risk_level value
+        risk   = parsed.get("risk_level", "none")
         if risk not in ("none", "low", "moderate", "high"):
             risk = "none"
-
-        result = _crime_result(risk, summary, area)
+        summary = parsed.get("summary", "")
+        result  = _crime_result(risk, summary, area)
         _save_cache(cache_key, result)
         return result
 
-    except (json.JSONDecodeError, KeyError) as e:
-        # LLM returned garbage — default to none so we don't block routing
+    except (json.JSONDecodeError, KeyError):
         result = _crime_result("none", "", area)
         _save_cache(cache_key, result)
         return result
@@ -361,13 +601,10 @@ def get_crime_risk_for_area(lat: float, lon: float, area_hint: str = "") -> dict
 
 
 def get_crime_warning(crime: dict, commuter_type: str) -> str:
-    """
-    Returns a tailored warning string for the crime risk level + commuter type.
-    Returns empty string if no risk.
-    """
+    """Returns a tailored warning string for the crime risk level + commuter type."""
     if not crime.get("ok"):
         return ""
-    risk  = crime.get("risk_level", "none")
+    risk = crime.get("risk_level", "none")
     if risk == "none":
         return ""
     group = _group_commuter(commuter_type)
@@ -378,9 +615,6 @@ def get_crime_warning_html(crime: dict, commuter_type: str = "") -> str:
     """
     Returns an HTML banner for crime risk.
     Returns empty string if risk is none or data unavailable.
-
-    Inject into index.html via Jinja: {{ crime_banner | safe }}
-    Place alongside weather/night/typhoon banners.
     """
     if not crime.get("ok") or crime.get("risk_level") == "none":
         return ""
@@ -410,18 +644,8 @@ def get_crime_warning_html(crime: dict, commuter_type: str = "") -> str:
 
 def apply_crime_to_routes(routes: list, crime: dict, commuter_type: str) -> list:
     """
-    Applies crime-zone safety penalty to all routes in-place.
-    Mirrors the exact same pattern as apply_weather_to_routes() and
-    apply_flood_to_routes() — safe to call right after them.
-
-    Args:
-        routes:        list of route dicts from navigation.py
-        crime:         result dict from get_crime_risk_for_area()
-        commuter_type: e.g. 'walk', 'motorcycle', 'commute'
-
-    Returns:
-        Same list with updated safety_score, score_color, score_label,
-        and a new 'crime_warning' key on each route.
+    Applies a single crime-zone safety penalty to all routes in-place.
+    Use apply_crime_both_ends() when you have separate origin/destination lookups.
     """
     from risk_monitor.features import get_score_color, get_score_label
 
@@ -438,27 +662,218 @@ def apply_crime_to_routes(routes: list, crime: dict, commuter_type: str) -> list
     return routes
 
 
+def apply_crime_both_ends(
+    routes: list,
+    orig_crime: dict,
+    dest_crime: dict,
+    commuter_type: str,
+) -> list:
+    """
+    Applies crime penalty using the WORSE of origin or destination risk,
+    and builds a combined warning that names both areas when they differ.
+    """
+    from risk_monitor.features import get_score_color, get_score_label
+
+    orig_level = _RISK_ORDER.get(orig_crime.get("risk_level", "none"), 0)
+    dest_level = _RISK_ORDER.get(dest_crime.get("risk_level", "none"), 0)
+
+    primary = dest_crime if dest_level >= orig_level else orig_crime
+    penalty = primary.get("penalty", 0)
+
+    orig_warn = get_crime_warning(orig_crime, commuter_type) if orig_level > 0 else ""
+    dest_warn = get_crime_warning(dest_crime, commuter_type) if dest_level > 0 else ""
+
+    orig_area = orig_crime.get("area", "")
+    dest_area = dest_crime.get("area", "")
+
+    if orig_area and dest_area and orig_area != dest_area and orig_level > 0 and dest_level > 0:
+        if dest_level >= orig_level:
+            warning = f"⚠️ {dest_area}: {dest_warn}"
+            if orig_level > 0:
+                warning += f" | Also: {orig_area} ({orig_crime.get('risk_level','').title()} risk)"
+        else:
+            warning = f"⚠️ {orig_area}: {orig_warn}"
+            warning += f" | Also: {dest_area} ({dest_crime.get('risk_level','').title()} risk)"
+    elif dest_level > 0 and dest_area:
+        warning = dest_warn
+    elif orig_level > 0 and orig_area:
+        warning = orig_warn
+    else:
+        warning = ""
+
+    for r in routes:
+        if penalty > 0:
+            r["safety_score"] = max(0, r.get("safety_score", 75) - penalty)
+            r["score_color"]  = get_score_color(r["safety_score"])
+            r["score_label"]  = get_score_label(r["safety_score"])
+        r["crime_warning"] = warning if penalty > 0 else ""
+        r["orig_crime"]    = orig_crime
+        r["dest_crime"]    = dest_crime
+
+    return routes
+
+
+def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
+    """
+    NEW: Reads pre-computed route["route_crime_zones"] from scan_route_crime_zones()
+    and applies additional safety score penalties for each high-risk zone the
+    route path actually passes through.
+
+    Must be called AFTER apply_crime_both_ends() / apply_crime_to_routes().
+    Requires each route dict to have a "route_crime_zones" key set by the caller.
+
+    Only adds a penalty if the route path crosses a zone WORSE than what origin/
+    destination checks already caught, so it's additive but not double-counted.
+    Also appends a "route_zones_warning" key listing the crossed zone names.
+
+    Usage in main.py:
+        for route in routes:
+            wps = route.get("waypoints") or route.get("geometry_coords") or []
+            route["route_crime_zones"] = scan_route_crime_zones(wps)
+        apply_crime_both_ends(routes, crime, dest_crime, commuter_type)
+        apply_route_crime_to_routes(routes, commuter_type)
+    """
+    from risk_monitor.features import get_score_color, get_score_label
+
+    group = _group_commuter(commuter_type)
+
+    for r in routes:
+        route_zones = r.get("route_crime_zones", [])
+        if not route_zones:
+            r.setdefault("route_zones_warning", "")
+            continue
+
+        worst_risk = get_worst_route_risk(route_zones)
+
+        # Already-applied penalty level (from origin/dest check)
+        existing_risk = "none"
+        if r.get("orig_crime"):
+            existing_risk = r["orig_crime"].get("risk_level", "none")
+        dest_risk = r.get("dest_crime", {}).get("risk_level", "none")
+        if _RISK_ORDER.get(dest_risk, 0) > _RISK_ORDER.get(existing_risk, 0):
+            existing_risk = dest_risk
+
+        # Only penalise if route path risk is WORSE than endpoints
+        if _RISK_ORDER.get(worst_risk, 0) > _RISK_ORDER.get(existing_risk, 0):
+            extra_penalty = _CRIME_PENALTY.get(worst_risk, 0) - _CRIME_PENALTY.get(existing_risk, 0)
+            if extra_penalty > 0:
+                r["safety_score"] = max(0, r.get("safety_score", 75) - extra_penalty)
+                r["score_color"]  = get_score_color(r["safety_score"])
+                r["score_label"]  = get_score_label(r["safety_score"])
+
+        # Build a human-readable list of crossed zones (high + moderate only)
+        notable = [z for z in route_zones if z.get("risk") in ("high", "moderate")]
+        if notable:
+            zone_names = ", ".join(z["name"].title() for z in notable[:4])
+            risk_label = worst_risk.title()
+            base_warn  = _CRIME_WARNINGS.get(worst_risk, {}).get(group, "")
+            r["route_zones_warning"] = (
+                f"{'🚨' if worst_risk == 'high' else '⚠️'} Route passes through "
+                f"{risk_label}-risk area(s): {zone_names}. {base_warn}"
+            )
+        else:
+            r["route_zones_warning"] = ""
+
+    return routes
+
+
 # ═════════════════════════════════════════════════════════════════════════════
-# HOW TO WIRE INTO main.py  (3 lines, no changes to navigation/map code)
+# COMMUNITY REPORT INTEGRATION
+# ═════════════════════════════════════════════════════════════════════════════
+
+def get_crime_risk_with_reports(
+    lat: float,
+    lon: float,
+    area_hint: str,
+    db,
+) -> dict:
+    """
+    Full crime risk assessment combining:
+      1. Coordinate/text-based static zone data
+      2. LLM web scrape (for unknown areas only)
+      3. Live community reports near the coordinates
+
+    Community report bump rules:
+      - 1 unverified crime/harassment report nearby  → raise risk by one level
+      - 1 verified report (2+ confirmations)         → raise risk by one level
+      - 2+ verified reports                          → raise risk by two levels
+      - Max cap: 'high'
+    """
+    base = get_crime_risk_for_area(lat, lon, area_hint)
+
+    try:
+        from risk_monitor.community_reports import get_reports_near
+        nearby = get_reports_near(db, lat, lon, radius_deg=_REPORT_BUMP_RADIUS)
+    except Exception as e:
+        import sys
+        print(f"[crime_data] get_reports_near failed: {e}", file=sys.stderr)
+        nearby = []
+
+    crime_reports = [r for r in nearby if r.get("report_type") in _REPORT_CRIME_TYPES]
+
+    if not crime_reports:
+        base["community_bump"] = 0
+        base["community_note"] = ""
+        return base
+
+    verified   = [r for r in crime_reports if r.get("confirmations", 0) >= 2]
+    unverified = [r for r in crime_reports if r.get("confirmations", 0) < 2]
+
+    bump = 0
+    if len(verified) >= 2:
+        bump = 2
+    elif verified or len(unverified) >= 2:
+        bump = 1
+
+    if bump == 0:
+        base["community_bump"] = 0
+        base["community_note"] = ""
+        return base
+
+    _LEVELS      = ["none", "low", "moderate", "high"]
+    current_idx  = _LEVELS.index(base.get("risk_level", "none"))
+    new_idx      = min(len(_LEVELS) - 1, current_idx + bump)
+    new_risk     = _LEVELS[new_idx]
+
+    if new_risk == base.get("risk_level"):
+        base["community_bump"] = 0
+        base["community_note"] = ""
+        return base
+
+    type_labels = list({r.get("report_type", "incident") for r in crime_reports})
+    label_map   = {"crime": "crime/snatching", "harassment": "harassment"}
+    type_str    = " and ".join(label_map.get(t, t) for t in type_labels)
+    count       = len(crime_reports)
+    note        = (
+        f"{count} recent community report{'s' if count > 1 else ''} "
+        f"of {type_str} within 550m."
+    )
+
+    bumped = _crime_result(new_risk, base.get("summary", ""), base.get("area", ""))
+    bumped["community_bump"] = bump
+    bumped["community_note"] = note
+    return bumped
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# HOW TO WIRE INTO main.py
 # ═════════════════════════════════════════════════════════════════════════════
 #
-# 1. At the top of main.py, add to existing imports:
+# Minimal (origin/dest only, same as before):
+#   crime      = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
+#   dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
+#   apply_crime_both_ends(routes, crime, dest_crime, commuter_type)
 #
-#       from risk_monitor.crime_data import get_crime_risk_for_area, apply_crime_to_routes
+# Full (also scans route path for intermediate high-risk zones):
+#   crime      = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
+#   dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
+#   for route in routes:
+#       wps = route.get("waypoints") or route.get("geometry_coords") or []
+#       route["route_crime_zones"] = scan_route_crime_zones(wps)
+#   apply_crime_both_ends(routes, crime, dest_crime, commuter_type)
+#   apply_route_crime_to_routes(routes, commuter_type)
 #
-# 2. Inside get_routes(), right after the apply_reports_to_routes(...) call
-#    (around line 699), add:
-#
-#       crime = get_crime_risk_for_area(orig_lat, orig_lon, origin_text or "")
-#       apply_crime_to_routes(routes, crime, commuter_type)
-#
-#    That's it. No changes to navigation.py, index.html, or any map code.
-#
-# 3. (Optional) To show a crime banner on the main page, in home() add:
-#
-#       crime_banner = get_crime_warning_html(
-#           get_crime_risk_for_area(14.5995, 120.9842), ""
-#       )
-#    and pass   crime_banner=crime_banner   to render_template, then add
-#       {{ crime_banner | safe }}
-#    in index.html alongside the other banners.
+# To display route_zones_warning in the route card (index.html / JS):
+#   if (route.route_zones_warning) {
+#       card.innerHTML += `<div class="route-warning report-warning">${route.route_zones_warning}</div>`;
+#   }

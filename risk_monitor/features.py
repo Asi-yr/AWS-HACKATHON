@@ -81,20 +81,20 @@ def rank_routes(routes: list, commuter_type: str = "") -> list:
         r['mode_label']       = 'Alternate'
         r['mode_label_color'] = '#7f8c8d'
 
-    # Attach safety scores
-    for r in routes:
+    # ── Assign IDs BEFORE scoring so position bonus in _compute_safety_score works ──
+    ordered = [fastest, balanced] + alternates
+    for i, r in enumerate(ordered):
+        r['id'] = i
+
+    # Attach safety scores (route id is now set, position bonus applies correctly)
+    for r in ordered:
         r['safety_score'] = _compute_safety_score(r, commuter_type)
 
     # Clean up temp keys
-    for r in routes:
+    for r in ordered:
         r.pop('_dur', None)
         r.pop('_dist', None)
         r.pop('_balance_score', None)
-
-    # Return in display order: Fastest, Balanced, Alternate
-    ordered = [fastest, balanced] + alternates
-    for i, r in enumerate(ordered):
-        r['id'] = i  # re-index so first route gets thick polyline
 
     return ordered
 
@@ -127,9 +127,11 @@ def _parse_km(dist_str: str) -> float:
 def _compute_safety_score(route: dict, commuter_type: str = "") -> int:
     """
     Heuristic safety score (0–100) based on:
-      - Speed ratio: avg speed = distance / time. Very high avg speed = highway = lower score.
-      - Commuter type bonus: walking/biking on slower roads scores higher.
-      - Time of day: night travel automatically penalises based on commuter type.
+      - Avg speed: high speed = expressway = lower safety
+      - Route position (id): Fastest(0) takes highways, Alternate(2) uses side streets
+      - Commuter type bonus/penalty
+    NOTE: Night/weather/crime/flood penalties are applied AFTER this by their
+    respective functions. Do NOT apply night penalty here to avoid double-counting.
     """
     dur  = _parse_mins(route.get('time', '0'))
     dist = _parse_km(route.get('distance', '0'))
@@ -139,32 +141,41 @@ def _compute_safety_score(route: dict, commuter_type: str = "") -> int:
 
     avg_speed_kmh = dist / (dur / 60)  # km/h
 
-    # Base score — penalise high-speed routes (likely expressways)
-    if avg_speed_kmh > 80:
-        base = 40   # Very fast = likely motorway
-    elif avg_speed_kmh > 50:
-        base = 60   # Normal urban driving
-    elif avg_speed_kmh > 30:
-        base = 75   # Slow urban / jeepney pace
+    # Base score — penalise high-speed routes (expressways/highways)
+    if avg_speed_kmh > 70:
+        base = 45   # Very fast = likely NLEX/SLEX/expressway
+    elif avg_speed_kmh > 45:
+        base = 62   # Fast urban — major arterial (EDSA, C5)
+    elif avg_speed_kmh > 25:
+        base = 76   # Moderate — secondary roads
     elif avg_speed_kmh > 10:
-        base = 88   # Bicycle / tricycle pace
+        base = 87   # Slow — residential / barangay roads, bicycle
     else:
-        base = 95   # Walking pace
+        base = 93   # Walking pace — pedestrian paths
 
-    # Commuter type adjustment
+    # ── Route position bonus ─────────────────────────────────────────────────
+    # OSRM route[0]=fastest (often highway), route[2]=alternate (side streets).
+    # This ensures the 3 routes always show meaningfully different scores.
+    route_idx = route.get('id', 0)
+    if route_idx == 0:
+        base = max(0, base - 6)    # Fastest = highway bias → slight penalty
+    elif route_idx == 1:
+        pass                        # Balanced → no adjustment
+    elif route_idx >= 2:
+        base = min(100, base + 9)  # Alternate = side streets → safer for peds/cyclists
+
+    # ── Commuter type adjustment ─────────────────────────────────────────────
     ct = commuter_type.lower()
     if any(x in ct for x in ['walk', 'bike', 'bicycle']):
-        base = min(100, base + 5)
+        base = min(100, base + 4)
+        if route_idx >= 2:
+            base = min(100, base + 4)  # Side-street walks are meaningfully safer
     elif any(x in ct for x in ['motorcycle', 'motor']):
         base = max(0, base - 5)
     elif any(x in ct for x in ['commute', 'jeepney', 'tricycle', 'bus']):
         base = max(0, base - 2)
 
-    # Night penalty — automatically reduces score if it's currently nighttime
-    night_penalty = get_night_safety_penalty(commuter_type)
-    base = max(0, base - night_penalty)
-
-    return base
+    return max(0, min(100, base))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
