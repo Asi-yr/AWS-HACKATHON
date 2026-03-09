@@ -9,14 +9,21 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
-<!-- ── Banner layer — always above the Leaflet map (which is isolated at z-index:0) ── -->
-<div id="banner-layer" style="position:fixed;top:0;left:0;right:0;z-index:100000;pointer-events:none;">
-  <div style="pointer-events:auto;">
-    {{ typhoon_banner | safe }}
-    {{ night_banner | safe }}
-    {{ weather_banner | safe }}
-  </div>
+<!-- ── Corner Alert Panel — modern notification cards instead of top banners ── -->
+<!-- Server-side alerts injected as data; JS renders them as corner cards        -->
+<div id="alert-panel" style="position:fixed;top:16px;right:16px;z-index:100000;pointer-events:none;
+  display:flex;flex-direction:column;gap:8px;max-width:300px;width:calc(100vw - 380px);">
+  <!-- Alert cards injected here by JS on page load + after each search -->
 </div>
+
+<!-- Hidden data elements so Jinja can pass server alerts to JS -->
+<script id="server-alerts-data" type="application/json">
+{
+  "typhoon_html": {{ (typhoon_banner | tojson) if typhoon_banner else '""' }},
+  "night_html":   {{ (night_banner   | tojson) if night_banner   else '""' }},
+  "weather_html": {{ (weather_banner | tojson) if weather_banner else '""' }}
+}
+</script>
 
 <div class="app-container">
 
@@ -111,7 +118,7 @@
         <div style="color:#888;font-size:10px;line-height:1.5;">
             Incidents refresh every 10 min · Weather every search · Crime zones from PNP data · Community reports peer-verified
         </div>
-        <div id="incident-status" style="margin-top:6px;font-size:10px;color:#888;">Checking for active incidents...</div>
+        <div id="incident-status" style="margin-top:6px;font-size:10px;color:#888;">🔄 Checking incident feeds…</div>
     </div>
 
   </div><!-- /sidebar -->
@@ -126,6 +133,11 @@
     <div class="map-overlay-controls">
       <button id="pinpoint-btn" title="Pick location on map">📌</button>
       <span class="pick-status-label" id="pick-status-label">Click map to set location</span>
+    </div>
+
+    <!-- Map status bar — bottom of map -->
+    <div id="map-status-bar">
+      <span id="map-status-text">Loading safety data…</span>
     </div>
   </div>
 
@@ -142,6 +154,21 @@ const map = L.map('map').setView([14.5995, 120.9842], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenStreetMap contributors', maxZoom: 19
 }).addTo(map);
+
+// ── Custom Leaflet panes for guaranteed z-ordering ────────────────────────────
+// Leaflet default: overlayPane=400, shadowPane=500, markerPane=600, popupPane=700
+// We slot hazard circles BELOW all markers so they never block clicks on pins.
+//   hazardCircles  → z-index 350  (below markers, pointer-events:none so clicks pass through)
+//   hazardMarkers  → z-index 560  (emoji/pulse dots — visible but under endpoint pins)
+//   endpointPins   → z-index 650  (origin / destination — always clickable on top)
+map.createPane('hazardCircles');
+map.createPane('hazardMarkers');
+map.createPane('endpointPins');
+map.getPane('hazardCircles').style.zIndex  = '350';
+map.getPane('hazardMarkers').style.zIndex  = '560';
+map.getPane('endpointPins').style.zIndex   = '650';
+// Circles must NOT eat pointer events — let clicks fall through to markers/map
+map.getPane('hazardCircles').style.pointerEvents = 'none';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let origCoords  = null;   // {lat, lon}
@@ -160,21 +187,29 @@ let lastDestCoords = null;    // dest coords from last search
 // SVG-based markers — no emoji, renders consistently on all platforms
 
 function mkPin(color, letter) {
-  // Teardrop map pin shape in pure SVG
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="38" viewBox="0 0 28 38">
-    <path d="M14 0C6.27 0 0 6.27 0 14c0 9.63 14 24 14 24S28 23.63 28 14C28 6.27 21.73 0 14 0z"
-          fill="${color}" stroke="white" stroke-width="2"/>
-    <text x="14" y="19" text-anchor="middle" dominant-baseline="middle"
-          font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="white">${letter}</text>
+  // Compact teardrop pin — smaller than before so it doesn't dominate the map.
+  // Size reduced from 28×38 to 22×30. The stroke is white so it pops against
+  // any background without blending into hazard zone colors.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="30" viewBox="0 0 22 30">
+    <path d="M11 0C5.1 0 0 5.1 0 11c0 7.8 11 19 11 19S22 18.8 22 11C22 5.1 16.9 0 11 0z"
+          fill="${color}" stroke="white" stroke-width="2.5"/>
+    <circle cx="11" cy="11" r="4.5" fill="white" opacity="0.92"/>
+    <text x="11" y="15" text-anchor="middle" dominant-baseline="middle"
+          font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="${color}">${letter}</text>
   </svg>`;
   return L.divIcon({
     className: '',
     html: svg,
-    iconSize: [28, 38],
-    iconAnchor: [14, 38],
-    popupAnchor: [0, -38],
+    iconSize:    [22, 30],
+    iconAnchor:  [11, 30],
+    popupAnchor: [0, -32],
   });
 }
+
+// Origin pin: bright cyan-blue — clearly "start", nothing like hazard red/orange
+const ORIGIN_COLOR = '#0984e3';   // vivid sky blue
+// Dest pin: deep violet — clearly "end", distinct from crime red/orange
+const DEST_COLOR   = '#6c5ce7';   // vivid purple
 
 function mkDot(color, letter) {
   // Smaller round marker for transit stops / overlays
@@ -220,12 +255,14 @@ async function fetchAndDrawNearby(lat, lon) {
         const data = await resp.json();
         
         const circle = L.circle([lat, lon], {
-            color: '#e74c3c',
-            fillColor: '#e74c3c',
-            fillOpacity: 0.08,
-            radius: 1000,
-            dashArray: '6, 6',
-            weight: 2
+            color: '#0984e3',
+            fillColor: '#0984e3',
+            fillOpacity: 0.04,
+            radius: 800,           // reduced from 1000 — less visual clutter
+            dashArray: '5, 8',
+            weight: 1.5,
+            interactive: false,    // never blocks clicks on the map
+            pane: 'hazardCircles',
         }).addTo(map);
         nearbyLayers.push(circle);
         
@@ -274,7 +311,7 @@ async function setOrigin(lat, lon, label) {
     reverseGeocode(lat, lon).then(name => { if (name) input.value = name; });
   }
   if (origMarker) map.removeLayer(origMarker);
-  origMarker = L.marker([lat, lon], {icon: mkPin('#2980b9', 'A')})
+  origMarker = L.marker([lat, lon], {icon: mkPin(ORIGIN_COLOR, 'A'), pane: 'endpointPins'})
     .addTo(map).bindPopup('Origin').openPopup();
   
   clearNearby();
@@ -294,7 +331,7 @@ async function setDest(lat, lon, label) {
     reverseGeocode(lat, lon).then(name => { if (name) input.value = name; });
   }
   if (destMarker) map.removeLayer(destMarker);
-  destMarker = L.marker([lat, lon], {icon: mkPin('#e74c3c', 'B')})
+  destMarker = L.marker([lat, lon], {icon: mkPin(DEST_COLOR, 'B'), pane: 'endpointPins'})
     .addTo(map).bindPopup('Destination').openPopup();
     
   clearNearby();
@@ -318,6 +355,7 @@ function clearRoutes() {
   activeRouteId = null;
   allRoutes = [];
   hasActiveRoute = false;
+  _routePathPts = [];
   ++_overlayGeneration;   // cancel any in-flight async safety fetch
   clearCrimeOverlay();    // remove all crime/flood circles
 }
@@ -494,7 +532,7 @@ setupAutocomplete('origin-input', result => {
     origCoords = { lat: result.lat, lon: result.lon };
     map.flyTo([result.lat, result.lon], 15, { animate: true, duration: 0.8 });
     if (origMarker) map.removeLayer(origMarker);
-    origMarker = L.marker([result.lat, result.lon], {icon: mkPin('#2980b9', 'A')}).addTo(map).bindPopup('Origin').openPopup();
+    origMarker = L.marker([result.lat, result.lon], {icon: mkPin(ORIGIN_COLOR, 'A'), pane: 'endpointPins'}).addTo(map).bindPopup('Origin').openPopup();
     clearNearby(); fetchAndDrawNearby(result.lat, result.lon); loadSafetyOverlay();
   } else { origCoords = null; if (origMarker) { map.removeLayer(origMarker); origMarker = null; } }
   checkEnableButton();
@@ -505,7 +543,7 @@ setupAutocomplete('dest-input', result => {
     destCoords = { lat: result.lat, lon: result.lon };
     map.flyTo([result.lat, result.lon], 15, { animate: true, duration: 0.8 });
     if (destMarker) map.removeLayer(destMarker);
-    destMarker = L.marker([result.lat, result.lon], {icon: mkPin('#e74c3c', 'B')}).addTo(map).bindPopup('Destination').openPopup();
+    destMarker = L.marker([result.lat, result.lon], {icon: mkPin(DEST_COLOR, 'B'), pane: 'endpointPins'}).addTo(map).bindPopup('Destination').openPopup();
     clearNearby(); fetchAndDrawNearby(result.lat, result.lon); loadSafetyOverlay();
   } else { destCoords = null; if (destMarker) { map.removeLayer(destMarker); destMarker = null; } }
   checkEnableButton();
@@ -558,7 +596,7 @@ async function findRoutes() {
       if (data.orig_lat && data.orig_lon) {
         origCoords = { lat: data.orig_lat, lon: data.orig_lon };
         if (origMarker) map.removeLayer(origMarker);
-        origMarker = L.marker([data.orig_lat, data.orig_lon], { icon: mkPin('#2980b9', 'A') })
+        origMarker = L.marker([data.orig_lat, data.orig_lon], { icon: mkPin(ORIGIN_COLOR, 'A'), pane: 'endpointPins' })
           .addTo(map).bindPopup('Origin');
         // Also update the input field if it was just a coordinate string
         const origInput = document.getElementById('origin-input');
@@ -567,7 +605,7 @@ async function findRoutes() {
       if (data.dest_lat && data.dest_lon) {
         destCoords = { lat: data.dest_lat, lon: data.dest_lon };
         if (destMarker) map.removeLayer(destMarker);
-        destMarker = L.marker([data.dest_lat, data.dest_lon], { icon: mkPin('#e74c3c', 'B') })
+        destMarker = L.marker([data.dest_lat, data.dest_lon], { icon: mkPin(DEST_COLOR, 'B'), pane: 'endpointPins' })
           .addTo(map).bindPopup('Destination');
         const destInput = document.getElementById('dest-input');
         if (!destInput.value.trim() && data.dest_text) destInput.value = data.dest_text;
@@ -598,27 +636,130 @@ function showError(msg) {
     `<div class="flash-message">${msg}</div>`;
 }
 
-// ── Live banner updater — replaces server-rendered banners after AJAX search ──
-function updateLiveBanners(data) {
-  const bannerLayer = document.getElementById('banner-layer');
-  if (!bannerLayer) return;
+// ── Corner alert panel system ──────────────────────────────────────────────────
+// Replaces the old full-width banners with modern corner notification cards.
+// Cards auto-dismiss after 10 s unless the user hovers; persistent ones stay.
 
-  // Remove any previously injected dynamic banners
-  document.querySelectorAll('.dynamic-weather-banner, .dynamic-flood-banner').forEach(el => el.remove());
+const _alertPanel = () => document.getElementById('alert-panel');
+let _alertCards   = {};  // id → element
 
-  if (data.weather_banner) {
-    const div = document.createElement('div');
-    div.className = 'dynamic-weather-banner';
-    div.style.pointerEvents = 'auto';
-    div.innerHTML = data.weather_banner;
-    bannerLayer.querySelector('div').appendChild(div);
+function _riskIcon(type) {
+  return { typhoon:'🌀', night:'🌙', weather:'🌦️', flood:'🌊', crime:'🚨',
+           fire:'🔥', wind:'💨', storm:'⛈️' }[type] || '⚠️';
+}
+
+function _alertColor(type, level) {
+  if (type === 'typhoon') return '#6c3483';
+  if (type === 'night')   return '#2c3e50';
+  if (type === 'flood') {
+    return { high:'#c0392b', moderate:'#e67e22', low:'#f39c12' }[level] || '#1a5276';
   }
-  if (data.flood_banner) {
-    const div = document.createElement('div');
-    div.className = 'dynamic-flood-banner';
-    div.style.pointerEvents = 'auto';
-    div.innerHTML = data.flood_banner;
-    bannerLayer.querySelector('div').appendChild(div);
+  if (type === 'weather') {
+    return { storm:'#6c3483', heavy_rain:'#c0392b', rain:'#1a5276',
+             light_rain:'#2980b9', fog:'#7f8c8d' }[level] || '#2980b9';
+  }
+  return '#e74c3c';
+}
+
+/**
+ * Show a corner alert card.
+ * @param {string} id        - Unique id (e.g. 'night', 'flood_high')
+ * @param {string} type      - Category: 'typhoon'|'night'|'weather'|'flood'|'crime'
+ * @param {string} title     - Bold header
+ * @param {string} body      - Detail text
+ * @param {string} [level]   - Risk sub-level for color
+ * @param {boolean} [persist]- If true, no auto-dismiss timer
+ */
+function showAlertCard(id, type, title, body, level = '', persist = false) {
+  const panel = _alertPanel();
+  if (!panel) return;
+
+  // Remove existing card with same id
+  const existing = document.getElementById('alert-card-' + id);
+  if (existing) existing.remove();
+
+  const color = _alertColor(type, level);
+  const icon  = _riskIcon(type);
+
+  const card = document.createElement('div');
+  card.id = 'alert-card-' + id;
+  card.className = 'map-alert-card';
+  card.style.cssText =
+    `border-left:4px solid ${color};pointer-events:auto;`;
+
+  card.innerHTML = `
+    <div class="mac-dot" style="background:${color};"></div>
+    <div class="mac-content">
+      <div class="mac-title">${icon} ${escHtml(title)}</div>
+      ${body ? `<div class="mac-body">${escHtml(body)}</div>` : ''}
+    </div>
+    <button class="mac-close" onclick="dismissAlertCard('${id}')" title="Dismiss">✕</button>
+  `;
+
+  panel.appendChild(card);
+  _alertCards[id] = card;
+
+  // Animate in
+  requestAnimationFrame(() => { card.classList.add('visible'); });
+
+  // Auto-dismiss after 10 s unless persistent or hovered
+  if (!persist) {
+    let timer = setTimeout(() => dismissAlertCard(id), 10000);
+    card.addEventListener('mouseenter', () => clearTimeout(timer));
+    card.addEventListener('mouseleave', () => {
+      timer = setTimeout(() => dismissAlertCard(id), 4000);
+    });
+  }
+}
+
+function dismissAlertCard(id) {
+  const card = document.getElementById('alert-card-' + id);
+  if (!card) return;
+  card.classList.remove('visible');
+  card.classList.add('dismissing');
+  setTimeout(() => card.remove(), 280);
+  delete _alertCards[id];
+}
+
+/** Parse and show server-rendered banners (from Jinja) as corner cards */
+function initServerAlertCards() {
+  try {
+    const raw  = document.getElementById('server-alerts-data');
+    if (!raw) return;
+    const data = JSON.parse(raw.textContent);
+
+    if (data.typhoon_html && data.typhoon_html.includes('Typhoon')) {
+      const text = data.typhoon_html.replace(/<[^>]+>/g, '').trim();
+      showAlertCard('typhoon', 'typhoon', 'Typhoon Warning', text, '', true);
+    }
+    if (data.night_html && data.night_html.includes('Night')) {
+      const text = data.night_html.replace(/<[^>]+>/g, '').trim();
+      showAlertCard('night', 'night', 'Night Travel', text, '', false);
+    }
+    if (data.weather_html && data.weather_html.trim()) {
+      const text = data.weather_html.replace(/<[^>]+>/g, '').trim();
+      const level = data.weather_html.includes('storm') ? 'storm'
+                  : data.weather_html.includes('heavy') ? 'heavy_rain'
+                  : data.weather_html.includes('rain')  ? 'rain' : 'light_rain';
+      showAlertCard('weather', 'weather', 'Weather Alert', text, level, false);
+    }
+  } catch(e) { /* no server alerts */ }
+}
+
+// ── Live banner updater — called after AJAX route search ──
+function updateLiveBanners(data) {
+  // Remove old dynamic cards
+  ['weather_live', 'flood_live'].forEach(id => dismissAlertCard(id));
+
+  if (data.weather_banner && data.weather_banner.trim()) {
+    const text  = data.weather_banner.replace(/<[^>]+>/g, '').trim();
+    const level = (data.weather && data.weather.risk_level) || 'rain';
+    showAlertCard('weather_live', 'weather', 'Live Weather', text, level, false);
+  }
+  if (data.flood_banner && data.flood_banner.trim()) {
+    const text  = data.flood_banner.replace(/<[^>]+>/g, '').trim();
+    const level = (data.flood && data.flood.risk_level) || 'moderate';
+    showAlertCard('flood_live', 'flood', 'Flood Zone Alert', text, level, true);
   }
 }
 
@@ -721,11 +862,31 @@ function renderRouteCards(routes) {
     }
     const fareDisp = route.fare ? route.fare.display : '';
     const safetyHTML = `
-      <div class="route-safety" style="color:${safetyColor(sc)}">
-        🛡️ Safety Score: ${sc}/100
-        ${fareDisp ? `<span class="fare-badge">💸 ${escHtml(fareDisp)}</span>` : ''}
-      </div>
-      ${warningLines}`;
+  <div class="route-safety" style="color:${safetyColor(sc)}">
+    🛡️ Safety Score: ${sc}/100
+    ${fareDisp ? `<span class="fare-badge">💸 ${escHtml(fareDisp)}</span>` : ''}
+  </div>
+  ${warningLines}
+  ${route.has_flood_zones && route.flood_warning ? `
+    <div style="background: #1a5276; color: white; padding: 8px 12px; border-radius: 4px; margin: 8px 0 4px 0; font-size: 13px; border-left: 3px solid #3498db;">
+      <strong>🌊 Flood Zones:</strong> ${escHtml(route.flood_warning)}
+      ${route.flood_zones && route.flood_zones.length > 0 ? `
+        <details style="margin-top: 6px;">
+          <summary style="cursor: pointer; font-size: 12px; font-weight: normal;">
+            View affected areas (${route.flood_zones.length} location${route.flood_zones.length !== 1 ? 's' : ''})
+          </summary>
+          <ul style="margin: 6px 0 0 20px; font-size: 11px; line-height: 1.6;">
+            ${route.flood_zones.slice(0, 5).map(zone => `
+              <li><strong>${escHtml(zone.risk.charAt(0).toUpperCase() + zone.risk.slice(1))}</strong> risk near ${zone.lat.toFixed(5)}, ${zone.lon.toFixed(5)}</li>
+            `).join('')}
+            ${route.flood_zones.length > 5 ? `
+              <li style="font-style: italic; color: #d5e8f5;">...and ${route.flood_zones.length - 5} more location(s)</li>
+            ` : ''}
+          </ul>
+        </details>
+      ` : ''}
+    </div>
+  ` : ''}`;
 
     // ── Station count / hazards ───────────────────────────────────────────
     const infoHTML = route.station_count
@@ -1010,6 +1171,8 @@ function _drawOneIncident(inc, isRealtime) {
         fillColor:   color,
         fillOpacity: isRealtime ? 0.18 : 0.14,
         dashArray:   isRealtime ? null : '6 4',
+        interactive: false,
+        pane:        'hazardCircles',
     }).addTo(map);
 
     const severityColors = { low:'#f39c12', moderate:'#e67e22', high:'#e74c3c', critical:'#6c1a1a' };
@@ -1059,7 +1222,16 @@ function _drawOneIncident(inc, isRealtime) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 let safetyOverlayLayers = [];   // community reports — zoom-toggled
-let routeCrimeLayers    = [];   // route crime areas — NEVER auto-cleared on zoom
+let routeCrimeLayers    = [];   // flat list kept for legacy clearCrimeOverlay()
+let routeZoneObjects   = [];   // structured: [{circle, pulse, label, type}] for zoom control
+let _routePathPts       = [];   // flattened [lat,lon] points of active route for proximity checks
+
+// ── Zoom thresholds for zone LOD (level of detail) ────────────────────────
+//   zoom < ZOOM_FAR   → pulse dot only (no circle, no label)
+//   ZOOM_FAR ≤ zoom < ZOOM_NEAR → circle + pulse (no label)
+//   zoom ≥ ZOOM_NEAR  → full: circle + pulse + label
+const ZOOM_FAR  = 13;   // city overview
+const ZOOM_NEAR = 15;   // street level
 let hasActiveRoute      = false; // true after a route search
 
 /**
@@ -1104,34 +1276,37 @@ function drawSafetyOverlay(reports) {
         police_visible:200,
     };
     const FILL_OPACITY = {
-        flooding:      0.28,
-        crime:         0.30,
-        harassment:    0.28,
-        accident:      0.25,
-        dark_area:     0.20,
-        road_damage:   0.18,
-        heavy_traffic: 0.18,
-        road_closed:   0.22,
-        construction:  0.18,
-        safe_spot:     0.18,
-        police_visible:0.18,
+        flooding:      0.08,   // reduced — prevents stacking opacity blobs
+        crime:         0.09,
+        harassment:    0.08,
+        accident:      0.07,
+        dark_area:     0.06,
+        road_damage:   0.05,
+        heavy_traffic: 0.05,
+        road_closed:   0.07,
+        construction:  0.05,
+        safe_spot:     0.06,
+        police_visible:0.06,
     };
 
     reports.forEach(r => {
         const radius     = RADIUS[r.type]  || 200;
-        const fillOp     = FILL_OPACITY[r.type] || 0.20;
+        const fillOp     = FILL_OPACITY[r.type] || 0.07;
         const isPositive = (r.type === 'safe_spot' || r.type === 'police_visible');
         const isHigh     = (r.type === 'flooding' || r.type === 'crime' || r.type === 'harassment');
 
-        // Danger / safe zone circle
+        // Thin-border circle — outline only to mark zones without obscuring the map
         const circle = L.circle([r.lat, r.lon], {
             radius:       radius,
             color:        r.color,
-            weight:       isHigh ? 2.5 : 1.5,
+            weight:       isHigh ? 1.5 : 1,
             fillColor:    r.color,
             fillOpacity:  fillOp,
             dashArray:    isPositive ? null : (isHigh ? null : '6 4'),
-        }).addTo(map);
+            interactive:  false,
+            pane:         'hazardCircles',
+        });
+        if (map.getZoom() >= ZOOM_NEAR) circle.addTo(map);
 
         // Popup with confirm/upvote button
         const verifiedBadge = r.verified
@@ -1157,16 +1332,30 @@ function drawSafetyOverlay(reports) {
             </div>`;
         circle.bindPopup(popupHtml, {maxWidth: 230});
 
-        // Small colored dot marker at center — uses first letter of type
-        const typeInitial = (r.label || r.type || '?').charAt(0).toUpperCase();
-        const iconMarker = L.marker([r.lat, r.lon], {
-            icon: mkDot(r.color, typeInitial),
-            interactive: true,
-            zIndexOffset: 500,
+        // Pulsing dot + typed pill label
+        const _EMOJI_MAP = {
+            flooding:'🌊', flood:'🌊', crime:'🚨', harassment:'😨',
+            accident:'💥', fire:'🔥', dark_area:'🌑', road_damage:'🚧',
+            heavy_traffic:'🚦', road_closed:'⛔', construction:'🏗️',
+            safe_spot:'✅', police_visible:'👮',
+        };
+        const _em = _EMOJI_MAP[r.type] || '⚠️';
+        const pulseM = L.marker([r.lat, r.lon], {
+            icon: mkPulseIcon(r.color, isHigh ? 9 : 7, null, 1.0, false, _em),
+            interactive:true, zIndexOffset:490, pane:'hazardMarkers',
         }).addTo(map);
+        const iconMarker = L.marker([r.lat, r.lon], {
+            icon: mkRiskIcon(_em, r.label || r.type || 'Incident', r.color, 'sm'),
+            interactive: true,
+            zIndexOffset: 500, pane:'hazardMarkers',
+        }).addTo(map);
+        pulseM.bindPopup(popupHtml, {maxWidth: 230});
         iconMarker.bindPopup(popupHtml, {maxWidth: 230});
 
-        safetyOverlayLayers.push(circle, iconMarker);
+        // Track circle separately so zoom LOD can show/hide it
+        routeZoneObjects.push({ circle, pulse: null, label: null, iconOnly: null });
+
+        safetyOverlayLayers.push(circle, pulseM, iconMarker);
     });
 }
 
@@ -1188,125 +1377,511 @@ async function confirmReport(reportId) {
         if (msgEl) msgEl.textContent = '❌ Error confirming.';
     }
 }
-// ── Crime zone overlay — drawn synchronously from pre-computed route data ─────
-// Uses route.route_crime_zones (set by backend scan_route_crime_zones) plus
-// route.orig_crime / route.dest_crime for endpoint circles.
-// No async fetches needed — instant swap when clicking route cards.
+// ── Crime/Flood/Safety zone overlay ──────────────────────────────────────────
+// Modern approach: minimal translucent zones with clean DivIcon markers
+// instead of stacking opaque circles. Each risk type gets a distinct icon
+// and a thin boundary only — no filled blobs piling up.
 
-let _overlayGeneration = 0;   // incremented on each new overlay draw to cancel stale async ops
+let _overlayGeneration = 0;
 
 function clearCrimeOverlay() {
     routeCrimeLayers.forEach(l => { try { map.removeLayer(l); } catch(e) {} });
     routeCrimeLayers = [];
+    routeZoneObjects = [];
+}
+
+/**
+ * Apply zoom-based LOD (Level of Detail) to all route zone objects.
+ * Called on zoomend and once after drawRouteZoneOverlay completes.
+ *
+ * LOD tiers:
+ *   zoom < ZOOM_FAR  : pulse dot only — no circle, no label, no icon badge
+ *   ZOOM_FAR–ZOOM_NEAR: circle + pulse + icon badge (emoji circle, no text)
+ *   zoom >= ZOOM_NEAR : circle + pulse + full text label pill
+ */
+function applyZoneLOD() {
+    const zoom = map.getZoom();
+    const showCircle   = zoom >= ZOOM_NEAR;
+    const showLabel    = zoom >= ZOOM_NEAR;
+    const showIconOnly = showCircle && !showLabel;  // mid tier
+
+    routeZoneObjects.forEach(obj => {
+        // ── Ghost circle ─────────────────────────────────────────────────
+        if (obj.circle) {
+            if (showCircle) { if (!map.hasLayer(obj.circle))   obj.circle.addTo(map); }
+            else            { try { map.removeLayer(obj.circle); } catch(e){} }
+        }
+
+        // ── Pulse dot: always visible ─────────────────────────────────────
+        if (obj.pulse) {
+            if (!map.hasLayer(obj.pulse)) obj.pulse.addTo(map);
+        }
+
+        // ── Icon-only badge (mid zoom) ────────────────────────────────────
+        if (obj.iconOnly) {
+            if (showIconOnly) { if (!map.hasLayer(obj.iconOnly)) obj.iconOnly.addTo(map); }
+            else              { try { map.removeLayer(obj.iconOnly); } catch(e){} }
+        }
+
+        // ── Full text label (close zoom only) ────────────────────────────
+        if (obj.label) {
+            if (showLabel)  { if (!map.hasLayer(obj.label))    obj.label.addTo(map); }
+            else            { try { map.removeLayer(obj.label); } catch(e){} }
+        }
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TIME-OF-DAY RISK SYSTEM + SPECIFIC CRIME ICONS
+// High-risk zones that mention "night" in their summary get dimmer colors
+// during daytime (6AM-6PM PHT) and intensify after dark.
+// Zones also get specific emoji icons based on crime type keywords.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Is it currently nighttime in Philippine Standard Time? (UTC+8) */
+function _isNightPHT() {
+    const h = new Date(Date.now() + 8 * 3600 * 1000).getUTCHours();
+    return h >= 18 || h < 6;   // 6 PM – 6 AM PHT
+}
+
+/**
+ * Returns zone circle style based on risk level, summary content, and time.
+ * Goal: reduce the sea of red — use amber/ochre during day, warm red at night.
+ */
+function _zoneStyle(risk, summary, isNightOnly) {
+    const night = _isNightPHT();
+    const high  = risk === 'high';
+
+    if (isNightOnly && !night) {
+        // Night-specific zone shown in soft purple during daytime — still visible,
+        // not alarming. Pulses slowly to signal "check back at night."
+        return { color: '#7d3c98', fillOpacity: 0.04, weight: 1.2, alpha: 0.60, slow: true };
+    }
+    if (high) {
+        if (night) {
+            // At night, high-risk: deep rose-red — clearly dangerous but not garish
+            return { color: '#c0392b', fillOpacity: 0.09, weight: 2.0, alpha: 1.0, slow: false };
+        } else {
+            // Daytime, high-risk: warm burnt orange — less alarming, still prominent
+            return { color: '#cb4335', fillOpacity: 0.06, weight: 1.5, alpha: 0.88, slow: false };
+        }
+    } else {
+        // Moderate risk: always muted amber/ochre regardless of time
+        return { color: '#b7950b', fillOpacity: 0.045, weight: 1.2, alpha: 0.78, slow: false };
+    }
+}
+
+/**
+ * Pick a specific crime emoji based on keywords in name + summary.
+ * Falls back to ⚠️ for high and 🔶 for moderate.
+ */
+function _crimeIcon(name, summary, risk) {
+    const t = ((name || '') + ' ' + (summary || '')).toLowerCase();
+    if (/drug|shabu|narco|illegal substance/.test(t))     return '💊';
+    if (/snatch|grab|snatching/.test(t))                  return '🤏';
+    if (/pickpocket/.test(t))                             return '👜';
+    if (/holdup|hold-up|armed|robbery/.test(t))           return '🔫';
+    if (/assault|stab|bolo|violence/.test(t))             return '🔪';
+    if (/carnap|vehicle theft|car theft/.test(t))         return '🚗';
+    if (/port|terminal|dock|pier/.test(t))                return '⚓';
+    if (/market|palengke|tiangge/.test(t))                return '🛒';
+    if (/nightlife|entertainment|bar|club/.test(t))       return '🌃';
+    if (/tourist|intramuros|heritage/.test(t))            return '🏛️';
+    if (/theft|steal/.test(t))                            return '🕵️';
+    return risk === 'high' ? '⚠️' : '🔶';
+}
+
+/** Returns true if this zone is primarily dangerous at night */
+function _isNightRisk(summary) {
+    return /especially at night|at night|poorly lit|nightlife|night economy|after dark/i.test(summary || '');
+}
+
+// ── Pulsing circle marker (SVG-based, CSS-animated) ─────────────────────────
+// Creates a DivIcon with a static filled circle + animated expanding ring.
+// radius_px is the visual icon size (independent of L.circle geo-radius).
+// icon (optional) — emoji shown in the center dot for zoomed-out/mid-zoom ID.
+function mkPulseIcon(color, radius_px = 14, pulseColor = null, alpha = 1.0, slow = false, icon = null) {
+    const pc  = pulseColor || color;
+    const sz  = radius_px * 2 + 24;
+    const cx  = sz / 2;
+    const dur = slow ? '3.5s' : '2s';
+    // Center dot: if icon provided, show emoji; otherwise solid filled circle
+    const dotSize = radius_px * 2;
+    const centerDot = icon
+        ? `<div style="position:absolute;top:50%;left:50%;
+                width:${dotSize}px;height:${dotSize}px;
+                margin-top:-${dotSize/2}px;margin-left:-${dotSize/2}px;
+                border-radius:50%;background:${color};
+                border:2px solid rgba(255,255,255,0.88);
+                box-shadow:0 2px 6px rgba(0,0,0,0.35);
+                display:flex;align-items:center;justify-content:center;
+                font-size:${Math.max(8, Math.round(dotSize * 0.52))}px;line-height:1;">${icon}</div>`
+        : `<div style="position:absolute;top:50%;left:50%;
+                width:${radius_px}px;height:${radius_px}px;
+                margin-top:-${radius_px/2}px;margin-left:-${radius_px/2}px;
+                border-radius:50%;background:${color};
+                border:2px solid rgba(255,255,255,0.88);
+                box-shadow:0 2px 6px rgba(0,0,0,0.35);"></div>`;
+    return L.divIcon({
+        className: 'sr-pulse-icon',
+        html: `<div style="position:relative;width:${sz}px;height:${sz}px;opacity:${alpha};">
+            <div style="position:absolute;top:50%;left:50%;
+                width:${radius_px*2}px;height:${radius_px*2}px;
+                margin-top:-${radius_px}px;margin-left:-${radius_px}px;
+                border-radius:50%;border:2px solid ${pc};opacity:0;
+                animation:sr-pulse ${dur} ease-out infinite;"></div>
+            <div style="position:absolute;top:50%;left:50%;
+                width:${radius_px*2}px;height:${radius_px*2}px;
+                margin-top:-${radius_px}px;margin-left:-${radius_px}px;
+                border-radius:50%;border:1.5px solid ${pc};opacity:0;
+                animation:sr-pulse ${dur} ease-out 0.85s infinite;"></div>
+            ${centerDot}
+        </div>`,
+        iconSize:   [sz, sz],
+        iconAnchor: [cx, cx],
+    });
+}
+
+/** Icon-only compact badge — shown at mid-zoom (no name text) */
+function mkIconOnlyMarker(icon, color) {
+    return L.divIcon({
+        className: 'saferoute-risk-icon',
+        html: `<div style="
+            background:${color};color:#fff;
+            width:22px;height:22px;
+            border-radius:50%;
+            font-size:12px;
+            display:flex;align-items:center;justify-content:center;
+            box-shadow:0 2px 6px rgba(0,0,0,0.4);
+            border:2px solid rgba(255,255,255,0.85);
+        ">${icon}</div>`,
+        iconSize:   [22, 22],
+        iconAnchor: [11, 11],
+    });
+}
+
+/** Pill label icon — appears near the pulse dot */
+function mkRiskIcon(icon, label, color, size = 'md') {
+    const fs  = size === 'sm' ? 10 : 11;
+    const pad = size === 'sm' ? '2px 7px' : '3px 9px';
+    // Measure text roughly: ~6px per char at 10px font
+    const approxW = Math.max(70, label.length * (fs * 0.65) + 30);
+    return L.divIcon({
+        className: 'saferoute-risk-icon',
+        html: `<div style="
+            background:${color};color:#fff;
+            padding:${pad};border-radius:12px;
+            font-size:${fs}px;font-weight:700;
+            font-family:'Segoe UI',Arial,sans-serif;
+            box-shadow:0 2px 8px rgba(0,0,0,0.35);
+            white-space:nowrap;display:flex;
+            align-items:center;gap:3px;
+            border:1.5px solid rgba(255,255,255,0.45);
+            backdrop-filter:blur(2px);
+            line-height:1;
+        ">${icon} ${escHtml(label)}</div>`,
+        iconSize: [approxW, size === 'sm' ? 22 : 26],
+        iconAnchor: [approxW/2, size === 'sm' ? 11 : 13],
+    });
+}
+
+/** Flood pill — same as mkRiskIcon but with blue water styling */
+function mkFloodIcon(risk, label) {
+    const cfgs = {
+        high:     { color:'#c0392b', bg:'rgba(192,57,43,0.95)', icon:'🚨' },
+        moderate: { color:'#e67e22', bg:'rgba(230,126,34,0.95)', icon:'⚠️' },
+        low:      { color:'#2980b9', bg:'rgba(41,128,185,0.95)', icon:'💧' },
+    };
+    const cfg = cfgs[risk] || cfgs.low;
+    const approxW = Math.max(90, label.length * 7 + 36);
+    return L.divIcon({
+        className: 'saferoute-risk-icon',
+        html: `<div style="
+            background:${cfg.bg};color:#fff;
+            padding:3px 9px;border-radius:14px;
+            font-size:11px;font-weight:800;
+            font-family:'Segoe UI',Arial,sans-serif;
+            box-shadow:0 3px 10px rgba(0,0,0,0.4);
+            white-space:nowrap;display:flex;
+            align-items:center;gap:4px;
+            border:2px solid rgba(255,255,255,0.5);
+            line-height:1;
+        ">${cfg.icon} 🌊 ${escHtml(label)}</div>`,
+        iconSize:   [approxW, 24],
+        iconAnchor: [approxW/2, 12],
+    });
+}
+
+function crimePopupHtml(color, icon, risk, name, summary, extraHtml = '') {
+    const riskLabel = risk === 'high' ? 'High Risk' : 'Moderate Risk';
+    return `<div style="font-family:'Segoe UI',Arial,sans-serif;min-width:180px;padding:4px 2px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+            <span style="font-size:20px;line-height:1;flex-shrink:0;">${icon}</span>
+            <div>
+                <div style="font-weight:700;color:${color};font-size:12px;line-height:1.2;">${riskLabel}</div>
+                <div style="font-size:11px;color:#666;text-transform:capitalize;margin-top:1px;">${escHtml(name||'This area')}</div>
+            </div>
+        </div>
+        <div style="font-size:11px;color:#444;line-height:1.55;margin-bottom:3px;">${escHtml(summary||'Stay alert and on well-lit streets.')}</div>
+        ${extraHtml}
+        <div style="font-size:10px;color:#bbb;margin-top:6px;border-top:1px solid #f0f0f0;padding-top:4px;">
+            📊 SafeRoute crime data
+        </div>
+    </div>`;
+}
+
+function floodPopupHtml(color, risk, label, depth) {
+    const icons = { high:'🚨', moderate:'⚠️', low:'💧' };
+    const icon  = icons[risk] || '🌊';
+    const riskLabel = risk.charAt(0).toUpperCase()+risk.slice(1);
+    const depthTxt = depth ? `~${depth.toFixed(1)}m depth` : 'Flood-prone during rain';
+    return `<div style="font-family:'Segoe UI',Arial,sans-serif;min-width:170px;padding:4px 2px;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <span style="font-size:18px;">${icon}</span>
+            <div>
+                <div style="font-weight:700;color:${color};font-size:13px;">${riskLabel} Flood Risk</div>
+                <div style="font-size:10px;color:#888;">${depthTxt}</div>
+            </div>
+        </div>
+        <div style="font-size:12px;font-weight:600;color:#2c3e50;margin-bottom:3px;">${escHtml(label)}</div>
+        <div style="font-size:10px;color:#aaa;margin-top:5px;border-top:1px solid #eee;padding-top:4px;">
+            🌊 Source: Project NOAH flood hazard data
+        </div>
+    </div>`;
 }
 
 function drawRouteZoneOverlay(route) {
     clearCrimeOverlay();
     if (!route) return;
 
-    const drawn = new Set(); // deduplicate by zone name
-
-    const popup = (color, icon, risk, name, summary) =>
-        `<div style="font-family:Arial,sans-serif;min-width:160px;">
-            <div style="font-weight:bold;color:${color};margin-bottom:4px;">${icon} ${risk.charAt(0).toUpperCase()+risk.slice(1)} Crime Risk</div>
-            <div style="font-size:12px;font-weight:600;">${escHtml(name || 'This area')}</div>
-            <div style="font-size:11px;color:#555;margin-top:4px;">${escHtml(summary || 'Stay alert and on well-lit streets.')}</div>
-            <div style="font-size:10px;color:#aaa;margin-top:4px;">Source: SafeRoute crime data</div>
-        </div>`;
-
-    // Draw the actual bounding-box rectangle for a zone that has coords.
-    // For road corridors like EDSA (21 km × 0.7 km) a circle is useless —
-    // the bbox IS the zone shape.
-    function addZoneShape(risk, name, summary, coords) {
-        const key = name || `${coords}`;
-        if (drawn.has(key)) return;
-        drawn.add(key);
-
-        const isHigh  = risk === 'high';
-        const color   = isHigh ? '#e74c3c' : '#e67e22';
-        const fillOp  = isHigh ? 0.15 : 0.10;
-        const icon    = isHigh ? '🚨' : '⚠️';
-
-        // coords = [lat_min, lat_max, lon_min, lon_max]
-        const bounds = [[coords[0], coords[2]], [coords[1], coords[3]]];
-
-        const rect = L.rectangle(bounds, {
-            color, weight: isHigh ? 1.5 : 1,
-            fillColor: color, fillOpacity: fillOp,
-            dashArray: isHigh ? null : '6 4',
-            interactive: true,
-        }).addTo(map);
-
-        rect.bindTooltip(
-            `<span style="font-size:11px;font-weight:bold;">${icon} ${escHtml(name || (isHigh ? 'High Crime Area' : 'Moderate Crime Area'))}</span>`,
-            { sticky: true, direction: 'top' }
-        );
-        rect.bindPopup(popup(color, icon, risk, name, summary), { maxWidth: 240 });
-        routeCrimeLayers.push(rect);
+    // Capture route polyline points for proximity filtering in appendSafetyOverlay
+    _routePathPts = [];
+    const addPts = pts => pts.forEach(pt => {
+        if (Array.isArray(pt)) _routePathPts.push([pt[0], pt[1]]);
+        else if (pt && pt.lat) _routePathPts.push([pt.lat, pt.lng || pt.lon]);
+    });
+    if (route.segments) {
+        route.segments.forEach(seg => {
+            if (!seg.coords) return;
+            const sets = (Array.isArray(seg.coords[0]) && Array.isArray(seg.coords[0][0])) ? seg.coords : [seg.coords];
+            sets.forEach(addPts);
+        });
+    } else if (route.coords) {
+        addPts(route.coords);
     }
 
-    // For origin/destination endpoints we only have a point, not a bbox —
-    // draw a modest circle (radius ≈ 200m) to indicate the area.
-    function addEndpointCircle(lat, lon, risk, name, summary) {
-        const key = name || `${lat.toFixed(4)},${lon.toFixed(4)}`;
+    const drawn  = new Set();
+    let crimeCount = 0, floodCount = 0;
+
+    // ── Crime zones — circles only, never rectangles ──────────────────────
+    // coords = [lat_min, lat_max, lon_min, lon_max]
+    // We convert the bbox to a circle: center + half-diagonal as radius.
+        // ── Zone: bbox → circle, time-aware color, specific crime icon ──────────
+    function addZoneShape(risk, name, summary, coords) {
+        const key = name || String(coords);
         if (drawn.has(key)) return;
         drawn.add(key);
+        crimeCount++;
 
-        const isHigh = risk === 'high';
-        const color  = isHigh ? '#e74c3c' : '#e67e22';
-        const icon   = isHigh ? '🚨' : '⚠️';
+        const nightOnly = _isNightRisk(summary);
+        const style     = _zoneStyle(risk, summary, nightOnly);
+        const icon      = _crimeIcon(name, summary, risk);
+
+        const midLat  = (coords[0] + coords[1]) / 2;
+        const midLon  = (coords[2] + coords[3]) / 2;
+        const latM    = Math.abs(coords[1] - coords[0]) * 111000;
+        const lonM    = Math.abs(coords[3] - coords[2]) * 111000 * Math.cos(midLat * Math.PI / 180);
+        const cappedR = Math.min(Math.sqrt((latM/2)**2 + (lonM/2)**2), 700);
+
+        // Create layers but DON'T add to map yet — applyZoneLOD() handles visibility
+        const circle = L.circle([midLat, midLon], {
+            radius: cappedR, color: style.color, weight: style.weight,
+            fillColor: style.color, fillOpacity: style.fillOpacity,
+            opacity: style.alpha,
+            dashArray: nightOnly ? '4 6' : (risk === 'high' ? null : '6 5'),
+            interactive: false,   // pointer-events handled by pane; explicitly off too
+            pane: 'hazardCircles',
+        });
+
+        // Pulse dot — carries the crime icon in its center for far/mid zoom
+        const pulseDot = mkPulseIcon(style.color, risk === 'high' ? 10 : 8, null, style.alpha, style.slow, icon);
+        const pulseM = L.marker([midLat, midLon], {
+            icon: pulseDot, interactive: true, zIndexOffset: 600, pane: 'hazardMarkers',
+        });
+
+        const shortName = (name || 'Crime Area').replace(/^barangay\s+/i, '').trim();
+        // Icon-only pill (no text) for mid-zoom
+        const iconOnlyM = L.marker([midLat, midLon], {
+            icon: mkIconOnlyMarker(icon, style.color),
+            interactive: true, zIndexOffset: 650, pane: 'hazardMarkers',
+        });
+        // Full label pill for close zoom
+        const labelM = L.marker([midLat, midLon], {
+            icon: mkRiskIcon(icon, shortName, style.color, 'sm'),
+            interactive: true, zIndexOffset: 700, pane: 'hazardMarkers',
+        });
+
+        const nightNote = nightOnly
+            ? (_isNightPHT()
+                ? '<div style="margin-top:5px;padding:3px 7px;border-radius:4px;background:#2c1f3d;color:#d7bfed;font-size:10px;">&#127761; Night-time risk zone — extra caution now</div>'
+                : '<div style="margin-top:5px;padding:3px 7px;border-radius:4px;background:#f4ecf7;color:#6c3483;font-size:10px;">&#127761; Risk increases significantly after 6 PM</div>')
+            : '';
+        const popup = crimePopupHtml(style.color, icon, risk, name, summary, nightNote);
+
+        circle.bindPopup(popup, { maxWidth: 260 });
+        pulseM.bindPopup(popup, { maxWidth: 260 });
+        iconOnlyM.bindPopup(popup, { maxWidth: 260 });
+        labelM.bindPopup(popup, { maxWidth: 260 });
+        circle.bindTooltip('<b>' + icon + ' ' + escHtml(shortName) + (nightOnly ? ' &#127761;' : '') + '</b>', { sticky: true });
+
+        // Register in structured array for LOD management
+        routeZoneObjects.push({ circle, pulse: pulseM, iconOnly: iconOnlyM, label: labelM, type: 'crime' });
+        // Also push to flat array so clearCrimeOverlay() can remove all
+        routeCrimeLayers.push(circle, pulseM, iconOnlyM, labelM);
+    }
+
+    function addEndpointCircle(lat, lon, risk, name, summary) {
+        const key = name || (lat.toFixed(4) + ',' + lon.toFixed(4));
+        if (drawn.has(key)) return;
+        drawn.add(key);
+        crimeCount++;
+
+        const nightOnly = _isNightRisk(summary);
+        const style     = _zoneStyle(risk, summary, nightOnly);
+        const icon      = _crimeIcon(name, summary, risk);
 
         const circle = L.circle([lat, lon], {
-            radius: 220, color, weight: isHigh ? 2 : 1.5,
-            fillColor: color, fillOpacity: isHigh ? 0.18 : 0.12,
-            dashArray: isHigh ? null : '6 4',
-        }).addTo(map);
+            radius: 220, color: style.color, weight: style.weight,
+            fillColor: style.color, fillOpacity: style.fillOpacity,
+            opacity: style.alpha,
+            dashArray: nightOnly ? '4 6' : (risk === 'high' ? null : '6 5'),
+            interactive: false,
+            pane: 'hazardCircles',
+        });
 
-        circle.bindTooltip(
-            `<span style="font-size:11px;font-weight:bold;">${icon} ${escHtml(name || (isHigh ? 'High Crime Area' : 'Moderate Crime Area'))}</span>`,
-            { sticky: true, direction: 'top' }
-        );
-        circle.bindPopup(popup(color, icon, risk, name, summary), { maxWidth: 240 });
-        routeCrimeLayers.push(circle);
+        const pulseM = L.marker([lat, lon], {
+            icon: mkPulseIcon(style.color, risk === 'high' ? 10 : 8, null, style.alpha, style.slow, icon),
+            interactive: true, zIndexOffset: 600, pane: 'hazardMarkers',
+        });
+
+        const shortName = (name || 'Crime Area').replace(/^barangay\s+/i, '').trim();
+        const iconOnlyM = L.marker([lat, lon], {
+            icon: mkIconOnlyMarker(icon, style.color),
+            interactive: true, zIndexOffset: 650, pane: 'hazardMarkers',
+        });
+        const labelM = L.marker([lat, lon], {
+            icon: mkRiskIcon(icon, shortName, style.color, 'sm'),
+            interactive: true, zIndexOffset: 700, pane: 'hazardMarkers',
+        });
+
+        const nightNote = nightOnly
+            ? (_isNightPHT()
+                ? '<div style="margin-top:5px;padding:3px 7px;border-radius:4px;background:#2c1f3d;color:#d7bfed;font-size:10px;">&#127761; Night-time risk zone — extra caution now</div>'
+                : '<div style="margin-top:5px;padding:3px 7px;border-radius:4px;background:#f4ecf7;color:#6c3483;font-size:10px;">&#127761; Risk increases significantly after 6 PM</div>')
+            : '';
+        const popup = crimePopupHtml(style.color, icon, risk, name, summary, nightNote);
+
+        circle.bindPopup(popup, { maxWidth: 260 });
+        pulseM.bindPopup(popup, { maxWidth: 260 });
+        iconOnlyM.bindPopup(popup, { maxWidth: 260 });
+        labelM.bindPopup(popup, { maxWidth: 260 });
+
+        routeZoneObjects.push({ circle, pulse: pulseM, iconOnly: iconOnlyM, label: labelM, type: 'crime' });
+        routeCrimeLayers.push(circle, pulseM, iconOnlyM, labelM);
     }
 
-    // 1. Zones along the route path (from backend scan_route_crime_zones)
+    // ── Flood zones — LOD-aware ────────────────────────────────────────────
+    function addFloodZone(zone) {
+        const key = `flood_${zone.lat.toFixed(5)}_${zone.lon.toFixed(5)}`;
+        if (drawn.has(key)) return;
+        drawn.add(key);
+        floodCount++;
+
+        const risk    = zone.risk || 'low';
+        const colors  = { high:'#c0392b', moderate:'#e67e22', low:'#2980b9' };
+        const color   = colors[risk] || '#2980b9';
+        const radius  = { high:380, moderate:320, low:260 }[risk] || 300;
+        const fillOp  = { high:0.10, moderate:0.07, low:0.05 }[risk] || 0.06;
+
+        const circle = L.circle([zone.lat, zone.lon], {
+            radius, color, weight: 2,
+            fillColor: color, fillOpacity: fillOp,
+            dashArray: '7 6', interactive: false,
+            pane: 'hazardCircles',
+        });
+
+        const pulseMarker = L.marker([zone.lat, zone.lon], {
+            icon: mkPulseIcon(color, 10, color, 1.0, false, '🌊'),
+            interactive: true, zIndexOffset: 600, pane: 'hazardMarkers',
+        });
+
+        // Icon-only for mid zoom
+        const iconOnlyM = L.marker([zone.lat, zone.lon], {
+            icon: mkIconOnlyMarker('🌊', color),
+            interactive: true, zIndexOffset: 650, pane: 'hazardMarkers',
+        });
+
+        const riskLabel = { high:'High Flood', moderate:'Mod. Flood', low:'Low Flood' }[risk] || 'Flood';
+        const labelMarker = L.marker([zone.lat, zone.lon], {
+            icon: mkFloodIcon(risk, riskLabel),
+            interactive: true, zIndexOffset: 700, pane: 'hazardMarkers',
+        });
+
+        const popup = floodPopupHtml(color, risk, zone.label || riskLabel, zone.depth_m);
+        circle.bindPopup(popup, { maxWidth: 240 });
+        pulseMarker.bindPopup(popup, { maxWidth: 240 });
+        iconOnlyM.bindPopup(popup, { maxWidth: 240 });
+        labelMarker.bindPopup(popup, { maxWidth: 240 });
+
+        routeZoneObjects.push({ circle, pulse: pulseMarker, iconOnly: iconOnlyM, label: labelMarker, type: 'flood' });
+        routeCrimeLayers.push(circle, pulseMarker, iconOnlyM, labelMarker);
+    }
+
+    // ── Draw all zones ─────────────────────────────────────────────────────
+
+    // 1. Crime zones along route
     const routeZones = route.route_crime_zones || [];
     routeZones.forEach(zone => {
         if (!['high', 'moderate'].includes(zone.risk)) return;
-        const c = zone.coords; // [lat_min, lat_max, lon_min, lon_max]
-        if (c && c.length === 4) {
-            // Skip whole-line corridor zones (MRT3 line, LRT1 line, EDSA, C5, etc.)
-            // that span >5km — individual station-level zones are drawn instead.
-            const latSpanM = Math.abs(c[1] - c[0]) * 111000;
-            const lonSpanM = Math.abs(c[3] - c[2]) * 111000 * Math.cos(((c[0]+c[1])/2) * Math.PI / 180);
-            if (Math.max(latSpanM, lonSpanM) > 5000) return;
-
-            addZoneShape(zone.risk, zone.name, zone.summary, c);
-        }
+        const c = zone.coords;
+        if (!c || c.length !== 4) return;
+        const latSpanM = Math.abs(c[1]-c[0]) * 111000;
+        const lonSpanM = Math.abs(c[3]-c[2]) * 111000 * Math.cos(((c[0]+c[1])/2)*Math.PI/180);
+        if (Math.max(latSpanM, lonSpanM) > 5000) return;
+        addZoneShape(zone.risk, zone.name, zone.summary, c);
     });
 
-    // 2. Origin endpoint (point only — use small circle)
-    if (route.orig_crime && ['high', 'moderate'].includes(route.orig_crime.risk_level)) {
+    // 2. Origin endpoint crime
+    if (route.orig_crime && ['high','moderate'].includes(route.orig_crime.risk_level) && lastOrigCoords) {
         const oc = route.orig_crime;
-        if (lastOrigCoords) {
-            addEndpointCircle(
-                lastOrigCoords.lat, lastOrigCoords.lon || lastOrigCoords.lng,
-                oc.risk_level, oc.area, oc.summary
-            );
-        }
+        addEndpointCircle(lastOrigCoords.lat, lastOrigCoords.lon||lastOrigCoords.lng, oc.risk_level, oc.area, oc.summary);
     }
 
-    // 3. Destination endpoint (point only — use small circle)
-    if (route.dest_crime && ['high', 'moderate'].includes(route.dest_crime.risk_level)) {
+    // 3. Destination endpoint crime
+    if (route.dest_crime && ['high','moderate'].includes(route.dest_crime.risk_level) && lastDestCoords) {
         const dc = route.dest_crime;
-        if (lastDestCoords) {
-            addEndpointCircle(
-                lastDestCoords.lat, lastDestCoords.lon || lastDestCoords.lng,
-                dc.risk_level, dc.area, dc.summary
-            );
-        }
+        addEndpointCircle(lastDestCoords.lat, lastDestCoords.lon||lastDestCoords.lng, dc.risk_level, dc.area, dc.summary);
     }
+
+    // 4. Flood zones along route
+    const floodZones = route.flood_zones_map || [];
+    floodZones.forEach(zone => addFloodZone(zone));
+
+    // 5. Update map status bar
+    // Apply zoom LOD immediately
+    applyZoneLOD();
+    updateMapStatus(crimeCount, floodCount);
+}
+
+function updateMapStatus(crimeCount, floodCount) {
+    const el = document.getElementById('map-status-text');
+    if (!el) return;
+    const parts = [];
+    if (crimeCount > 0) parts.push(`🚨 ${crimeCount} crime zone${crimeCount>1?'s':''}`);
+    if (floodCount > 0) parts.push(`🌊 ${floodCount} flood zone${floodCount>1?'s':''}`);
+    el.textContent = parts.length > 0
+        ? `Active risks on route: ${parts.join(' · ')} — tap markers for details`
+        : 'No major risk zones on this route';
 }
 
 // Legacy async overlay — used only on initial page load for community reports + weather/flood.
@@ -1338,43 +1913,46 @@ async function drawAreaSafetyOverlay(origCoords, destCoords, route = null) {
             appendSafetyOverlay(data.reports);
         }
 
-        // Flood circle (only when raining)
+        // Flood zone at origin — show as icon card (not a blob circle)
         const rainActive = data.weather && ['light_rain','rain','heavy_rain','storm'].includes(data.weather.risk_level);
         if (data.flood && data.flood.risk_level !== 'none' && rainActive) {
-            const floodColors = { low:'#f39c12', moderate:'#e67e22', high:'#e74c3c' };
-            const floodRadii  = { low:400, moderate:600, high:900 };
-            const risk   = data.flood.risk_level;
-            const color  = floodColors[risk] || '#e74c3c';
-            const radius = floodRadii[risk]  || 500;
+            const risk  = data.flood.risk_level;
+            const color = { low:'#f39c12', moderate:'#e67e22', high:'#c0392b' }[risk] || '#e67e22';
+            const radius = { low:280, moderate:380, high:520 }[risk] || 350;
+            // Thin dashed boundary only — no filled blob
             const floodCircle = L.circle([lat, lon], {
-                radius, color, weight:2, fillColor:color, fillOpacity:0.18, dashArray:'6 4'
+                radius, color, weight:2, fillColor:color, fillOpacity:0.06, dashArray:'7 5',
+                interactive: false, pane: 'hazardCircles',
             }).addTo(map);
-            const floodLabel = L.marker([lat, lon], {
-                icon: L.divIcon({
-                    className:'saferoute-label',
-                    html:`<div class="sr-area-label" style="background:${color};">Flood: ${risk.charAt(0).toUpperCase()+risk.slice(1)}</div>`,
-                    iconSize:[120, 24], iconAnchor:[60, 30],
-                }), interactive:false, zIndexOffset:600,
+            // Pulsing flood marker
+            const floodLabel = { high:'High Flood Risk', moderate:'Moderate Flood', low:'Low Flood Risk' }[risk];
+            const floodPulse = L.marker([lat, lon], {
+                icon: mkPulseIcon(color, 11, color),
+                interactive:true, zIndexOffset:650, pane:'hazardMarkers',
             }).addTo(map);
-            floodCircle.bindPopup(`<div style="font-family:Arial,sans-serif;min-width:160px;">
-                <div style="font-weight:bold;color:${color};margin-bottom:4px;">Flood Risk: ${risk.toUpperCase()}</div>
-                <div style="font-size:12px;">${data.flood.label || ''}</div>
-                <div style="font-size:11px;color:#888;margin-top:4px;">Source: Project NOAH</div>
-            </div>`, { maxWidth:200 });
-            routeCrimeLayers.push(floodCircle, floodLabel);
+            const floodMarker = L.marker([lat, lon], {
+                icon: mkFloodIcon(risk, floodLabel),
+                interactive:true, zIndexOffset:700, pane:'hazardMarkers',
+            }).addTo(map);
+            const popupHtml = floodPopupHtml(color, risk, data.flood.label || floodLabel, data.flood.depth_m);
+            floodCircle.bindPopup(popupHtml, { maxWidth:240 });
+            floodPulse.bindPopup(popupHtml, { maxWidth:240 });
+            floodMarker.bindPopup(popupHtml, { maxWidth:240 });
+            routeCrimeLayers.push(floodCircle, floodPulse, floodMarker);
+
+            // Show corner alert card
+            showAlertCard('flood_origin', 'flood',
+                floodLabel,
+                (data.flood.label || '') + ' — consider an alternate route.',
+                risk, true);
         }
 
-        // Weather circle (severe only)
+        // Weather — show as corner alert card only (no circle blob on map)
         if (data.weather && ['heavy_rain','storm','rain'].includes(data.weather.risk_level)) {
-            const wColor = data.weather.color || '#2980b9';
-            const wCircle = L.circle([lat, lon], {
-                radius:1200, color:wColor, weight:1.5, fillColor:wColor, fillOpacity:0.08, dashArray:'4 6'
-            }).addTo(map);
-            wCircle.bindPopup(`<div style="font-family:Arial,sans-serif;">
-                <div style="font-weight:bold;color:${wColor};margin-bottom:4px;">Weather: ${data.weather.description}</div>
-                <div style="font-size:12px;">${data.weather.temp_c}°C — Wind: ${data.weather.wind_kph} km/h</div>
-            </div>`, { maxWidth:180 });
-            routeCrimeLayers.push(wCircle);
+            const w = data.weather;
+            const title = w.description || 'Rain Alert';
+            const body  = `${w.temp_c}°C · 💨 ${w.wind_kph} km/h${w.rain_mm > 0 ? ` · 🌧️ ${w.rain_mm} mm/hr` : ''}`;
+            showAlertCard('weather_origin', 'weather', title, body, w.risk_level, false);
         }
     } catch(e) {
         console.warn('Safety overlay fetch failed:', e);
@@ -1382,18 +1960,43 @@ async function drawAreaSafetyOverlay(origCoords, destCoords, route = null) {
 }
 
     function appendSafetyOverlay(reports) {
-      const RADIUS = { flooding:350, crime:300, harassment:250, accident:200, dark_area:280, road_damage:150, heavy_traffic:200, road_closed:150, construction:180, safe_spot:200, police_visible:200 };
-      const FILL_OPACITY = { flooding:0.28, crime:0.30, harassment:0.28, accident:0.25, dark_area:0.20, road_damage:0.18, heavy_traffic:0.18, road_closed:0.22, construction:0.18, safe_spot:0.18, police_visible:0.18 };
+      const RADIUS = { flooding:280, crime:240, harassment:200, accident:160, dark_area:220, road_damage:120, heavy_traffic:160, road_closed:120, construction:140, safe_spot:160, police_visible:160 };
+      const FILL_OPACITY = { flooding:0.08, crime:0.10, harassment:0.08, accident:0.07, dark_area:0.06, road_damage:0.05, heavy_traffic:0.05, road_closed:0.07, construction:0.05, safe_spot:0.05, police_visible:0.05 };
+      const _EMOJI2 = {
+          flooding:'🌊', flood:'🌊', crime:'🚨', harassment:'😨',
+          accident:'💥', fire:'🔥', dark_area:'🌑', road_damage:'🚧',
+          heavy_traffic:'🚦', road_closed:'⛔', construction:'🏗️',
+          safe_spot:'✅', police_visible:'👮'
+      };
+
+      // Helper: is this report point within ~500m of the active route path?
+      function nearRoute(rLat, rLon) {
+          const pts = _routePathPts;
+          if (!pts || pts.length === 0) return true; // no route active, show all
+          const DEG = 500 / 111000;
+          for (let i = 0; i < pts.length - 1; i++) {
+              const [aLat, aLon] = pts[i], [bLat, bLon] = pts[i + 1];
+              const dx = bLon - aLon, dy = bLat - aLat;
+              const lenSq = dx*dx + dy*dy;
+              let t = lenSq > 0 ? ((rLon-aLon)*dx + (rLat-aLat)*dy) / lenSq : 0;
+              t = Math.max(0, Math.min(1, t));
+              const dLat = rLat - (aLat + t*dy);
+              const dLon = (rLon - (aLon + t*dx)) * Math.cos(rLat * Math.PI/180);
+              if (Math.sqrt(dLat*dLat + dLon*dLon) <= DEG) return true;
+          }
+          return false;
+      }
+
       reports.forEach(r => {
-        const radius = RADIUS[r.type] || 200;
-        const fillOp = FILL_OPACITY[r.type] || 0.20;
+        // Only show reports near the chosen route
+        if (!nearRoute(r.lat, r.lon)) return;
+
+        const radius     = RADIUS[r.type] || 160;
+        const fillOp     = FILL_OPACITY[r.type] || 0.07;
         const isPositive = (r.type === 'safe_spot' || r.type === 'police_visible');
-        const isHigh = (r.type === 'flooding' || r.type === 'crime' || r.type === 'harassment');
-        const circle = L.circle([r.lat, r.lon], {
-          radius, color:r.color, weight:isHigh?2.5:1.5,
-          fillColor:r.color, fillOpacity:fillOp,
-          dashArray:isPositive?null:(isHigh?null:'6 4'),
-        }).addTo(map);
+        const isHigh     = (r.type === 'flooding' || r.type === 'crime' || r.type === 'harassment');
+        const _em        = _EMOJI2[r.type] || '⚠️';
+
         const verifiedBadge = r.verified
           ? `<span style="background:#27ae60;color:white;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:bold;">VERIFIED (${r.confirmations})</span>`
           : `<span style="color:#888;font-size:11px;">${r.confirmations} report(s)</span>`;
@@ -1405,35 +2008,68 @@ async function drawAreaSafetyOverlay(origCoords, destCoords, route = null) {
           <button onclick="confirmReport(${r.id})" style="background:${r.color};color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;width:100%;">Verify Report</button>
           <div id="conf-msg-${r.id}" style="font-size:11px;margin-top:5px;"></div>
         </div>`;
+
+        // Three layers — visibility managed by applyZoneLOD() on zoom
+        const circle = L.circle([r.lat, r.lon], {
+          radius, color:r.color, weight:isHigh?2.5:1.5,
+          fillColor:r.color, fillOpacity:fillOp,
+          dashArray:isPositive?null:(isHigh?null:'6 4'),
+          interactive: false,
+          pane: 'hazardCircles',
+        });
         circle.bindPopup(popupHtml, {maxWidth:230});
-        const iconMarker = L.marker([r.lat, r.lon], {
-          icon:mkDot(r.color,(r.label||r.type||'?').charAt(0).toUpperCase()),
-          interactive:true, zIndexOffset:500
-        }).addTo(map);
-        iconMarker.bindPopup(popupHtml, {maxWidth:230});
-        safetyOverlayLayers.push(circle, iconMarker);
+
+        // Pulse + emoji in center — shown at far & mid zoom
+        const pulseM = L.marker([r.lat, r.lon], {
+          icon: mkPulseIcon(r.color, isHigh?9:7, null, 1.0, false, _em),
+          interactive:true, zIndexOffset:490, pane:'hazardMarkers',
+        });
+        pulseM.bindPopup(popupHtml, {maxWidth:230});
+
+        // Icon-only badge — mid zoom
+        const iconOnlyM = L.marker([r.lat, r.lon], {
+          icon: mkIconOnlyMarker(_em, r.color),
+          interactive:true, zIndexOffset:500, pane:'hazardMarkers',
+        });
+        iconOnlyM.bindPopup(popupHtml, {maxWidth:230});
+
+        // Full label pill — close zoom only
+        const labelM = L.marker([r.lat, r.lon], {
+          icon: mkRiskIcon(_em, r.label||r.type||'Incident', r.color, 'sm'),
+          interactive:true, zIndexOffset:510, pane:'hazardMarkers',
+        });
+        labelM.bindPopup(popupHtml, {maxWidth:230});
+
+        // Register in LOD system (same as crime/flood zones)
+        routeZoneObjects.push({ circle, pulse: pulseM, iconOnly: iconOnlyM, label: labelM, type: 'report' });
+        safetyOverlayLayers.push(circle, pulseM, iconOnlyM, labelM);
       });
+
+      applyZoneLOD();
     }
+
+// ── Initialize server-rendered alert cards on page load ──
+initServerAlertCards();
 
 // Load safety overlay on page start (only draws if zoom >= OVERLAY_MIN_ZOOM)
 loadSafetyOverlay();
 
-// ── Show/hide community reports based on zoom, never touch route crime layers ──
+// ── Zoom handler: community reports + route zone LOD ─────────────────────
 map.on('zoomend', function () {
     const zoom = map.getZoom();
+
+    // Community report circles (hide when zoomed far out)
     if (zoom < OVERLAY_MIN_ZOOM) {
-        // Hide community report circles only — crime area labels stay visible
-        safetyOverlayLayers.forEach(l => map.removeLayer(l));
+        safetyOverlayLayers.forEach(l => { try { map.removeLayer(l); } catch(e){} });
     } else {
-        // Re-show community report circles
         safetyOverlayLayers.forEach(l => {
             if (!map.hasLayer(l)) l.addTo(map);
         });
-        // Only reload generic overlay if no route is active
-        // (avoids overwriting route-specific crime data)
         if (!hasActiveRoute) loadSafetyOverlay();
     }
-    // routeCrimeLayers are NEVER removed on zoom — they stay until next search
+
+    // Route zone LOD — applies 3-tier visibility to crime/flood circles
+    applyZoneLOD();
 });
 
 // ── History prefill: set active mode tile from URL params ─────────────────
@@ -1502,7 +2138,7 @@ map.on('zoomend', function () {
         .then(r => r.json())
         .then(data => {
             if (!Array.isArray(data) || data.length === 0) {
-                statusEl.textContent = '✅ No active incidents in Philippines';
+                statusEl.innerHTML = '✅ Monitoring active &nbsp;·&nbsp; No major alerts';
                 statusEl.style.color = '#27ae60';
             } else {
                 const fires = data.filter(d => d.type === 'fire').length;
@@ -1512,7 +2148,8 @@ map.on('zoomend', function () {
                 if (floods) parts.push(`🌊 ${floods} flood${floods>1?'s':''}`);
                 const others = data.length - fires - floods;
                 if (others > 0) parts.push(`⚠️ ${others} other`);
-                statusEl.textContent = `Active: ${parts.join(' · ')} · Click map circles for details`;
+                const now = new Date().toLocaleTimeString('en-PH', {hour:'2-digit',minute:'2-digit'});
+                statusEl.innerHTML = `🚨 Active: ${parts.join(' · ')} &nbsp;·&nbsp; <span style="font-weight:normal;color:#e88;">Updated ${now}</span>`;
                 statusEl.style.color = '#c0392b';
                 statusEl.style.fontWeight = 'bold';
                 // Draw them on the map immediately
@@ -1520,7 +2157,7 @@ map.on('zoomend', function () {
             }
         })
         .catch(() => {
-            statusEl.textContent = 'Incident feed unavailable';
+            statusEl.innerHTML = '⚠️ Incident feed unavailable &nbsp;·&nbsp; <span style="color:#aaa;">using local data</span>';
         });
 })();
 </script>

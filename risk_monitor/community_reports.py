@@ -679,11 +679,19 @@ function submitReport() {{
               '&lon=' + encodeURIComponent(lon) +
               '&description=' + encodeURIComponent(desc),
     }})
-    .then(function(r) {{ return r.ok ? r : Promise.reject(r.status); }})
-    .then(function() {{
-        document.getElementById('report-msg').textContent = '✅ Report submitted! Thank you.';
+    .then(function(r) {{ return r.ok ? r.json() : Promise.reject('HTTP ' + r.status); }})
+    .then(function(data) {{
+        if (!data.ok) {{
+            document.getElementById('report-msg').textContent = '❌ ' + (data.message || 'Error submitting report.');
+            document.getElementById('report-msg').style.color = '#c0392b';
+            return;
+        }}
+        document.getElementById('report-msg').textContent = '✅ ' + (data.message || 'Report submitted! Thank you.');
+        document.getElementById('report-msg').style.color = '#27ae60';
         document.getElementById('report-submit-btn').disabled = true;
-        setTimeout(closeReportPanel, 1500);
+        // Reload the safety overlay so the new pin appears immediately
+        if (typeof loadSafetyOverlay === 'function') setTimeout(loadSafetyOverlay, 800);
+        setTimeout(closeReportPanel, 1800);
     }})
     .catch(function(e) {{
         document.getElementById('report-msg').textContent = '❌ Error submitting report. Try again.';

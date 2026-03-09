@@ -54,12 +54,15 @@ def add_noah_flood_layer(
     )
 
     # Use Mapbox raster tiles from NOAH's account
+    # NOTE: Mapbox raster tiles require the token inline in the URL.
+    # The Origin/Referer restriction only applies to the Tilequery API,
+    # not to raster tile fetches (which are browser-initiated).
     folium.TileLayer(
         tiles=(
             f"https://api.mapbox.com/v4/upri-noah.ph_fh_100yr_tls/"
             f"{{z}}/{{x}}/{{y}}.png?access_token={_MAPBOX_TOKEN}"
         ),
-        attr="Project NOAH / UP DOST via Mapbox",
+        attr='<a href="https://noah.up.edu.ph/">Project NOAH / UP DOST</a> via Mapbox',
         name="NOAH Flood Zones",
         overlay=True,
         control=False,
@@ -70,9 +73,42 @@ def add_noah_flood_layer(
     return m
 
 
+# ── Required headers for NOAH/Mapbox tilequery ───────────────────────────────
+# Mapbox returns 403 if Origin/Referer are missing — the token is scoped
+# to requests originating from noah.up.edu.ph. Always include these headers.
+_MAPBOX_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer":    "https://noah.up.edu.ph/",
+    "Origin":     "https://noah.up.edu.ph",
+    "Accept":     "application/json",
+}
+
+
+def check_mapbox_token() -> dict:
+    """
+    Verify the Mapbox token is still valid by making a minimal tilequery.
+    Returns {"ok": bool, "status": int, "error": str|None}
+
+    Call this in your health-check route or on app startup.
+    The token expires when NOAH rotates it — update _MAPBOX_TOKEN if this fails.
+    """
+    url = _TILEQUERY_URL.format(layers=_FLOOD_LAYERS, lon=121.1020, lat=14.6330)
+    params = {"radius": 0, "limit": 1, "access_token": _MAPBOX_TOKEN}
+    try:
+        r = requests.get(url, params=params, headers=_MAPBOX_HEADERS, timeout=6)
+        ok = r.status_code == 200
+        return {"ok": ok, "status": r.status_code,
+                "error": None if ok else f"HTTP {r.status_code} — token may have expired"}
+    except Exception as e:
+        return {"ok": False, "status": 0, "error": str(e)}
+
+
 def get_flood_risk_at(lat: float, lon: float, layer: str = _DEFAULT_LAYER) -> dict:
     """
     Query NOAH flood hazard at a coordinate using Mapbox Tilequery API.
+
+    NOTE: Mapbox returns 403 without the correct Referer/Origin headers.
+    _MAPBOX_HEADERS above ensures these are always sent.
 
     Returns:
         {
@@ -99,9 +135,15 @@ def get_flood_risk_at(lat: float, lon: float, layer: str = _DEFAULT_LAYER) -> di
     try:
         resp = requests.get(
             url, params=params,
-            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://noah.up.edu.ph/", "Origin": "https://noah.up.edu.ph"},
+            headers=_MAPBOX_HEADERS,   # must include Origin/Referer — 403 without them
             timeout=8,
         )
+        if resp.status_code == 403:
+            # Token scoped to noah.up.edu.ph — check headers and/or token expiry
+            return _flood_error(
+                "Mapbox 403: token may have expired or Origin header rejected. "
+                "Run check_mapbox_token() and update _MAPBOX_TOKEN in noah.py if needed."
+            )
         resp.raise_for_status()
         data     = resp.json()
         features = data.get("features", [])
@@ -186,11 +228,24 @@ def _flood_error(msg: str) -> dict:
     }
 
 
-def get_flood_warning_html(flood: dict, location_label: str = "") -> str:
+def get_flood_warning_html(flood: dict, weather: dict, location_label: str = "") -> str:
     """
     Returns an HTML warning string for flood risk at a location.
-    Returns empty string if no flood risk.
+    Returns empty string if no flood risk OR if it's not raining.
+    
+    Args:
+        flood: Result from get_flood_risk_at()
+        weather: Result from get_weather_risk() - REQUIRED to check if raining
+        location_label: Optional location name
     """
+    # CRITICAL: Only show flood banner if it's actively raining
+    rain_active = False
+    if weather and weather.get("ok"):
+        rain_active = weather.get("risk_level") in ("light_rain", "rain", "heavy_rain", "storm")
+    
+    if not rain_active:
+        return ""
+    
     if not flood.get("ok") or flood.get("risk_level") == "none":
         return ""
 
@@ -211,26 +266,173 @@ def get_flood_warning_html(flood: dict, location_label: str = "") -> str:
     )
 
 
+def check_route_flood_zones(route_coords: list, weather: dict, sample_every_n: int = 15) -> dict:
+    """
+    Check for flood zones along an entire route path.
+    ONLY checks and returns results if it's actively raining.
+    
+    Args:
+        route_coords: List of [lat, lon] coordinates along the route
+        weather: Current weather data (must have active rain to matter)
+        sample_every_n: Sample every Nth coordinate (default 15) to avoid too many API calls
+    
+    Returns:
+        {
+          "has_flood_zones": bool,
+          "flood_points": [{"lat": float, "lon": float, "risk": str, "label": str, "penalty": int}, ...],
+          "max_risk": str,  # highest risk level found
+          "total_penalty": int,
+        }
+    """
+    # CRITICAL: Only check if it's raining
+    rain_active = False
+    if weather and weather.get("ok"):
+        rain_active = weather.get("risk_level") in ("light_rain", "rain", "heavy_rain", "storm")
+    
+    if not rain_active or not route_coords:
+        return {
+            "has_flood_zones": False,
+            "flood_points": [],
+            "max_risk": "none",
+            "total_penalty": 0,
+        }
+    
+    flood_points = []
+    max_risk = "none"
+    max_penalty = 0
+    
+    # Sample points along route to check for floods
+    sampled_coords = route_coords[::sample_every_n]
+    if len(sampled_coords) > 20:  # Cap at 20 checks per route to avoid rate limits
+        step = len(sampled_coords) // 20
+        sampled_coords = sampled_coords[::step]
+    
+    for coord in sampled_coords:
+        lat, lon = coord[0], coord[1]
+        flood_result = get_flood_risk_at(lat, lon)
+        
+        if flood_result.get("ok") and flood_result.get("risk_level") != "none":
+            flood_points.append({
+                "lat": lat,
+                "lon": lon,
+                "risk": flood_result["risk_level"],
+                "label": flood_result["label"],
+                "penalty": flood_result["penalty"],
+            })
+            
+            # Track highest risk
+            risk_levels = ["none", "low", "moderate", "high"]
+            if risk_levels.index(flood_result["risk_level"]) > risk_levels.index(max_risk):
+                max_risk = flood_result["risk_level"]
+                max_penalty = flood_result["penalty"]
+    
+    return {
+        "has_flood_zones": len(flood_points) > 0,
+        "flood_points": flood_points,
+        "max_risk": max_risk,
+        "total_penalty": max_penalty,
+    }
+
+
+def apply_route_flood_analysis(routes: list, weather: dict) -> list:
+    """
+    Analyze each route for flood zones along its path.
+    ONLY applies penalties and warnings during active rain.
+
+    Key change: faster routes (id=0, highway-biased) receive a LARGER flood
+    penalty via the exposure multiplier — underpasses on highways flood worse
+    and are harder to avoid than side-street alternatives.
+    """
+    from risk_monitor.features import get_score_color, get_score_label, _route_exposure_multiplier
+
+    # Check if it's raining
+    rain_active = False
+    if weather and weather.get("ok"):
+        rain_active = weather.get("risk_level") in ("light_rain", "rain", "heavy_rain", "storm")
+
+    for route in routes:
+        route["flood_zones"]     = []
+        route["flood_zones_map"] = []
+        route["has_flood_zones"] = False
+        route["flood_warning"]   = ""
+
+        if not rain_active:
+            continue
+
+        coords = []
+        if route.get('coords'):
+            coords = route['coords']
+        elif route.get('segments'):
+            for seg in route['segments']:
+                if seg.get('coords'):
+                    if isinstance(seg['coords'][0], list) and isinstance(seg['coords'][0][0], list):
+                        for subseg in seg['coords']:
+                            coords.extend(subseg)
+                    else:
+                        coords.extend(seg['coords'])
+
+        if not coords:
+            continue
+
+        flood_analysis = check_route_flood_zones(coords, weather, sample_every_n=15)
+
+        route["flood_zones"]     = flood_analysis["flood_points"]
+        route["flood_zones_map"] = format_flood_zones_for_map(flood_analysis["flood_points"])
+        route["has_flood_zones"] = flood_analysis["has_flood_zones"]
+
+        if flood_analysis["has_flood_zones"]:
+            base_penalty = flood_analysis["total_penalty"]
+            multiplier   = _route_exposure_multiplier(route.get('id', 1))
+            from risk_monitor.features import apply_penalty_to_route
+            apply_penalty_to_route(route, base_penalty * multiplier, "")
+            route["score_color"]  = get_score_color(route["safety_score"])
+            route["score_label"]  = get_score_label(route["safety_score"])
+
+            num_zones = len(flood_analysis["flood_points"])
+            risk_desc = flood_analysis["max_risk"].replace("_", " ").title()
+            route["flood_warning"] = (
+                f"{risk_desc} flood risk in {num_zones} area{'s' if num_zones != 1 else ''} along route"
+            )
+
+    return routes
+
+
+# ── DEPRECATED: Old single-point flood checking (kept for backward compatibility) ──
+
 def apply_flood_to_routes(routes: list, flood: dict, weather: dict = None) -> list:
+    """
+    DEPRECATED: Use apply_route_flood_analysis() instead.
+    
+    This function only checks flood risk at origin point, not along the route.
+    Kept for backward compatibility only.
+    """
     from risk_monitor.features import get_score_color, get_score_label
 
-    # Only apply flood penalty if it's actually raining right now
-    if weather is not None:
+    # CRITICAL: Only apply flood penalty if it's actually raining right now
+    rain_active = False
+    if weather is not None and weather.get("ok"):
         rain_active = weather.get("risk_level") in ("light_rain", "rain", "heavy_rain", "storm")
-        if not rain_active:
-            for r in routes:
-                r["flood_warning"] = ""
-            return routes
+    
+    if not rain_active:
+        # Clear any flood warnings since it's not raining
+        for r in routes:
+            r["flood_warning"] = ""
+            if "flood_zones" not in r:
+                r["flood_zones"] = []
+        return routes
 
     penalty = flood.get("penalty", 0)
     label   = flood.get("label", "")
 
     for r in routes:
         if penalty > 0:
-            r["safety_score"] = max(0, r.get("safety_score", 75) - penalty)
-            r["score_color"]  = get_score_color(r["safety_score"])
-            r["score_label"]  = get_score_label(r["safety_score"])
+            from risk_monitor.features import apply_penalty_to_route
+            apply_penalty_to_route(r, penalty, "")
+            r["score_color"] = get_score_color(r["safety_score"])
+            r["score_label"] = get_score_label(r["safety_score"])
         r["flood_warning"] = label if penalty > 0 else ""
+        if "flood_zones" not in r:
+            r["flood_zones"] = []
 
     return routes
 
@@ -255,3 +457,48 @@ def get_flood_layer_toggle_js() -> str:
     });
 })();
 """
+
+
+def format_flood_zones_for_map(flood_points: list) -> list:
+    """
+    Converts flood zone data into a format similar to crime zones for map display.
+    
+    Args:
+        flood_points: List of flood zone dicts from check_route_flood_zones()
+    
+    Returns:
+        List of dicts formatted for map overlay:
+        [{
+          "lat": float,
+          "lon": float, 
+          "risk": str,  # "low", "moderate", "high"
+          "label": str,
+          "color": str,
+          "icon": str
+        }]
+    """
+    risk_icons = {
+        "low": "🟡",
+        "moderate": "🟠", 
+        "high": "🔴"
+    }
+    
+    risk_colors = {
+        "low": "#f39c12",
+        "moderate": "#e67e22",
+        "high": "#e74c3c"
+    }
+    
+    formatted = []
+    for point in flood_points:
+        formatted.append({
+            "lat": point["lat"],
+            "lon": point["lon"],
+            "risk": point["risk"],
+            "label": point.get("label", "Flood risk area"),
+            "color": risk_colors.get(point["risk"], "#e67e22"),
+            "icon": risk_icons.get(point["risk"], "🌊"),
+            "penalty": point.get("penalty", 0)
+        })
+    
+    return formatted

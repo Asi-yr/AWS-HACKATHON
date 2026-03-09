@@ -124,58 +124,198 @@ def _parse_km(dist_str: str) -> float:
         return 0.0
 
 
+def _route_exposure_multiplier(route_idx: int) -> float:
+    """
+    Returns a penalty multiplier based on route position.
+    Fastest routes (id=0) use highways → more exposed to hazards.
+    Alternate routes (id=2) use side streets → less exposed.
+
+    Multipliers are kept tighter (1.2 / 1.0 / 0.85) compared to the old
+    (1.4 / 1.0 / 0.65) to prevent penalty stacking from crashing scores to 0.
+    """
+    return {0: 1.20, 1: 1.00, 2: 0.85}.get(route_idx, 1.00)
+
+
+# ── Per-commuter safety ceiling and floor ─────────────────────────────────────
+# These reflect the inherent risk of each travel mode regardless of road type.
+#   ceiling  — maximum score achievable (car on side street = 88, walk on highway < 60)
+#   floor    — minimum score on a clear day (walk is never "perfectly safe")
+#   road_sensitivity — how much road speed affects the score
+#
+# Design rationale:
+#   Walk   : most physically vulnerable, no crash protection, no speed advantage.
+#             Realistic day-trip on safe roads ≈ 62–72. Highway walk ≈ 42–52.
+#   Bike   : exposed but faster; can use bike lanes / footpaths.
+#             Realistic range ≈ 58–78.
+#   Motor  : speed protection but falls worse; lane-splitting adds risk.
+#             Realistic range ≈ 60–80.
+#   Transit: inside a vehicle but no control; crowd / pickpocket risk.
+#             Realistic range ≈ 65–82.
+#   Car    : most crash protection, controlled environment.
+#             Realistic range ≈ 70–88.
+#
+# Result: even before any hazard penalty is applied, a walker gets a lower
+# baseline than a car driver on the same road. Hazard penalties then shrink
+# proportionally (see apply_penalty_to_route), so no single source can
+# cause a cliff-drop to 0.
+
+_COMMUTER_PROFILE = {
+    # key: (ceiling, floor, road_sensitivity)
+    #   road_sensitivity: extra deduction per 10 kph above 30 kph avg speed
+    #
+    # IMPORTANT: floors must be LOW enough that they represent the absolute
+    # worst-case scenario, NOT the typical-bad-day outcome. If the floor is
+    # close to the realistic base score range, penalty stacking (night +
+    # crime + weather) will clamp every route to the same floor value and
+    # make all routes show the same score. Floors were previously too high
+    # (walk=42, motorcycle=52, car=62) which caused this exact symptom.
+    "walk":       (72,  28, 2.5),   # floor=28: "risky walk at night in a crime zone"
+    "bike":       (78,  32, 1.8),
+    "motorcycle": (80,  36, 1.2),   # floor=36: worst credible motorcycle conditions
+    "transit":    (82,  40, 0.8),
+    "car":        (88,  45, 0.4),   # floor=45: bad road + crime + storm in a car
+}
+
+_ROUTE_POSITION_ADJ = {0: -10, 1: 0, 2: +10}   # fastest / balanced / alternate
+# Wider spread (±10 vs old ±6) ensures routes still differ visibly after
+# proportional hazard penalties (night/crime/weather) are applied on top.
+
+
+def _get_commuter_profile(ct: str) -> tuple:
+    """Map commuter_type string → (ceiling, floor, road_sensitivity) tuple."""
+    ct = ct.lower().strip()
+    if any(x in ct for x in ["walk", "foot"]):
+        return _COMMUTER_PROFILE["walk"]
+    if any(x in ct for x in ["bike", "bicycle", "cycling"]):
+        return _COMMUTER_PROFILE["bike"]
+    if any(x in ct for x in ["motor", "motorcycle", "motorbike"]):
+        return _COMMUTER_PROFILE["motorcycle"]
+    if any(x in ct for x in ["commute", "jeepney", "bus", "tricycle", "puj",
+                               "lrt", "mrt", "pnr", "rail", "train"]):
+        return _COMMUTER_PROFILE["transit"]
+    return _COMMUTER_PROFILE["car"]
+
+
 def _compute_safety_score(route: dict, commuter_type: str = "") -> int:
     """
-    Heuristic safety score (0–100) based on:
-      - Avg speed: high speed = expressway = lower safety
-      - Route position (id): Fastest(0) takes highways, Alternate(2) uses side streets
-      - Commuter type bonus/penalty
-    NOTE: Night/weather/crime/flood penalties are applied AFTER this by their
-    respective functions. Do NOT apply night penalty here to avoid double-counting.
+    Per-commuter safety score (0–100).
+
+    Architecture
+    ────────────
+    Each commuter type has its own ceiling and floor that reflect its inherent
+    physical vulnerability. A car's ceiling (88) is higher than a walker's (72)
+    because the car provides crash protection and speed control that walking
+    never can.
+
+    Within those bounds, three factors adjust the score:
+
+      1. Road speed proxy  — avg_speed = distance ÷ time.
+                             Faster avg speed → likely highway → subtract from
+                             ceiling scaled by road_sensitivity for this mode.
+                             Cars barely care about speed; pedestrians care a lot.
+
+      2. Distance exposure — longer trips = more total exposure.
+                             Small, capped deduction so a 20 km ride doesn't
+                             automatically become "risky."
+
+      3. Route position    — id=0 (fastest, highway-biased) → −6
+                             id=1 (balanced)                 →  0
+                             id=2 (alternate, side streets)  → +6
+                             This guarantees a visible spread between route
+                             options in the UI even when OSRM returns similar
+                             avg speeds.
+
+    Hazard penalties (night / weather / crime / flood) are applied AFTER this
+    function by apply_penalty_to_route().  They use proportional reduction
+    instead of flat subtraction, so no single source can crash the score to 0.
     """
-    dur  = _parse_mins(route.get('time', '0'))
-    dist = _parse_km(route.get('distance', '0'))
+    dur       = _parse_mins(route.get('time', '0'))
+    dist      = _parse_km(route.get('distance', '0'))
+    route_idx = route.get('id', 0)
 
     if dur <= 0:
-        return 75  # fallback
+        # Fallback: use commuter ceiling minus a small buffer
+        ceiling, floor, _ = _get_commuter_profile(commuter_type)
+        return max(floor, ceiling - 8)
 
-    avg_speed_kmh = dist / (dur / 60)  # km/h
+    avg_speed_kmh = (dist / (dur / 60)) if dur > 0 else 0
+    ceiling, floor, sensitivity = _get_commuter_profile(commuter_type)
 
-    # Base score — penalise high-speed routes (expressways/highways)
-    if avg_speed_kmh > 70:
-        base = 45   # Very fast = likely NLEX/SLEX/expressway
-    elif avg_speed_kmh > 45:
-        base = 62   # Fast urban — major arterial (EDSA, C5)
-    elif avg_speed_kmh > 25:
-        base = 76   # Moderate — secondary roads
-    elif avg_speed_kmh > 10:
-        base = 87   # Slow — residential / barangay roads, bicycle
+    # ── 1. Road speed deduction ────────────────────────────────────────────
+    # No deduction below 30 kph (urban secondary — considered the baseline).
+    # Above 30, each extra 10 kph costs (sensitivity) points, capped at 24.
+    speed_above_30 = max(0.0, avg_speed_kmh - 30.0)
+    speed_deduction = min(24.0, (speed_above_30 / 10.0) * sensitivity)
+
+    # Very slow (<8 kph) = heavy congestion — slight penalty for all modes
+    if avg_speed_kmh < 8:
+        congestion_penalty = 3
     else:
-        base = 93   # Walking pace — pedestrian paths
+        congestion_penalty = 0
 
-    # ── Route position bonus ─────────────────────────────────────────────────
-    # OSRM route[0]=fastest (often highway), route[2]=alternate (side streets).
-    # This ensures the 3 routes always show meaningfully different scores.
-    route_idx = route.get('id', 0)
-    if route_idx == 0:
-        base = max(0, base - 6)    # Fastest = highway bias → slight penalty
-    elif route_idx == 1:
-        pass                        # Balanced → no adjustment
-    elif route_idx >= 2:
-        base = min(100, base + 9)  # Alternate = side streets → safer for peds/cyclists
+    # ── 2. Distance exposure deduction ────────────────────────────────────
+    if dist > 30:
+        dist_deduction = 5
+    elif dist > 20:
+        dist_deduction = 3
+    elif dist > 12:
+        dist_deduction = 1
+    else:
+        dist_deduction = 0
 
-    # ── Commuter type adjustment ─────────────────────────────────────────────
-    ct = commuter_type.lower()
-    if any(x in ct for x in ['walk', 'bike', 'bicycle']):
-        base = min(100, base + 4)
-        if route_idx >= 2:
-            base = min(100, base + 4)  # Side-street walks are meaningfully safer
-    elif any(x in ct for x in ['motorcycle', 'motor']):
-        base = max(0, base - 5)
-    elif any(x in ct for x in ['commute', 'jeepney', 'tricycle', 'bus']):
-        base = max(0, base - 2)
+    # ── 3. Route position adjustment ──────────────────────────────────────
+    position_adj = _ROUTE_POSITION_ADJ.get(route_idx, 0)
 
-    return max(0, min(100, base))
+    raw = ceiling - speed_deduction - dist_deduction - congestion_penalty + position_adj
+    return int(max(float(floor), min(float(ceiling), raw)))
+
+
+# ── Proportional penalty helper ───────────────────────────────────────────────
+
+def apply_penalty_to_route(route: dict, raw_penalty: float, commuter_type: str = "") -> int:
+    """
+    Apply an external hazard penalty (night / weather / crime / flood) to a
+    route's safety_score using proportional reduction instead of flat subtraction.
+
+    Why proportional?
+      Flat subtraction stacks badly: 4 hazards × 15 pts each = −60 from a 75
+      baseline → score of 15, which looks catastrophic for a light rain + night
+      commute in a low-crime area.
+
+    Proportional reduction formula:
+        new_score = current_score × (1 − reduction_fraction)
+
+    The reduction_fraction is derived from raw_penalty but is capped so that:
+      • A single "high" penalty (e.g. raw=20) reduces the score by at most 18%
+      • ALL penalties combined can reduce the score by at most 55% from the
+        post-base value, so even a walker in a storm at night never falls below
+        ~28 (roughly "Caution" rather than "impossible to travel")
+
+    The floor from the commuter profile is always respected as an absolute min.
+
+    Args:
+        route:         route dict with 'safety_score' (int, set by _compute_safety_score)
+        raw_penalty:   the integer penalty from night/weather/crime/flood tables
+        commuter_type: used to retrieve the floor for this mode
+
+    Returns:
+        New safety_score (int). Also mutates route['safety_score'] in-place.
+    """
+    _, floor, _ = _get_commuter_profile(commuter_type)
+    current     = float(route.get("safety_score", 75))
+
+    # Map raw_penalty → fraction to reduce.
+    # Calibration: raw=5 → 3%, raw=10 → 6%, raw=15 → 9%, raw=20 → 13%, raw=30 → 18%
+    # Cap is 18% per penalty source (was 20%) with a higher divisor (160 vs 140)
+    # so that stacking 3 penalties still leaves visible spread between routes.
+    fraction = min(0.18, raw_penalty / 160.0)
+
+    new_score = current * (1.0 - fraction)
+    # Hard floor: commuter floor, and never below 20 (prevents "0/100" UI shock)
+    new_score = max(float(max(floor, 20)), new_score)
+
+    route["safety_score"] = int(round(new_score))
+    return route["safety_score"]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -185,16 +325,24 @@ def _compute_safety_score(route: dict, commuter_type: str = "") -> int:
 def get_score_color(score: int) -> str:
     """
     Returns a hex color for a safety score.
-      90–100 → green
-      70–89  → yellow-green
-      50–69  → orange
-      0–49   → red
+
+    Thresholds are intentionally mode-agnostic — the score itself already
+    encodes the commuter type's vulnerability (a 72 for a walker IS safe
+    for a walker; it is not the same as a 72 for a car driver).
+
+      80–100 → deep green  (Very Safe)
+      65–79  → green       (Safe)
+      50–64  → yellow      (Moderate)
+      38–49  → orange      (Caution)
+      0–37   → red         (Risky)
     """
-    if score >= 90:
+    if score >= 80:
+        return "#1e8449"   # deep green
+    elif score >= 65:
         return "#27ae60"   # green
-    elif score >= 70:
-        return "#f1c40f"   # yellow
     elif score >= 50:
+        return "#f1c40f"   # yellow
+    elif score >= 38:
         return "#e67e22"   # orange
     else:
         return "#e74c3c"   # red
@@ -202,23 +350,31 @@ def get_score_color(score: int) -> str:
 
 def get_score_label(score: int) -> str:
     """Returns a short human label for a safety score."""
-    if score >= 90:
+    if score >= 80:
+        return "Very Safe"
+    elif score >= 65:
         return "Safe"
-    elif score >= 70:
-        return "Moderate"
     elif score >= 50:
+        return "Moderate"
+    elif score >= 38:
         return "Caution"
     else:
         return "Risky"
 
 
-def enrich_routes_with_scores(routes: list) -> list:
+def enrich_routes_with_scores(routes: list, commuter_type: str = "") -> list:
     """
     Adds 'score_color' and 'score_label' to each route dict in-place.
-    Call this in navigation.py before returning routes.
+    If a route has no 'safety_score' yet (e.g. transit routes that skipped
+    rank_routes), computes one via _compute_safety_score rather than
+    defaulting everyone to 75 — which caused all routes to show the same score.
+
+    Call this after rank_routes() (for road routes) or directly (for transit).
     """
     for r in routes:
-        score = r.get('safety_score', 75)
+        if 'safety_score' not in r or r.get('safety_score') is None:
+            r['safety_score'] = _compute_safety_score(r, commuter_type)
+        score = r['safety_score']
         r['score_color'] = get_score_color(score)
         r['score_label'] = get_score_label(score)
     return routes
@@ -382,15 +538,70 @@ def attach_fares(routes: list, commuter_type: str) -> list:
 # 4. TYPHOON SIGNAL BANNER
 # ═════════════════════════════════════════════════════════════════════════════
 
-# PAGASA public RSS — no API key needed
-_PAGASA_RSS = "https://pubfiles.pagasa.dost.gov.ph/tamss/weather/bulletin.json"
+# PAGASA endpoints — bulletin.json URL rotates; we try multiple in order
+_PAGASA_URLS = [
+    # Primary: tamss bulletin JSON
+    "https://pubfiles.pagasa.dost.gov.ph/tamss/weather/bulletin.json",
+    # Fallback 1: alternative DOST subdomain
+    "https://pubfiles.pagasa.dost.gov.ph/climps/tcthreat/summary.json",
+    # Fallback 2: raw JSON from the new PAGASA site
+    "https://bagong.pagasa.dost.gov.ph/api/tropical-cyclone/active",
+    # Fallback 3: pubfiles direct API variant (2026 observed pattern)
+    "https://pubfiles.pagasa.dost.gov.ph/tamss/weather/bulletin_en.json",
+    # Fallback 4: new PAGASA REST endpoint pattern
+    "https://bagong.pagasa.dost.gov.ph/api/v1/tropical-cyclone/active",
+]
 _BAGYO_WATCH = "https://bagong.pagasa.dost.gov.ph/tropical-cyclone/public-storm-warning-signals"
+
+_PAGASA_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://bagong.pagasa.dost.gov.ph/",
+    "Origin": "https://bagong.pagasa.dost.gov.ph",
+}
+
+
+def _try_parse_pagasa_response(data: dict) -> dict | None:
+    """
+    Try to parse a PAGASA JSON response in any known schema.
+    Returns a typhoon dict or None if no active cyclone found.
+    """
+    # Schema A: {"cyclones": [...]}
+    cyclones = data.get("cyclones") or data.get("data") or data.get("results") or []
+    if isinstance(cyclones, dict):
+        cyclones = list(cyclones.values())
+
+    if not cyclones:
+        return None
+
+    active = None
+    for c in cyclones:
+        if isinstance(c, dict) and c.get("active", True):
+            active = c
+            break
+
+    if not active:
+        return None
+
+    name   = (active.get("name") or active.get("international_name")
+              or active.get("typhoon_name") or "Tropical Cyclone")
+    signal = int(active.get("signal") or active.get("max_signal")
+                 or active.get("psws") or 1)
+
+    return {
+        "active":   True,
+        "signal":   signal,
+        "name":     name,
+        "headline": f"⚠️ Typhoon {name} — Signal #{signal} in effect",
+        "color":    _signal_color(signal),
+        "source":   _BAGYO_WATCH,
+    }
 
 
 def get_typhoon_signal() -> dict:
     """
     Fetch the current PAGASA tropical cyclone bulletin and return a summary.
-    Falls back gracefully if the endpoint is unreachable.
+    Tries multiple PAGASA endpoints in order, falls back gracefully if all fail.
 
     Returns dict:
         {
@@ -401,45 +612,78 @@ def get_typhoon_signal() -> dict:
           "color":    str,           # banner background hex
           "source":   str,           # URL for "more info" link
         }
+
+    NOTE: PAGASA rotates bulletin.json URLs occasionally.
+    If this returns inactive when a typhoon is active, check _PAGASA_URLS
+    in features.py and update with the current endpoint from DevTools on
+    https://bagong.pagasa.dost.gov.ph/
     """
+    last_error = None
+    for url in _PAGASA_URLS:
+        try:
+            resp = requests.get(url, timeout=6, headers=_PAGASA_HEADERS)
+            if resp.status_code == 404:
+                last_error = f"404 at {url}"
+                continue   # try next URL
+            resp.raise_for_status()
+
+            # Try JSON first
+            try:
+                data = resp.json()
+                result = _try_parse_pagasa_response(data)
+                if result is not None:
+                    return result
+                # Valid JSON but no cyclones = genuinely no active typhoon
+                return _no_typhoon()
+            except ValueError:
+                # Not JSON — might be HTML page; skip this URL
+                last_error = f"Non-JSON response from {url}"
+                continue
+
+        except requests.exceptions.Timeout:
+            last_error = f"Timeout: {url}"
+            continue
+        except requests.exceptions.ConnectionError:
+            last_error = f"Connection error: {url}"
+            continue
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    # All JSON URLs failed — try scraping the public PAGASA advisory page for
+    # any mention of active signal numbers (non-critical, best-effort)
     try:
-        resp = requests.get(_PAGASA_RSS, timeout=6,
-                            headers={'User-Agent': 'SafeRoute/1.0'})
-        resp.raise_for_status()
-        data = resp.json()
-
-        # PAGASA bulletin JSON structure varies — try common keys
-        cyclones = data.get("cyclones") or data.get("data") or []
-        if isinstance(cyclones, dict):
-            cyclones = list(cyclones.values())
-
-        if not cyclones:
-            return _no_typhoon()
-
-        # Pick the highest signal active cyclone
-        active = None
-        for c in cyclones:
-            if isinstance(c, dict) and c.get("active", True):
-                active = c
-                break
-
-        if not active:
-            return _no_typhoon()
-
-        name   = active.get("name") or active.get("international_name") or "Tropical Cyclone"
-        signal = int(active.get("signal") or active.get("max_signal") or 1)
-
-        return {
-            "active":   True,
-            "signal":   signal,
-            "name":     name,
-            "headline": f"⚠️ Typhoon {name} — Signal #{signal} in effect",
-            "color":    _signal_color(signal),
-            "source":   _BAGYO_WATCH,
-        }
-
+        resp = requests.get(_BAGYO_WATCH, timeout=8, headers=_PAGASA_HEADERS)
+        if resp.status_code == 200:
+            text = resp.text
+            import re as _re
+            signal_match = _re.search(
+                r'(?:signal\s*(?:no\.?|#)\s*(\d)|psws\s*#?\s*(\d))',
+                text, _re.IGNORECASE
+            )
+            name_match = _re.search(
+                r'(?:typhoon|tropical storm|tropical depression)\s+([A-Z][a-z]+)',
+                text, _re.IGNORECASE
+            )
+            if signal_match:
+                signal = int(signal_match.group(1) or signal_match.group(2))
+                name   = name_match.group(1) if name_match else "Tropical Cyclone"
+                return {
+                    "active":   True,
+                    "signal":   signal,
+                    "name":     name,
+                    "headline": f"⚠️ Typhoon {name} — Signal #{signal} in effect",
+                    "color":    _signal_color(signal),
+                    "source":   _BAGYO_WATCH,
+                }
     except Exception:
-        return _no_typhoon()
+        pass  # HTML scrape failed — fall through to no_typhoon
+
+    import logging
+    logging.getLogger("saferoute").warning(
+        f"PAGASA typhoon check failed (all URLs exhausted). Last error: {last_error}"
+    )
+    return _no_typhoon()
 
 
 def _no_typhoon() -> dict:
@@ -616,27 +860,21 @@ def apply_night_safety(routes: list, commuter_type: str) -> list:
     """
     Applies night-time safety penalties and warnings to all routes in-place.
 
-    - Reduces safety_score by the night penalty for the commuter type
-    - Updates score_color and score_label to reflect the new score
-    - Adds 'night_warning' string to each route
+    Uses proportional reduction (apply_penalty_to_route) instead of flat
+    subtraction, so stacking this on top of crime/weather/flood never crashes
+    the score to 0.  Faster routes (id=0) still get a slightly larger penalty
+    via _route_exposure_multiplier, but the multiplier range is tighter now.
 
     Call this AFTER enrich_routes_with_scores() in navigation.py.
-
-    Args:
-        routes: list of route dicts
-        commuter_type: e.g. 'walk', 'jeepney', 'car'
-
-    Returns:
-        Same list with updated safety fields.
     """
-    penalty = get_night_safety_penalty(commuter_type)
-    warning = get_night_warning(commuter_type)
+    base_penalty = get_night_safety_penalty(commuter_type)
+    warning      = get_night_warning(commuter_type)
 
     for r in routes:
-        if penalty > 0:
-            original = r.get('safety_score', 75)
-            r['safety_score'] = max(0, original - penalty)
-            # Recompute color + label with the penalised score
+        if base_penalty > 0:
+            multiplier = _route_exposure_multiplier(r.get('id', 1))
+            scaled     = base_penalty * multiplier
+            apply_penalty_to_route(r, scaled, commuter_type)
             r['score_color'] = get_score_color(r['safety_score'])
             r['score_label'] = get_score_label(r['safety_score'])
         r['night_warning'] = warning

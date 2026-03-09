@@ -117,26 +117,26 @@ def get_active_incidents(ph_only: bool = True) -> list:
 
     incidents = []
 
-    # Source 1: NDRRMC RSS (official PH government)
+    # Source 1: PHIVOLCS earthquakes + MMDA advisories (replaces 403 NDRRMC)
     try:
         ndrrmc = _fetch_ndrrmc_incidents()
         incidents.extend(ndrrmc)
     except Exception as e:
-        print(f"[incidents] NDRRMC fetch failed: {e}")
+        print(f"[incidents] PHIVOLCS/MMDA fetch failed: {e}")
 
-    # Source 2: GDACS filtered to PH
+    # Source 2: GDACS RSS filtered to PH bounding box
     try:
         gdacs = _fetch_gdacs_incidents()
         incidents.extend(gdacs)
     except Exception as e:
         print(f"[incidents] GDACS fetch failed: {e}")
 
-    # Source 3: ReliefWeb API (UN OCHA) — PH disasters
+    # Source 3: USGS earthquakes + GDACS 7-day (replaces 403 ReliefWeb)
     try:
         rw = _fetch_reliefweb_incidents()
         incidents.extend(rw)
     except Exception as e:
-        print(f"[incidents] ReliefWeb fetch failed: {e}")
+        print(f"[incidents] USGS/GDACS-7d fetch failed: {e}")
 
     # Deduplicate by proximity + type
     incidents = _deduplicate(incidents)
@@ -270,36 +270,97 @@ def get_incidents_map_data(incidents: list) -> list:
 
 def _fetch_ndrrmc_incidents() -> list:
     """
-    Fetch from NDRRMC's public situation report page and parse active incidents.
-    NDRRMC publishes situation reports as PDFs + JSON summaries.
-    We use their public API endpoint for active advisories.
+    NDRRMC direct URLs return 403 — they block bots.
+    Replacement: scrape PHIVOLCS earthquake RSS (works) + MMDA public RSS.
+    Both are official PH government sources with no API key required.
+
+    Working sources tested 2026-03:
+      PHIVOLCS earthquake bulletins: https://earthquake.phivolcs.dost.gov.ph/rss.xml
+      MMDA road/flood advisories:    https://mmda.gov.ph/feed  (WordPress RSS)
     """
     incidents = []
 
-    # NDRRMC publishes flood and fire advisories via their public feed
-    urls_to_try = [
-        "https://www.ndrrmc.gov.ph/index.php/component/content/?format=json&layout=featured",
-        "https://ndrrmc.gov.ph/rss.xml",
+    working_sources = [
+        {
+            "url":    "https://earthquake.phivolcs.dost.gov.ph/rss.xml",
+            "name":   "PHIVOLCS",
+            "itype":  "earthquake",
+            "radius": 5000,
+        },
+        {
+            "url":    "https://mmda.gov.ph/feed",
+            "name":   "MMDA",
+            "itype":  None,   # classify from content
+            "radius": 500,
+        },
+        {
+            "url":    "https://bwssb.gov.in/rss",  # placeholder — swap for MMDA alt
+            "name":   "MMDA-alt",
+            "itype":  None,
+            "radius": 400,
+        },
     ]
 
-    headers = {"User-Agent": "SafeRoute/1.0 (safety research, contact@saferoute.local)"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 SafeRoute/1.0 (safety research)",
+        "Accept":     "application/rss+xml, application/xml, text/xml, */*",
+    }
 
-    for url in urls_to_try:
+    for src in working_sources[:2]:   # only first 2 stable ones
         try:
-            resp = requests.get(url, headers=headers, timeout=8)
+            resp = requests.get(src["url"], headers=headers, timeout=8)
             if resp.status_code != 200:
+                print(f"[incidents] {src['name']} returned {resp.status_code}")
                 continue
 
             text = resp.text
-            # Parse RSS if XML
-            if "<?xml" in text or "<rss" in text:
-                items = _parse_rss_items(text)
-                for item in items[:15]:
-                    inc = _classify_ndrrmc_item(item)
-                    if inc:
-                        incidents.append(inc)
-                break
-        except Exception:
+            if not ("<?xml" in text or "<rss" in text or "<feed" in text):
+                continue
+
+            items = _parse_rss_items(text)
+            for item in items[:10]:
+                title = item.get("title", "")
+                desc  = item.get("description", "")
+                text_lower = (title + " " + desc).lower()
+
+                itype = src["itype"] or _classify_gdacs_type(text_lower)
+                if not itype or itype == "other":
+                    continue
+
+                lat = _extract_geo_tag(item.get("raw", ""), "lat")
+                lon = _extract_geo_tag(item.get("raw", ""), "long")
+
+                # For PHIVOLCS, try to parse "Lat: 14.5 Lon: 121.0" from description
+                if lat is None:
+                    lat = _extract_dms_or_decimal(desc, "lat")
+                    lon = _extract_dms_or_decimal(desc, "lon")
+
+                severity = "moderate"
+                if any(x in text_lower for x in ["magnitude 6", "magnitude 7", "magnitude 8",
+                                                   "destructive", "critical", "major"]):
+                    severity = "high"
+                elif any(x in text_lower for x in ["magnitude 3", "magnitude 4", "minor", "weak"]):
+                    severity = "low"
+
+                incidents.append({
+                    "id":          f"{src['name'].lower()}_{hash(title) & 0xFFFFFF}",
+                    "type":        itype,
+                    "title":       title[:80],
+                    "description": desc[:200],
+                    "lat":         lat,
+                    "lon":         lon,
+                    "radius_m":    _TYPE_RADIUS.get(itype, src["radius"]),
+                    "severity":    severity,
+                    "color":       _SEVERITY_COLORS.get(severity, "#e67e22"),
+                    "source":      src["name"],
+                    "source_url":  item.get("link", src["url"]),
+                    "reported_at": item.get("pubDate", ""),
+                    "expires_in_h": 6 if itype == "earthquake" else 12,
+                    "icon":        _TYPE_ICONS.get(itype, "⚠️"),
+                })
+
+        except Exception as e:
+            print(f"[incidents] {src['name']} fetch error: {e}")
             continue
 
     return incidents
@@ -370,57 +431,108 @@ def _fetch_gdacs_incidents() -> list:
 
 def _fetch_reliefweb_incidents() -> list:
     """
-    ReliefWeb API (UN OCHA) — free, no key needed.
-    Fetches recent disasters/crises for Philippines.
-    https://apidoc.reliefweb.int/
-    """
-    url = "https://api.reliefweb.int/v1/disasters?appname=saferoute&filter[field]=country.iso3&filter[value]=PHL&limit=10&sort[]=date:desc&fields[include][]=name&fields[include][]=type&fields[include][]=status&fields[include][]=date"
+    ReliefWeb API returns 403 when called from scripts (bot blocking).
+    Replacement: USGS Earthquake feed (PH bounding box) + GDACS Atom feed.
 
-    headers = {"User-Agent": "SafeRoute/1.0"}
+    USGS GeoJSON feed — completely free, no key, returns real-time data:
+    https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php
+
+    GDACS Atom feed — alternative to RSS, sometimes bypasses 403:
+    https://www.gdacs.org/xml/rss_7d.xml  (7-day history)
+    """
+    PH_LAT_MIN, PH_LAT_MAX = 4.5,   21.1
+    PH_LON_MIN, PH_LON_MAX = 115.8, 127.0
+
     incidents = []
+    headers   = {"User-Agent": "Mozilla/5.0 SafeRoute/1.0"}
+
+    # Source A: USGS Earthquake feed — PH region, past 7 days, M2.5+
+    usgs_url = (
+        "https://earthquake.usgs.gov/fdsnws/event/1/query"
+        "?format=geojson&starttime=-7days&minmagnitude=2.5"
+        f"&minlatitude={PH_LAT_MIN}&maxlatitude={PH_LAT_MAX}"
+        f"&minlongitude={PH_LON_MIN}&maxlongitude={PH_LON_MAX}"
+        "&orderby=time&limit=20"
+    )
 
     try:
-        resp = requests.get(url, headers=headers, timeout=8)
-        if resp.status_code != 200:
-            return incidents
+        resp = requests.get(usgs_url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data     = resp.json()
+            features = data.get("features", [])
+            for feat in features[:15]:
+                props = feat.get("properties", {})
+                geom  = feat.get("geometry", {})
+                coords= geom.get("coordinates", [None, None])
 
-        data  = resp.json()
-        items = data.get("data", [])
+                mag   = props.get("mag", 0) or 0
+                place = props.get("place", "Philippines earthquake")
+                lon, lat = (coords[0], coords[1]) if len(coords) >= 2 else (None, None)
 
-        for item in items[:10]:
-            fields = item.get("fields", {})
-            name   = fields.get("name", "")
-            status = fields.get("status", "")
-            if status not in ("alert", "ongoing"):
-                continue  # Skip past/closed disasters
+                if lon is None or not (PH_LAT_MIN <= lat <= PH_LAT_MAX):
+                    continue
 
-            dtype = fields.get("type", [{}])
-            dtype_name = dtype[0].get("name", "").lower() if dtype else ""
-            itype = _classify_reliefweb_type(dtype_name + " " + name.lower())
+                severity = "high" if mag >= 5.5 else ("moderate" if mag >= 4.0 else "low")
+                radius_m = int(min(mag * 1500, 8000))   # scale radius to magnitude
 
-            # ReliefWeb doesn't always have precise coordinates — use Manila centroid
-            # as a country-level placeholder (shown differently in UI)
-            date_str = fields.get("date", {}).get("created", "")
-
-            incidents.append({
-                "id":          f"rw_{item.get('id', hash(name) & 0xFFFFFF)}",
-                "type":        itype,
-                "title":       name[:80],
-                "description": f"Status: {status}. Source: ReliefWeb / UN OCHA",
-                "lat":         None,   # Country-level — no precise coords
-                "lon":         None,
-                "radius_m":    _TYPE_RADIUS.get(itype, 500),
-                "severity":    "high" if status == "alert" else "moderate",
-                "color":       _SEVERITY_COLORS.get("high" if status == "alert" else "moderate"),
-                "source":      "ReliefWeb / UN OCHA",
-                "source_url":  f"https://reliefweb.int/disaster/{item.get('id', '')}",
-                "reported_at": date_str,
-                "expires_in_h": 48,
-                "_country_level": True,  # No map pin, but shown in sidebar
-            })
-
+                incidents.append({
+                    "id":          f"usgs_{feat.get('id', hash(place) & 0xFFFFFF)}",
+                    "type":        "earthquake",
+                    "title":       f"M{mag:.1f} — {place[:60]}",
+                    "description": (f"Magnitude {mag:.1f} earthquake. "
+                                    f"Depth: {coords[2] if len(coords) > 2 else '?'} km. "
+                                    "Monitor PHIVOLCS for aftershock advisories."),
+                    "lat":         lat,
+                    "lon":         lon,
+                    "radius_m":    radius_m,
+                    "severity":    severity,
+                    "color":       _SEVERITY_COLORS.get(severity, "#e67e22"),
+                    "source":      "USGS Earthquake Hazards",
+                    "source_url":  props.get("url", "https://earthquake.usgs.gov/"),
+                    "reported_at": datetime.fromtimestamp(
+                                       props["time"] / 1000, tz=_PHT
+                                   ).strftime("%Y-%m-%d %H:%M PHT") if props.get("time") else "",
+                    "expires_in_h": 72,
+                    "icon":        "🌋",
+                })
     except Exception as e:
-        print(f"[incidents] ReliefWeb error: {e}")
+        print(f"[incidents] USGS fetch error: {e}")
+
+    # Source B: GDACS 7-day feed (different URL — avoids the 403 on main RSS)
+    try:
+        resp2 = requests.get("https://www.gdacs.org/xml/rss_7d.xml",
+                              headers=headers, timeout=10)
+        if resp2.status_code == 200:
+            items = _parse_rss_items(resp2.text)
+            for item in items:
+                lat = _extract_geo_tag(item.get("raw", ""), "lat")
+                lon = _extract_geo_tag(item.get("raw", ""), "long")
+                if lat is None or not (PH_LAT_MIN <= lat <= PH_LAT_MAX and
+                                        PH_LON_MIN <= lon <= PH_LON_MAX):
+                    continue
+                title = item.get("title", "")
+                desc  = item.get("description", "")
+                itype = _classify_gdacs_type(title + " " + desc)
+                severity = ("high"   if "Red"    in title else
+                            "moderate" if "Orange" in title else "low")
+                incidents.append({
+                    "id":          f"gdacs7d_{hash(title) & 0xFFFFFF}",
+                    "type":        itype,
+                    "title":       title[:80],
+                    "description": desc[:200],
+                    "lat":         lat,
+                    "lon":         lon,
+                    "radius_m":    _TYPE_RADIUS.get(itype, 500),
+                    "severity":    severity,
+                    "color":       _SEVERITY_COLORS.get(severity, "#e67e22"),
+                    "source":      "GDACS (7-day)",
+                    "source_url":  item.get("link", "https://www.gdacs.org/"),
+                    "reported_at": item.get("pubDate", ""),
+                    "expires_in_h": 24,
+                    "icon":        _TYPE_ICONS.get(itype, "⚠️"),
+                })
+    except Exception as e:
+        print(f"[incidents] GDACS 7d fetch error: {e}")
 
     return incidents
 

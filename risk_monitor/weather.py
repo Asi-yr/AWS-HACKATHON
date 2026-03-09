@@ -362,26 +362,25 @@ def apply_weather_to_routes(routes: list, weather: dict, commuter_type: str) -> 
     Applies weather-based safety score penalty to all routes in-place.
     Also adds 'weather_warning' key to each route.
 
+    Uses proportional reduction (apply_penalty_to_route) so stacking with
+    night/crime/flood never crashes the score to 0.
+
+    Faster routes (id=0, highway-biased) still receive a slightly larger
+    penalty via the exposure multiplier — highways are more exposed in rain.
+
     Call this AFTER apply_night_safety() in navigation.py.
-
-    Args:
-        routes:        list of route dicts
-        weather:       result from get_weather_risk()
-        commuter_type: e.g. 'walk', 'motorcycle'
-
-    Returns:
-        Same list with updated safety fields.
     """
-    from risk_monitor.features import get_score_color, get_score_label
+    from risk_monitor.features import get_score_color, get_score_label, apply_penalty_to_route, _route_exposure_multiplier
 
-    penalty = get_weather_risk_penalty(weather, commuter_type)
-    warning = get_weather_warning(weather, commuter_type)
+    base_penalty = get_weather_risk_penalty(weather, commuter_type)
+    warning      = get_weather_warning(weather, commuter_type)
 
     for r in routes:
-        if penalty > 0:
-            r["safety_score"] = max(0, r.get("safety_score", 75) - penalty)
-            r["score_color"]  = get_score_color(r["safety_score"])
-            r["score_label"]  = get_score_label(r["safety_score"])
-        r["weather_warning"] = warning if penalty > 0 else ""
+        if base_penalty > 0:
+            multiplier = _route_exposure_multiplier(r.get('id', 1))
+            apply_penalty_to_route(r, base_penalty * multiplier, commuter_type)
+            r["score_color"] = get_score_color(r["safety_score"])
+            r["score_label"] = get_score_label(r["safety_score"])
+        r["weather_warning"] = warning if base_penalty > 0 else ""
 
     return routes

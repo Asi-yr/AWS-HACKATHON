@@ -513,9 +513,8 @@ def home():
                     apply_weather_to_routes(routes_data, weather, commuter_type)
 
                     # Flood risk (NOAH)
-                    flood = get_flood_risk_at(orig_lat, orig_lon)
-                    from risk_monitor.noah import apply_flood_to_routes
-                    apply_flood_to_routes(routes_data, flood, weather)
+                    from risk_monitor.noah import apply_route_flood_analysis, add_noah_flood_layer
+                    apply_route_flood_analysis(routes_data, weather)
 
                     # Community reports penalty
                     apply_reports_to_routes(
@@ -697,6 +696,7 @@ def get_routes():
         from risk_monitor.features import (
             rank_routes, enrich_routes_with_scores,
             attach_fares, apply_night_safety,
+            _compute_safety_score,
         )
         from risk_monitor.weather import apply_weather_to_routes
         from risk_monitor.noah   import apply_flood_to_routes
@@ -713,12 +713,17 @@ def get_routes():
         if not _is_transit:
             routes = rank_routes(routes, commuter_type)
         else:
-            # Just assign id/mode_label so the frontend renders correctly
+            # Transit routes: assign id/mode_label AND compute safety scores.
+            # Without this, all transit routes get the enrich fallback of 75
+            # which makes every route show the same score after penalties.
             for i, r in enumerate(routes):
                 r.setdefault('id', i)
                 r.setdefault('mode_label', 'Route' if len(routes) > 1 else 'Best Route')
                 r.setdefault('mode_label_color', '#e67e22')
-        enrich_routes_with_scores(routes)
+                # Compute score now so it reflects actual time/distance/position
+                if 'safety_score' not in r or r.get('safety_score') is None:
+                    r['safety_score'] = _compute_safety_score(r, commuter_type)
+        enrich_routes_with_scores(routes, commuter_type)
         apply_night_safety(routes, commuter_type)
         attach_fares(routes, commuter_type)
 
@@ -806,7 +811,7 @@ def get_routes():
         from risk_monitor.weather import get_weather_banner_html as _wbh
         from risk_monitor.noah   import get_flood_warning_html  as _fwh
         nav_response["weather_banner"] = _wbh(weather, commuter_type)
-        nav_response["flood_banner"]   = _fwh(flood)
+        nav_response["flood_banner"]   = _fwh(flood, weather)  # Pass weather to check if raining
         nav_response["weather_risk"]   = weather.get("risk_level", "clear")
         nav_response["flood_risk"]     = flood.get("risk_level",   "none")
 

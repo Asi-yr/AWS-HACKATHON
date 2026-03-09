@@ -70,9 +70,9 @@ _CRIME_COLORS = {
 
 _CRIME_PENALTY = {
     "none":     0,
-    "low":      5,
-    "moderate": 12,
-    "high":     20,
+    "low":      6,
+    "moderate": 14,
+    "high":     24,
 }
 
 _CRIME_WARNINGS = {
@@ -646,17 +646,19 @@ def apply_crime_to_routes(routes: list, crime: dict, commuter_type: str) -> list
     """
     Applies a single crime-zone safety penalty to all routes in-place.
     Use apply_crime_both_ends() when you have separate origin/destination lookups.
+    Uses proportional reduction so stacking with other hazards stays bounded.
     """
-    from risk_monitor.features import get_score_color, get_score_label
+    from risk_monitor.features import get_score_color, get_score_label, apply_penalty_to_route, _route_exposure_multiplier
 
     penalty = crime.get("penalty", 0)
     warning = get_crime_warning(crime, commuter_type)
 
     for r in routes:
         if penalty > 0:
-            r["safety_score"] = max(0, r.get("safety_score", 75) - penalty)
-            r["score_color"]  = get_score_color(r["safety_score"])
-            r["score_label"]  = get_score_label(r["safety_score"])
+            multiplier = _route_exposure_multiplier(r.get('id', 1))
+            apply_penalty_to_route(r, penalty * multiplier, commuter_type)
+            r["score_color"] = get_score_color(r["safety_score"])
+            r["score_label"] = get_score_label(r["safety_score"])
         r["crime_warning"] = warning if penalty > 0 else ""
 
     return routes
@@ -671,14 +673,21 @@ def apply_crime_both_ends(
     """
     Applies crime penalty using the WORSE of origin or destination risk,
     and builds a combined warning that names both areas when they differ.
+
+    Uses proportional reduction (apply_penalty_to_route) so stacking with
+    night/weather/flood never crashes a score to 0.
+
+    Also stores the endpoint risk level on each route so that
+    apply_route_crime_to_routes() can correctly avoid double-counting when
+    the scanned path contains zones that are sub-regions of the endpoint area.
     """
-    from risk_monitor.features import get_score_color, get_score_label
+    from risk_monitor.features import get_score_color, get_score_label, apply_penalty_to_route, _route_exposure_multiplier
 
     orig_level = _RISK_ORDER.get(orig_crime.get("risk_level", "none"), 0)
     dest_level = _RISK_ORDER.get(dest_crime.get("risk_level", "none"), 0)
 
-    primary = dest_crime if dest_level >= orig_level else orig_crime
-    penalty = primary.get("penalty", 0)
+    primary      = dest_crime if dest_level >= orig_level else orig_crime
+    base_penalty = primary.get("penalty", 0)
 
     orig_warn = get_crime_warning(orig_crime, commuter_type) if orig_level > 0 else ""
     dest_warn = get_crime_warning(dest_crime, commuter_type) if dest_level > 0 else ""
@@ -701,41 +710,55 @@ def apply_crime_both_ends(
     else:
         warning = ""
 
+    # Record the worst endpoint risk level so apply_route_crime_to_routes
+    # can skip adding extra penalty for zones that are sub-areas of origin/dest.
+    worst_endpoint_risk = primary.get("risk_level", "none")
+
     for r in routes:
-        if penalty > 0:
-            r["safety_score"] = max(0, r.get("safety_score", 75) - penalty)
-            r["score_color"]  = get_score_color(r["safety_score"])
-            r["score_label"]  = get_score_label(r["safety_score"])
-        r["crime_warning"] = warning if penalty > 0 else ""
-        r["orig_crime"]    = orig_crime
-        r["dest_crime"]    = dest_crime
+        if base_penalty > 0:
+            multiplier = _route_exposure_multiplier(r.get('id', 1))
+            scaled     = base_penalty * multiplier
+            apply_penalty_to_route(r, scaled, commuter_type)
+            r["score_color"] = get_score_color(r["safety_score"])
+            r["score_label"] = get_score_label(r["safety_score"])
+        r["crime_warning"]          = warning if base_penalty > 0 else ""
+        r["orig_crime"]             = orig_crime
+        r["dest_crime"]             = dest_crime
+        r["_endpoint_crime_risk"]   = worst_endpoint_risk   # used by route scan
 
     return routes
 
 
 def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
     """
-    NEW: Reads pre-computed route["route_crime_zones"] from scan_route_crime_zones()
-    and applies additional safety score penalties for each high-risk zone the
+    Reads pre-computed route["route_crime_zones"] from scan_route_crime_zones()
+    and applies INCREMENTAL safety score penalties for each high-risk zone the
     route path actually passes through.
 
-    Must be called AFTER apply_crime_both_ends() / apply_crime_to_routes().
-    Requires each route dict to have a "route_crime_zones" key set by the caller.
+    Double-counting prevention
+    ──────────────────────────
+    apply_crime_both_ends() already penalises based on the WORST of the
+    origin/destination risk.  This function only adds an EXTRA penalty when
+    the route path passes through a zone that is:
+      (a) WORSE than the already-applied endpoint risk, OR
+      (b) a *different* zone at the SAME level (genuinely new hazard exposure).
 
-    Only adds a penalty if the route path crosses a zone WORSE than what origin/
-    destination checks already caught, so it's additive but not double-counted.
-    Also appends a "route_zones_warning" key listing the crossed zone names.
+    The "Tondo contains Gagalangin" problem is solved by checking parent-zone
+    containment: if a scanned zone's bounding box is fully contained within a
+    zone that was already assessed at the same or higher risk level, it is
+    skipped entirely — no extra penalty.
 
-    Usage in main.py:
-        for route in routes:
-            wps = route.get("waypoints") or route.get("geometry_coords") or []
-            route["route_crime_zones"] = scan_route_crime_zones(wps)
-        apply_crime_both_ends(routes, crime, dest_crime, commuter_type)
-        apply_route_crime_to_routes(routes, commuter_type)
+    Also stores the scanned zones on the route for UI display.
+
+    Must be called AFTER apply_crime_both_ends().
     """
-    from risk_monitor.features import get_score_color, get_score_label
+    from risk_monitor.features import get_score_color, get_score_label, apply_penalty_to_route
 
     group = _group_commuter(commuter_type)
+
+    # Build lookup of all zone coords from the JSON so we can check containment
+    all_zones    = _load_crime_zones()
+    coord_zones  = {z["name"]: z["coords"] for z in all_zones if z.get("coords") and len(z["coords"]) == 4}
 
     for r in routes:
         route_zones = r.get("route_crime_zones", [])
@@ -743,33 +766,78 @@ def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
             r.setdefault("route_zones_warning", "")
             continue
 
-        worst_risk = get_worst_route_risk(route_zones)
+        # Risk already applied from endpoint check
+        endpoint_risk = r.get("_endpoint_crime_risk", "none")
+        endpoint_ord  = _RISK_ORDER.get(endpoint_risk, 0)
 
-        # Already-applied penalty level (from origin/dest check)
-        existing_risk = "none"
-        if r.get("orig_crime"):
-            existing_risk = r["orig_crime"].get("risk_level", "none")
-        dest_risk = r.get("dest_crime", {}).get("risk_level", "none")
-        if _RISK_ORDER.get(dest_risk, 0) > _RISK_ORDER.get(existing_risk, 0):
-            existing_risk = dest_risk
+        # Collect scanned zones that represent genuinely NEW exposure:
+        #   - risk level is HIGHER than endpoint, OR
+        #   - risk level is same but it is not a sub-zone of the endpoint area
+        extra_penalty_total = 0.0
+        notable             = []
+        applied_zone_names  = set()
 
-        # Only penalise if route path risk is WORSE than endpoints
-        if _RISK_ORDER.get(worst_risk, 0) > _RISK_ORDER.get(existing_risk, 0):
-            extra_penalty = _CRIME_PENALTY.get(worst_risk, 0) - _CRIME_PENALTY.get(existing_risk, 0)
-            if extra_penalty > 0:
-                r["safety_score"] = max(0, r.get("safety_score", 75) - extra_penalty)
-                r["score_color"]  = get_score_color(r["safety_score"])
-                r["score_label"]  = get_score_label(r["safety_score"])
+        # If origin/dest itself was a zone, record it to check containment
+        orig_zone_name = (r.get("orig_crime") or {}).get("area", "").lower()
+        dest_zone_name = (r.get("dest_crime") or {}).get("area", "").lower()
+        endpoint_zone_names = {orig_zone_name, dest_zone_name} - {""}
 
-        # Build a human-readable list of crossed zones (high + moderate only)
-        notable = [z for z in route_zones if z.get("risk") in ("high", "moderate")]
+        for zone in route_zones:
+            z_name = zone["name"].lower()
+            z_risk = zone.get("risk", "none")
+            z_ord  = _RISK_ORDER.get(z_risk, 0)
+
+            if z_ord == 0:
+                continue   # 'none' risk zones are irrelevant
+
+            # Skip if this zone IS one of the endpoint zones (already penalised)
+            if z_name in endpoint_zone_names:
+                continue
+
+            # Skip if this zone is spatially contained within a higher/equal-risk
+            # endpoint zone (classic Gagalangin ⊂ Tondo case).
+            z_coords = coord_zones.get(z_name)
+            if z_coords and z_ord <= endpoint_ord:
+                is_subzone = False
+                for ep_name in endpoint_zone_names:
+                    ep_coords = coord_zones.get(ep_name)
+                    if ep_coords:
+                        ep_lat_min, ep_lat_max, ep_lon_min, ep_lon_max = ep_coords
+                        z_lat_min,  z_lat_max,  z_lon_min,  z_lon_max  = z_coords
+                        if (z_lat_min >= ep_lat_min and z_lat_max <= ep_lat_max and
+                                z_lon_min >= ep_lon_min and z_lon_max <= ep_lon_max):
+                            is_subzone = True
+                            break
+                if is_subzone:
+                    continue
+
+            # This zone is a genuinely new hazard.
+            # Apply an INCREMENTAL penalty = difference vs endpoint level,
+            # but only if worse, or a flat small penalty if same level new zone.
+            if z_ord > endpoint_ord:
+                incremental = _CRIME_PENALTY.get(z_risk, 0) - _CRIME_PENALTY.get(endpoint_risk, 0)
+            else:
+                # Same risk level, genuinely different zone → small additive penalty
+                incremental = _CRIME_PENALTY.get(z_risk, 0) * 0.35
+
+            if incremental > 0 and z_name not in applied_zone_names:
+                extra_penalty_total += incremental
+                applied_zone_names.add(z_name)
+                if z_risk in ("high", "moderate"):
+                    notable.append(zone)
+
+        if extra_penalty_total > 0:
+            apply_penalty_to_route(r, extra_penalty_total, commuter_type)
+            r["score_color"] = get_score_color(r["safety_score"])
+            r["score_label"] = get_score_label(r["safety_score"])
+
         if notable:
+            worst_risk = notable[0]["risk"]   # already sorted worst-first
             zone_names = ", ".join(z["name"].title() for z in notable[:4])
-            risk_label = worst_risk.title()
             base_warn  = _CRIME_WARNINGS.get(worst_risk, {}).get(group, "")
             r["route_zones_warning"] = (
                 f"{'🚨' if worst_risk == 'high' else '⚠️'} Route passes through "
-                f"{risk_label}-risk area(s): {zone_names}. {base_warn}"
+                f"{worst_risk.title()}-risk area(s): {zone_names}. {base_warn}"
             )
         else:
             r["route_zones_warning"] = ""

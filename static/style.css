@@ -95,7 +95,18 @@ body { background-color: #f4f7f6; color: #333; overflow: hidden; height: 100vh; 
 }
 
 /* ── Map area ──────────────────────────────────────────────────────────────── */
-.map-area { flex-grow: 1; height: 100%; background-color: #e5e3df; position: relative; }
+/* isolation:isolate creates a new stacking context for the Leaflet map,
+   containing all its internal z-index layers (tiles, markers, controls, popups).
+   This prevents Leaflet's repaints from ever covering fixed-position banners
+   that live in the root stacking context above. */
+.map-area {
+    flex-grow: 1;
+    height: 100%;
+    background-color: #e5e3df;
+    position: relative;
+    isolation: isolate;       /* ← key fix: Leaflet z-indices stay inside this box */
+    z-index: 0;               /* ← anchor this layer below sidebar and banners */
+}
 
 /* ── Map overlay controls ──────────────────────────────────────────────────── */
 .map-overlay-controls {
@@ -251,6 +262,189 @@ body { background-color: #f4f7f6; color: #333; overflow: hidden; height: 100vh; 
     padding: 2px 8px;
 }
 
+/* ── Banners (typhoon / night / weather / crime / flood) ───────────────────── */
+/* These must always render above the Leaflet map regardless of repaint.
+   isolation:isolate on .map-area keeps Leaflet's stacking context contained,
+   so any z-index here wins cleanly. The inline z-index values from Python
+   banner generators (99997-99999) are preserved as-is. */
+.typhoon-banner,
+.night-banner,
+.weather-banner,
+.crime-banner,
+.flood-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 99999;           /* always on top — map is isolated at z-index:0 */
+    pointer-events: auto;
+    font-size: 13px;
+    font-weight: bold;
+    text-align: center;
+    padding: 8px 16px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+/* Stack multiple active banners vertically instead of overlapping */
+.night-banner   { z-index: 99998; }
+.weather-banner { z-index: 99997; }
+.crime-banner   { z-index: 99996; }
+.flood-banner   { z-index: 99995; }
 /* ── Community reports nav link ──────────────────────────────────────────────── */
 .user-info a { color: #2980b9; text-decoration: none; }
 .user-info a:hover { text-decoration: underline; }
+
+/* ── Map area labels (crime, flood) — must survive zoom repaints ─────────────── */
+/* Using a named className instead of inline styles prevents Leaflet from
+   recalculating the element on zoom and losing the label. iconSize must be
+   explicitly set (not null) so the anchor is stable. */
+.saferoute-label { pointer-events: none !important; }
+.sr-area-label {
+    color: white;
+    padding: 3px 9px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
+    font-family: Arial, sans-serif;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.35);
+    display: inline-block;
+    /* No transform — keeps label pinned at anchor through zoom animation */
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* CORNER ALERT CARDS — replaces full-width top banners                       */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Replace old fixed-position banner classes so they don't take up top space  */
+.typhoon-banner,
+.night-banner,
+.weather-banner,
+.crime-banner,
+.flood-banner,
+.dynamic-weather-banner,
+.dynamic-flood-banner {
+    /* Redirect to corner card system — hide any server-rendered inline banners */
+    display: none !important;
+}
+
+/* Modern corner notification card */
+.map-alert-card {
+    background: rgba(255,255,255,0.97);
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    opacity: 0;
+    transform: translateX(20px) scale(0.97);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    cursor: default;
+    pointer-events: auto;
+    backdrop-filter: blur(8px);
+    /* left border color set inline by JS */
+}
+
+.map-alert-card.visible {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+}
+
+.map-alert-card.dismissing {
+    opacity: 0;
+    transform: translateX(18px) scale(0.96);
+    pointer-events: none;
+}
+
+.mac-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+}
+
+.mac-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.mac-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #2c3e50;
+    line-height: 1.3;
+    margin-bottom: 2px;
+}
+
+.mac-body {
+    font-size: 11px;
+    color: #555;
+    line-height: 1.4;
+    word-break: break-word;
+    /* Truncate very long bodies */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.mac-close {
+    background: none;
+    border: none;
+    color: #aaa;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: color 0.15s;
+}
+.mac-close:hover { color: #e74c3c; }
+
+/* ── Risk icon pills on map ──────────────────────────────────────────────── */
+.saferoute-risk-icon {
+    background: transparent !important;
+    border: none !important;
+}
+
+/* ── Map status bar ─────────────────────────────────────────────────────── */
+#map-status-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background: rgba(44, 62, 80, 0.82);
+    color: rgba(255,255,255,0.92);
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 6px 14px;
+    text-align: center;
+    backdrop-filter: blur(6px);
+    pointer-events: none;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    letter-spacing: 0.01em;
+}
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* PULSING RISK MARKERS — animated rings for crime/flood zones                */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The pulse ring expands outward and fades — creates a sonar/radar effect    */
+@keyframes sr-pulse {
+    0%   { transform: scale(1);    opacity: 0.75; }
+    70%  { transform: scale(2.8);  opacity: 0; }
+    100% { transform: scale(2.8);  opacity: 0; }
+}
+
+/* Container: no Leaflet default background/border */
+.sr-pulse-icon {
+    background: transparent !important;
+    border: none !important;
+}
+
+/* Pill label icons stay crisp */
+.saferoute-risk-icon {
+    background: transparent !important;
+    border: none !important;
+}
