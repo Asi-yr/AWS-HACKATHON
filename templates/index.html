@@ -839,7 +839,11 @@ function renderRouteCards(routes) {
     let warningLines = '';
     if (route.night_warning)    warningLines += `<div class="route-warning night-warning">🌙 ${escHtml(route.night_warning)}</div>`;
     if (route.weather_warning)  warningLines += `<div class="route-warning weather-warning">🌦️ ${escHtml(route.weather_warning)}</div>`;
-    if (route.flood_warning)    warningLines += `<div class="route-warning flood-warning">🌊 ${escHtml(route.flood_warning)}</div>`;
+    // Only show flood warning in sidebar if there are rain-active zones
+    const _activeFloodZones = (route.flood_zones || []).filter(z => z.rain_active !== false);
+    if (route.flood_warning && _activeFloodZones.length > 0) {
+        warningLines += `<div class="route-warning flood-warning" style="background:#e3f2fd;color:#0d47a1;border-left:3px solid #1565c0;">🌊 ${escHtml(route.flood_warning)}</div>`;
+    }
     if (route.report_warnings && route.report_warnings.length) {
         route.report_warnings.forEach(w => {
             warningLines += `<div class="route-warning report-warning">⚠️ ${escHtml(w)}</div>`;
@@ -867,26 +871,35 @@ function renderRouteCards(routes) {
     ${fareDisp ? `<span class="fare-badge">💸 ${escHtml(fareDisp)}</span>` : ''}
   </div>
   ${warningLines}
-  ${route.has_flood_zones && route.flood_warning ? `
-    <div style="background: #1a5276; color: white; padding: 8px 12px; border-radius: 4px; margin: 8px 0 4px 0; font-size: 13px; border-left: 3px solid #3498db;">
-      <strong>🌊 Flood Zones:</strong> ${escHtml(route.flood_warning)}
-      ${route.flood_zones && route.flood_zones.length > 0 ? `
-        <details style="margin-top: 6px;">
-          <summary style="cursor: pointer; font-size: 12px; font-weight: normal;">
-            View affected areas (${route.flood_zones.length} location${route.flood_zones.length !== 1 ? 's' : ''})
-          </summary>
-          <ul style="margin: 6px 0 0 20px; font-size: 11px; line-height: 1.6;">
-            ${route.flood_zones.slice(0, 5).map(zone => `
-              <li><strong>${escHtml(zone.risk.charAt(0).toUpperCase() + zone.risk.slice(1))}</strong> risk near ${zone.lat.toFixed(5)}, ${zone.lon.toFixed(5)}</li>
-            `).join('')}
-            ${route.flood_zones.length > 5 ? `
-              <li style="font-style: italic; color: #d5e8f5;">...and ${route.flood_zones.length - 5} more location(s)</li>
-            ` : ''}
-          </ul>
-        </details>
-      ` : ''}
-    </div>
-  ` : ''}`;
+  ${(() => {
+    // Only show flood section if there are zones where it is actively raining.
+    // Dry flood-prone zones are hidden — no rain, no warning.
+    const activeFloodZones = (route.flood_zones || []).filter(z => z.rain_active !== false);
+    if (!activeFloodZones.length) return '';
+    const riskOrder = { high: 0, moderate: 1, low: 2 };
+    const sorted = [...activeFloodZones].sort((a, b) => (riskOrder[a.risk] ?? 9) - (riskOrder[b.risk] ?? 9));
+    const worstRisk = sorted[0]?.risk || 'low';
+    const bgColor     = { high:'#0d2b6b', moderate:'#1565c0', low:'#1976d2' }[worstRisk] || '#1565c0';
+    const borderColor = { high:'#42a5f5', moderate:'#64b5f6', low:'#90caf9' }[worstRisk] || '#64b5f6';
+    const riskIcons   = { high:'🌊', moderate:'💧', low:'💦' };
+    return `
+    <div style="background:${bgColor};color:#fff;padding:8px 12px;border-radius:4px;margin:8px 0 4px 0;font-size:13px;border-left:3px solid ${borderColor};">
+      <strong>${riskIcons[worstRisk] || '💧'} Flooding Along Route:</strong> ${escHtml(route.flood_warning || activeFloodZones.length + ' flood zone(s) currently active')}
+      <details style="margin-top:6px;">
+        <summary style="cursor:pointer;font-size:12px;font-weight:normal;opacity:0.85;">
+          View ${activeFloodZones.length} active area${activeFloodZones.length !== 1 ? 's' : ''}
+        </summary>
+        <ul style="margin:6px 0 0 16px;font-size:11px;line-height:1.7;list-style:none;padding:0;">
+          ${sorted.slice(0, 5).map(zone => {
+            const ic = riskIcons[zone.risk] || '💧';
+            const rl = zone.risk.charAt(0).toUpperCase() + zone.risk.slice(1);
+            return `<li>${ic} <strong>${escHtml(rl)}</strong> flood risk — currently raining here</li>`;
+          }).join('')}
+          ${activeFloodZones.length > 5 ? `<li style="opacity:0.7;font-style:italic;">...and ${activeFloodZones.length - 5} more area(s)</li>` : ''}
+        </ul>
+      </details>
+    </div>`;
+  })()}`;
 
     // ── Station count / hazards ───────────────────────────────────────────
     const infoHTML = route.station_count
@@ -1587,10 +1600,11 @@ function mkRiskIcon(icon, label, color, size = 'md') {
 
 /** Flood pill — same as mkRiskIcon but with blue water styling */
 function mkFloodIcon(risk, label) {
+    // Blue shades: deep navy (high) → medium blue (moderate) → sky blue (low)
     const cfgs = {
-        high:     { color:'#c0392b', bg:'rgba(192,57,43,0.95)', icon:'🚨' },
-        moderate: { color:'#e67e22', bg:'rgba(230,126,34,0.95)', icon:'⚠️' },
-        low:      { color:'#2980b9', bg:'rgba(41,128,185,0.95)', icon:'💧' },
+        high:     { color:'#0d2b6b', bg:'rgba(13,43,107,0.95)',  icon:'🌊', border:'rgba(100,160,255,0.7)' },
+        moderate: { color:'#1565c0', bg:'rgba(21,101,192,0.95)', icon:'💧', border:'rgba(130,185,255,0.6)' },
+        low:      { color:'#1976d2', bg:'rgba(25,118,210,0.95)', icon:'💦', border:'rgba(160,210,255,0.5)' },
     };
     const cfg = cfgs[risk] || cfgs.low;
     const approxW = Math.max(90, label.length * 7 + 36);
@@ -1601,12 +1615,12 @@ function mkFloodIcon(risk, label) {
             padding:3px 9px;border-radius:14px;
             font-size:11px;font-weight:800;
             font-family:'Segoe UI',Arial,sans-serif;
-            box-shadow:0 3px 10px rgba(0,0,0,0.4);
+            box-shadow:0 3px 12px rgba(13,43,107,0.5);
             white-space:nowrap;display:flex;
             align-items:center;gap:4px;
-            border:2px solid rgba(255,255,255,0.5);
+            border:2px solid ${cfg.border};
             line-height:1;
-        ">${cfg.icon} 🌊 ${escHtml(label)}</div>`,
+        ">${cfg.icon} ${escHtml(label)}</div>`,
         iconSize:   [approxW, 24],
         iconAnchor: [approxW/2, 12],
     });
@@ -1630,20 +1644,27 @@ function crimePopupHtml(color, icon, risk, name, summary, extraHtml = '') {
     </div>`;
 }
 
-function floodPopupHtml(color, risk, label, depth) {
-    const icons = { high:'🚨', moderate:'⚠️', low:'💧' };
-    const icon  = icons[risk] || '🌊';
+function floodPopupHtml(color, risk, label, depth, rainActive) {
+    // Blue shades for flood popups
+    const blueColors = { high:'#0d2b6b', moderate:'#1565c0', low:'#1976d2' };
+    const blueColor  = blueColors[risk] || '#1976d2';
+    const icons  = { high:'🌊', moderate:'💧', low:'💦' };
+    const icon   = icons[risk] || '🌊';
     const riskLabel = risk.charAt(0).toUpperCase()+risk.slice(1);
-    const depthTxt = depth ? `~${depth.toFixed(1)}m depth` : 'Flood-prone during rain';
-    return `<div style="font-family:'Segoe UI',Arial,sans-serif;min-width:170px;padding:4px 2px;">
+    const depthTxt  = depth ? `~${depth.toFixed(1)}m estimated depth` : 'Flood-prone during rain';
+    const rainNote  = rainActive
+        ? `<div style="margin-top:5px;padding:3px 8px;border-radius:5px;background:#e3f2fd;color:#0d47a1;font-size:10px;font-weight:700;">🌧️ Currently raining here — flooding active</div>`
+        : `<div style="margin-top:5px;padding:3px 8px;border-radius:5px;background:#f5f5f5;color:#666;font-size:10px;">☀️ Dry now — floods when it rains</div>`;
+    return `<div style="font-family:'Segoe UI',Arial,sans-serif;min-width:180px;padding:4px 2px;">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-            <span style="font-size:18px;">${icon}</span>
+            <span style="font-size:20px;">${icon}</span>
             <div>
-                <div style="font-weight:700;color:${color};font-size:13px;">${riskLabel} Flood Risk</div>
+                <div style="font-weight:700;color:${blueColor};font-size:13px;">${riskLabel} Flood Risk</div>
                 <div style="font-size:10px;color:#888;">${depthTxt}</div>
             </div>
         </div>
         <div style="font-size:12px;font-weight:600;color:#2c3e50;margin-bottom:3px;">${escHtml(label)}</div>
+        ${rainNote}
         <div style="font-size:10px;color:#aaa;margin-top:5px;border-top:1px solid #eee;padding-top:4px;">
             🌊 Source: Project NOAH flood hazard data
         </div>
@@ -1790,44 +1811,53 @@ function drawRouteZoneOverlay(route) {
         routeCrimeLayers.push(circle, pulseM, iconOnlyM, labelM);
     }
 
-    // ── Flood zones — LOD-aware ────────────────────────────────────────────
+    // ── Flood zones — only shown when actively raining at that segment ────────
     function addFloodZone(zone) {
+        const rainActive = zone.rain_active !== false; // default true for legacy data
+
+        // Only render flood markers where it is raining at this route segment.
+        // Dry flood-prone zones are hidden — they clutter the map for no reason.
+        if (!rainActive) return;
+
         const key = `flood_${zone.lat.toFixed(5)}_${zone.lon.toFixed(5)}`;
         if (drawn.has(key)) return;
         drawn.add(key);
         floodCount++;
 
-        const risk    = zone.risk || 'low';
-        const colors  = { high:'#c0392b', moderate:'#e67e22', low:'#2980b9' };
-        const color   = colors[risk] || '#2980b9';
-        const radius  = { high:380, moderate:320, low:260 }[risk] || 300;
-        const fillOp  = { high:0.10, moderate:0.07, low:0.05 }[risk] || 0.06;
+        const risk = zone.risk || 'low';
+
+        // Blue shades: deep navy (high) → medium blue (moderate) → sky blue (low)
+        const blueColors = { high:'#0d2b6b', moderate:'#1565c0', low:'#1976d2' };
+        const color  = blueColors[risk] || '#1976d2';
+        const radius = { high:400, moderate:330, low:265 }[risk] || 300;
+        const fillOp = { high:0.18, moderate:0.13, low:0.09 }[risk] || 0.1;
 
         const circle = L.circle([zone.lat, zone.lon], {
-            radius, color, weight: 2,
+            radius, color, weight: 2.5,
             fillColor: color, fillOpacity: fillOp,
-            dashArray: '7 6', interactive: false,
-            pane: 'hazardCircles',
+            dashArray: '8 5',
+            interactive: false, pane: 'hazardCircles',
         });
 
+        const markerIcon = { high:'🌊', moderate:'💧', low:'💦' }[risk] || '💧';
         const pulseMarker = L.marker([zone.lat, zone.lon], {
-            icon: mkPulseIcon(color, 10, color, 1.0, false, '🌊'),
+            icon: mkPulseIcon(color, 10, color, 1.0, false, markerIcon),
             interactive: true, zIndexOffset: 600, pane: 'hazardMarkers',
         });
 
-        // Icon-only for mid zoom
         const iconOnlyM = L.marker([zone.lat, zone.lon], {
-            icon: mkIconOnlyMarker('🌊', color),
+            icon: mkIconOnlyMarker(markerIcon, color),
             interactive: true, zIndexOffset: 650, pane: 'hazardMarkers',
         });
 
-        const riskLabel = { high:'High Flood', moderate:'Mod. Flood', low:'Low Flood' }[risk] || 'Flood';
+        const riskLabel = { high:'Flooding!', moderate:'Flooding', low:'Low Flood' }[risk] || 'Flood Zone';
+
         const labelMarker = L.marker([zone.lat, zone.lon], {
             icon: mkFloodIcon(risk, riskLabel),
             interactive: true, zIndexOffset: 700, pane: 'hazardMarkers',
         });
 
-        const popup = floodPopupHtml(color, risk, zone.label || riskLabel, zone.depth_m);
+        const popup = floodPopupHtml(color, risk, zone.label || riskLabel, zone.depth_m, true);
         circle.bindPopup(popup, { maxWidth: 240 });
         pulseMarker.bindPopup(popup, { maxWidth: 240 });
         iconOnlyM.bindPopup(popup, { maxWidth: 240 });
@@ -1913,28 +1943,31 @@ async function drawAreaSafetyOverlay(origCoords, destCoords, route = null) {
             appendSafetyOverlay(data.reports);
         }
 
-        // Flood zone at origin — show as icon card (not a blob circle)
+        // Flood zone at origin — only shown when raining, blue shades
         const rainActive = data.weather && ['light_rain','rain','heavy_rain','storm'].includes(data.weather.risk_level);
         if (data.flood && data.flood.risk_level !== 'none' && rainActive) {
             const risk  = data.flood.risk_level;
-            const color = { low:'#f39c12', moderate:'#e67e22', high:'#c0392b' }[risk] || '#e67e22';
+            // Blue shades: deep navy (high) → medium blue (moderate) → sky blue (low)
+            const blueColors = { high:'#0d2b6b', moderate:'#1565c0', low:'#1976d2' };
+            const color = blueColors[risk] || '#1976d2';
             const radius = { low:280, moderate:380, high:520 }[risk] || 350;
-            // Thin dashed boundary only — no filled blob
+            // Dashed blue boundary
             const floodCircle = L.circle([lat, lon], {
-                radius, color, weight:2, fillColor:color, fillOpacity:0.06, dashArray:'7 5',
+                radius, color, weight:2.5, fillColor:color, fillOpacity:0.12, dashArray:'8 5',
                 interactive: false, pane: 'hazardCircles',
             }).addTo(map);
             // Pulsing flood marker
             const floodLabel = { high:'High Flood Risk', moderate:'Moderate Flood', low:'Low Flood Risk' }[risk];
+            const floodIcon  = { high:'🌊', moderate:'💧', low:'💦' }[risk] || '💧';
             const floodPulse = L.marker([lat, lon], {
-                icon: mkPulseIcon(color, 11, color),
+                icon: mkPulseIcon(color, 11, color, 1.0, false, floodIcon),
                 interactive:true, zIndexOffset:650, pane:'hazardMarkers',
             }).addTo(map);
             const floodMarker = L.marker([lat, lon], {
                 icon: mkFloodIcon(risk, floodLabel),
                 interactive:true, zIndexOffset:700, pane:'hazardMarkers',
             }).addTo(map);
-            const popupHtml = floodPopupHtml(color, risk, data.flood.label || floodLabel, data.flood.depth_m);
+            const popupHtml = floodPopupHtml(color, risk, data.flood.label || floodLabel, data.flood.depth_m, true);
             floodCircle.bindPopup(popupHtml, { maxWidth:240 });
             floodPulse.bindPopup(popupHtml, { maxWidth:240 });
             floodMarker.bindPopup(popupHtml, { maxWidth:240 });

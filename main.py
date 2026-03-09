@@ -699,7 +699,7 @@ def get_routes():
             _compute_safety_score,
         )
         from risk_monitor.weather import apply_weather_to_routes
-        from risk_monitor.noah   import apply_flood_to_routes
+        from risk_monitor.noah   import apply_route_flood_analysis
 
         # rank_routes labels and pads road/walk routes to 3.
         # Skip for transit/jeepney/bus/train — they return a single
@@ -730,8 +730,12 @@ def get_routes():
         weather = get_weather_risk(orig_lat, orig_lon)
         apply_weather_to_routes(routes, weather, commuter_type)
 
+        # Flood: scan entire route path (not just origin).
+        # Flood-prone zones always appear on map; penalties only where it's raining there.
+        from risk_monitor.noah import apply_route_flood_analysis
+        apply_route_flood_analysis(routes, weather)
+        # Keep single-point result for flood_banner / flood_risk fields only
         flood = get_flood_risk_at(orig_lat, orig_lon)
-        apply_flood_to_routes(routes, flood, weather)
 
         apply_reports_to_routes(
             routes, chDB_perf,

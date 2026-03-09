@@ -143,6 +143,7 @@ def get_weather_risk(lat: float, lon: float) -> dict:
     Args:
         lat: latitude (e.g. 14.5995 for Manila)
         lon: longitude (e.g. 120.9842 for Manila)
+    
 
     Returns:
         {
@@ -160,6 +161,15 @@ def get_weather_risk(lat: float, lon: float) -> dict:
           "error":        str or None,
         }
     """
+
+    # return {
+    #     "ok": True, "risk_level": "storm",
+    #     "description": "TEST STORM", "temp_c": 22,
+    #     "feels_like_c": 20, "humidity_pct": 95,
+    #     "wind_kph": 85, "rain_mm": 40,
+    #     "color": "#6c3483", "fetched_at": "TEST", "error": None,
+    # }
+
     params = {
         "latitude":            lat,
         "longitude":           lon,
