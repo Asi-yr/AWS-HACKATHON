@@ -348,6 +348,72 @@ def _draw_bus_route(route, m):
 
     route_layer.add_to(m)
 
+
+def _draw_surface_route(route, m):
+    """
+    Draw a multi-leg surface-transit route from the Sakay GTFS planner.
+    Segments can be: walk (grey dashed), jeepney (orange solid), bus (teal solid).
+    Each transit leg shows board/alight circle markers.
+    """
+    route_layer = folium.FeatureGroup(name=route.get('name', 'Route'))
+    segments    = route.get('segments', [])
+
+    if not segments:
+        # Fallback: draw raw coords
+        folium.PolyLine(
+            locations=route.get('coords', []),
+            color=route.get('color', '#e67e22'), weight=5, opacity=0.9,
+            tooltip=route.get('name', 'Route'),
+        ).add_to(route_layer)
+        route_layer.add_to(m)
+        return
+
+    for seg_idx, seg in enumerate(segments):
+        coords   = seg.get('coords', [])
+        seg_type = seg.get('type', '')
+        label    = seg.get('label', '')
+
+        if len(coords) < 2:
+            continue
+
+        if seg_type == 'walk':
+            folium.PolyLine(
+                locations=coords, color='#7f8c8d', weight=3,
+                opacity=0.8, dash_array='8 6',
+                tooltip=label or 'Walk',
+            ).add_to(route_layer)
+
+        elif seg_type in ('jeepney', 'bus'):
+            seg_color = '#e67e22' if seg_type == 'jeepney' else '#16a085'
+            folium.PolyLine(
+                locations=coords,
+                color=seg.get('color', seg_color),
+                weight=6, opacity=0.9,
+                tooltip=f"{'Jeepney' if seg_type=='jeepney' else 'Bus'}: {label}",
+            ).add_to(route_layer)
+
+            # Board marker at first stop, alight at last stop
+            stops = seg.get('stations', [])
+            if stops:
+                board  = stops[0]
+                alight = stops[-1]
+                folium.CircleMarker(
+                    location=[board['lat'], board['lon']],
+                    radius=8, color=seg_color, weight=2,
+                    fill=True, fill_color='#ffffff', fill_opacity=1.0,
+                    tooltip=f"Board: {board.get('name','Stop')}",
+                ).add_to(route_layer)
+                if len(stops) > 1:
+                    folium.CircleMarker(
+                        location=[alight['lat'], alight['lon']],
+                        radius=8, color=seg_color, weight=2,
+                        fill=True, fill_color=seg_color, fill_opacity=1.0,
+                        tooltip=f"Alight: {alight.get('name','Stop')}",
+                    ).add_to(route_layer)
+
+    route_layer.add_to(m)
+
+
 def _draw_multimodal_route(route, m):
     route_layer = folium.FeatureGroup(name=route['name'])
     for seg in route.get('segments', []):
@@ -417,16 +483,29 @@ def _draw_transit_route(route, m):
                     tooltip=lbl,
                 ).add_to(route_layer)
 
-        # ── Jeepney connector leg ─────────────────────────────────────────────
-        elif seg_type == 'jeepney':
+        # ── Jeepney / Bus surface leg ─────────────────────────────────────────
+        elif seg_type in ('jeepney', 'bus'):
+            seg_color = seg.get('color', '#e67e22' if seg_type == 'jeepney' else '#16a085')
             if len(coords) >= 2:
                 folium.PolyLine(
                     locations=coords,
-                    color=seg.get('color', '#e67e22'),
-                    weight=5,
+                    color=seg_color,
+                    weight=5 if seg_type == 'jeepney' else 6,
                     opacity=0.88,
-                    tooltip=seg.get('label', 'Jeepney connector'),
+                    tooltip=seg.get('label', seg_type.capitalize()),
                 ).add_to(route_layer)
+            # Show board/alight markers for surface legs
+            stops = seg.get('stations', [])
+            if stops:
+                for si, st in enumerate([stops[0], stops[-1]]):
+                    folium.CircleMarker(
+                        location=[st['lat'], st['lon']],
+                        radius=7, color=seg_color, weight=2,
+                        fill=True,
+                        fill_color='#ffffff' if si == 0 else seg_color,
+                        fill_opacity=1.0,
+                        tooltip=('Board: ' if si == 0 else 'Alight: ') + st.get('name', ''),
+                    ).add_to(route_layer)
 
         # ── Train leg ─────────────────────────────────────────────────────────
         elif seg_type == 'train':
@@ -516,13 +595,20 @@ def home():
 
                 for route in routes_data:
                     rtype = route.get('type', '')
-                    if rtype in ('transit', 'train'):
+                    segs  = route.get('segments', [])
+                    seg_types = {s.get('type') for s in segs}
+                    # New multi-leg surface routes: transit type with jeepney/bus legs
+                    has_surface = bool(seg_types & {'jeepney', 'bus'})
+                    has_train   = 'train' in seg_types
+                    if rtype == 'transit' and has_surface and not has_train:
+                        _draw_surface_route(route, m)
+                    elif rtype in ('transit', 'train'):
                         _draw_transit_route(route, m)
-                    elif route.get('type') == 'jeepney':
+                    elif rtype == 'jeepney':
                         _draw_jeepney_route(route, m)
-                    elif route.get('type') == 'bus':
+                    elif rtype == 'bus':
                         _draw_bus_route(route, m)
-                    elif route.get('type') == 'multimodal':
+                    elif rtype == 'multimodal':
                         _draw_multimodal_route(route, m)
                     else:
                         _draw_road_route(route, m)
@@ -806,8 +892,10 @@ def get_routes():
         # Skip for transit/jeepney/bus/train — they return a single
         # carefully-built segmented route that must not be padded with
         # raw OSRM driving detours.
-        _is_transit = commuter_type.lower().strip() in (
+        _ct = commuter_type.lower().strip()
+        _is_transit = _ct in (
             'transit', 'jeepney', 'bus', 'train',
+            'jeepney_bus', 'train_jeepney', 'train_bus',
             'lrt1', 'lrt-1', 'lrt2', 'lrt-2',
             'mrt3', 'mrt-3', 'mrt7', 'pnr', 'commute',
         )
@@ -817,10 +905,20 @@ def get_routes():
             # Transit routes: assign id/mode_label AND compute safety scores.
             # Without this, all transit routes get the enrich fallback of 75
             # which makes every route show the same score after penalties.
+            # Per-mode label colors so Train/Jeepney/Bus look distinct
+            _mode_colors = {
+                'train': '#27ae60', 'lrt1': '#27ae60', 'lrt-1': '#27ae60',
+                'lrt2': '#2980b9', 'lrt-2': '#2980b9',
+                'mrt3': '#f39c12', 'mrt-3': '#f39c12',
+                'bus': '#16a085', 'jeepney': '#e67e22',
+                'jeepney_bus': '#2980b9', 'train_jeepney': '#27ae60',
+                'train_bus': '#16a085', 'transit': '#2980b9',
+            }
+            _ml_color = _mode_colors.get(_ct, '#2980b9')
             for i, r in enumerate(routes):
                 r.setdefault('id', i)
-                r.setdefault('mode_label', 'Route' if len(routes) > 1 else 'Best Route')
-                r.setdefault('mode_label_color', '#e67e22')
+                r.setdefault('mode_label', r.get('route_name', 'Route'))
+                r.setdefault('mode_label_color', _ml_color)
                 # Compute score now so it reflects actual time/distance/position
                 if 'safety_score' not in r or r.get('safety_score') is None:
                     r['safety_score'] = _compute_safety_score(r, commuter_type)

@@ -92,12 +92,23 @@
         </div>
       </div>
 
-      <!-- Sub-toggle: only visible when Transit is the active mode -->
+      <!-- Sub-toggles: 3 independent ON/OFF switches shown under Transit -->
       <div class="transit-subtoggle" id="transit-subtoggle">
-        <div class="sub-tile active" data-submode="train" id="sub-train">🚇 Train</div>
-        <div class="sub-tile" data-submode="jeepney" id="sub-jeepney">🚌 Jeepney/Bus</div>
+        <div class="sub-tile sub-train active"   id="sub-train"   title="LRT/MRT train">
+          <span class="sub-ico">🚇</span><span class="sub-lbl">Train</span>
+          <span class="sub-badge" id="badge-train">ON</span>
+        </div>
+        <div class="sub-tile sub-jeepney active" id="sub-jeepney" title="Jeepney routes">
+          <span class="sub-ico">🚌</span><span class="sub-lbl">Jeepney</span>
+          <span class="sub-badge" id="badge-jeepney">ON</span>
+        </div>
+        <div class="sub-tile sub-bus active"     id="sub-bus"     title="Bus routes">
+          <span class="sub-ico">🚍</span><span class="sub-lbl">Bus</span>
+          <span class="sub-badge" id="badge-bus">ON</span>
+        </div>
       </div>
-      <br><br>
+      <div class="transit-hint" id="transit-hint"></div>
+      <br>
 
       <!-- Safe Spots toggle — available before AND after searching -->
       <label id="safe-spots-pre-toggle"
@@ -410,41 +421,94 @@ const MODE_COLORS = {
   walk:       '#27ae60',
 };
 
-// activeSubMode tracks the sub-toggle under Transit
-let activeSubMode = 'train';   // default sub-mode
+// ── Transit sub-toggles: 3 independent ON/OFF switches ──────────────────────
+let trainOn = true, jeepneyOn = true, busOn = true;
+
+function resolvedTransitMode() {
+  // Maps the 3 toggle states to an API mode string
+  const t = trainOn, j = jeepneyOn, b = busOn;
+  if (t && j && b) return 'transit';
+  if (t && j)      return 'train_jeepney';
+  if (t && b)      return 'train_bus';
+  if (j && b)      return 'jeepney_bus';
+  if (t)           return 'train';
+  if (j)           return 'jeepney';
+  if (b)           return 'bus';
+  return 'transit'; // fallback: all on
+}
+
+function updateSubToggles() {
+  const els = {
+    train:   document.getElementById('sub-train'),
+    jeepney: document.getElementById('sub-jeepney'),
+    bus:     document.getElementById('sub-bus'),
+  };
+  const badges = {
+    train:   document.getElementById('badge-train'),
+    jeepney: document.getElementById('badge-jeepney'),
+    bus:     document.getElementById('badge-bus'),
+  };
+  const states = { train: trainOn, jeepney: jeepneyOn, bus: busOn };
+  Object.keys(els).forEach(k => {
+    els[k].classList.toggle('active',   states[k]);
+    els[k].classList.toggle('inactive', !states[k]);
+    badges[k].textContent = states[k] ? 'ON' : 'OFF';
+  });
+
+  // Hint bar
+  const hint = document.getElementById('transit-hint');
+  const on = [trainOn&&'Train', jeepneyOn&&'Jeepney', busOn&&'Bus'].filter(Boolean);
+  if (on.length > 1) {
+    hint.textContent = '⚡ ' + on.join(' + ') + ' — combined multi-modal routing';
+    hint.classList.add('visible');
+  } else {
+    hint.classList.remove('visible');
+  }
+
+  // Sync activeMode if transit parent is active
+  if (document.getElementById('transit-tile').classList.contains('active')) {
+    activeMode = resolvedTransitMode();
+    const colors = { transit:'#2980b9', train:'#27ae60', jeepney:'#e67e22', bus:'#16a085',
+                     train_jeepney:'#27ae60', train_bus:'#16a085', jeepney_bus:'#e67e22' };
+    document.documentElement.style.setProperty('--mode-color', colors[activeMode] || '#2980b9');
+  }
+}
+
+function _toggleSub(key) {
+  const states = { train: trainOn, jeepney: jeepneyOn, bus: busOn };
+  const on = Object.values(states).filter(Boolean).length;
+  // Prevent turning off the last active toggle
+  if (states[key] && on === 1) return;
+  if (key === 'train')   trainOn   = !trainOn;
+  if (key === 'jeepney') jeepneyOn = !jeepneyOn;
+  if (key === 'bus')     busOn     = !busOn;
+  updateSubToggles();
+}
+
+document.getElementById('sub-train').addEventListener('click',   () => _toggleSub('train'));
+document.getElementById('sub-jeepney').addEventListener('click', () => _toggleSub('jeepney'));
+document.getElementById('sub-bus').addEventListener('click',     () => _toggleSub('bus'));
 
 document.querySelectorAll('.mode-tile').forEach(tile => {
   tile.addEventListener('click', () => {
     document.querySelectorAll('.mode-tile').forEach(t => t.classList.remove('active'));
     tile.classList.add('active');
     const base = tile.dataset.mode;
-    // If transit, actual API mode is the sub-mode
-    activeMode = (base === 'transit') ? activeSubMode : base;
+    activeMode = (base === 'transit') ? resolvedTransitMode() : base;
     const color = MODE_COLORS[base] || tile.dataset.color;
     document.documentElement.style.setProperty('--mode-color', color);
-    // Show/hide sub-toggle
-    document.getElementById('transit-subtoggle').classList.toggle('visible', base === 'transit');
+    const isTransit = base === 'transit';
+    document.getElementById('transit-subtoggle').classList.toggle('visible', isTransit);
+    const hint = document.getElementById('transit-hint');
+    const onCount = [trainOn,jeepneyOn,busOn].filter(Boolean).length;
+    if (isTransit && onCount > 1) hint.classList.add('visible');
+    else hint.classList.remove('visible');
   });
 });
 
-// Sub-toggle (Train / Jeepney·Bus)
-document.querySelectorAll('.sub-tile').forEach(tile => {
-  tile.addEventListener('click', () => {
-    document.querySelectorAll('.sub-tile').forEach(t => t.classList.remove('active'));
-    tile.classList.add('active');
-    activeSubMode = tile.dataset.submode;
-    // Only update activeMode if the Transit parent tile is currently active
-    const transitTileActive = document.getElementById('transit-tile').classList.contains('active');
-    if (transitTileActive) {
-      activeMode = activeSubMode;
-      const color = MODE_COLORS[activeSubMode] || '#2980b9';
-      document.documentElement.style.setProperty('--mode-color', color);
-    }
-  });
-});
-
-// Show sub-toggle on load since Transit is the default active tile
+// Show sub-toggle on load (Transit is default active)
 document.getElementById('transit-subtoggle').classList.add('visible');
+updateSubToggles();
 
 // ── Locate-me (origin) ────────────────────────────────────────────────────────
 document.getElementById('locate-origin-btn').addEventListener('click', () => {
@@ -1051,10 +1115,22 @@ function drawAllRoutes(routes) {
               fillOpacity: 1, weight: 2,
             }).addTo(map).bindPopup(st.name));
           });
-        } else if (seg.type === 'jeepney' && seg.coords && seg.coords.length >= 2) {
+        } else if ((seg.type === 'jeepney' || seg.type === 'bus') && seg.coords && seg.coords.length >= 2) {
+          const segColor = seg.type === 'bus' ? '#16a085' : '#e67e22';
           layers.push(L.polyline(seg.coords, {
             color: lineColor, weight: 5, opacity: 0.88,
           }).addTo(map));
+          // Board/alight markers for surface transit
+          const stList = seg.stations || [];
+          if (stList.length >= 2) {
+            [stList[0], stList[stList.length-1]].forEach((st, i) => {
+              if (!st || !st.lat) return;
+              layers.push(L.circleMarker([st.lat, st.lon], {
+                radius: 6, color: segColor, fillColor: i === 0 ? segColor : 'white',
+                fillOpacity: 1, weight: 2,
+              }).addTo(map).bindPopup((i===0?'Board: ':'Alight: ') + (st.name||'')));
+            });
+          }
         } else if (seg.type === 'walk' && seg.coords && seg.coords.length >= 2) {
           layers.push(L.polyline(seg.coords, {
             color: '#555', weight: 4, opacity: 0.8,
@@ -2193,13 +2269,17 @@ map.on('zoomend', function () {
   });
   activeMode = prefillMode;
 
-  // Activate sub-tile if needed
+  // Activate sub-toggles if needed (history prefill)
   if (subMode) {
-    document.querySelectorAll('.sub-tile').forEach(function(t) {
-      t.classList.remove('active');
-      if (t.dataset.submode === subMode) t.classList.add('active');
-    });
-    activeSubMode = subMode;
+    if (subMode === 'train')                         { trainOn=true;  jeepneyOn=false; busOn=false; }
+    else if (subMode === 'jeepney')                  { trainOn=false; jeepneyOn=true;  busOn=false; }
+    else if (subMode === 'bus')                      { trainOn=false; jeepneyOn=false; busOn=true;  }
+    else if (subMode === 'jeepney_bus')              { trainOn=false; jeepneyOn=true;  busOn=true;  }
+    else if (subMode === 'train_jeepney')            { trainOn=true;  jeepneyOn=true;  busOn=false; }
+    else if (subMode === 'train_bus')                { trainOn=true;  jeepneyOn=false; busOn=true;  }
+    else                                             { trainOn=true;  jeepneyOn=true;  busOn=true;  }
+    updateSubToggles();
+    activeMode = resolvedTransitMode();
     document.getElementById('transit-subtoggle').classList.add('visible');
   }
 
@@ -2247,331 +2327,8 @@ map.on('zoomend', function () {
         });
 })();
 </script>
-
-<!-- ── Report Mode Toggle Button (inside map area) ──────────────────────── -->
-<button id="report-mode-btn"
-  onclick="toggleReportMode()"
-  title="Report a hazard"
-  style="position:fixed;bottom:24px;right:80px;z-index:100010;
-         background:#c0392b;color:white;border:none;border-radius:50%;
-         width:48px;height:48px;font-size:22px;cursor:pointer;
-         box-shadow:0 3px 8px rgba(0,0,0,0.35);transition:transform 0.15s;">
-  🚨
-</button>
-
-<!-- ── Floating report panel (appears where user clicks) ────────────────── -->
-<div id="report-panel"
-  style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-         z-index:9998;background:#fff;border-radius:12px;
-         box-shadow:0 8px 32px rgba(0,0,0,0.28);
-         width:320px;max-height:90vh;overflow-y:auto;font-family:inherit;">
-
-  <!-- Header -->
-  <div style="background:#c0392b;color:#fff;padding:14px 18px;border-radius:12px 12px 0 0;
-              display:flex;justify-content:space-between;align-items:center;">
-    <span style="font-weight:700;font-size:15px;">🚨 Report a Hazard</span>
-    <button onclick="closeReportPanel()"
-      style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1;">✕</button>
-  </div>
-
-  <div style="padding:16px;">
-    <!-- Location display -->
-    <div id="report-loc-badge"
-      style="background:#f0f4ff;border:1px solid #c5d5f5;border-radius:6px;
-             padding:7px 12px;font-size:12px;color:#2c3e50;margin-bottom:12px;">
-      📍 <span id="report-loc-text">Waiting for map click…</span>
-    </div>
-
-    <!-- Report type grid -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:12px;">
-      <button type="button" class="rtype-btn" data-type="flooding"
-              style="background:#1a527622;border:1px solid #1a5276;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#1a527644'"
-              onmouseout="this.style.background='#1a527622'"
-              onclick="selectReportType('flooding', this)">
-           🌊 Flooding
-         </button>
-<button type="button" class="rtype-btn" data-type="fire"
-              style="background:#c0392b22;border:1px solid #c0392b;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#c0392b44'"
-              onmouseout="this.style.background='#c0392b22'"
-              onclick="selectReportType('fire', this)">
-           🔥 Fire / Blaze
-         </button>
-<button type="button" class="rtype-btn" data-type="dark_area"
-              style="background:#2c3e5022;border:1px solid #2c3e50;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#2c3e5044'"
-              onmouseout="this.style.background='#2c3e5022'"
-              onclick="selectReportType('dark_area', this)">
-           🌑 Dark / Unlit Area
-         </button>
-<button type="button" class="rtype-btn" data-type="crime"
-              style="background:#c0392b22;border:1px solid #c0392b;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#c0392b44'"
-              onmouseout="this.style.background='#c0392b22'"
-              onclick="selectReportType('crime', this)">
-           🚨 Crime / Snatching
-         </button>
-<button type="button" class="rtype-btn" data-type="harassment"
-              style="background:#e74c3c22;border:1px solid #e74c3c;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#e74c3c44'"
-              onmouseout="this.style.background='#e74c3c22'"
-              onclick="selectReportType('harassment', this)">
-           ⚠️ Harassment
-         </button>
-<button type="button" class="rtype-btn" data-type="road_damage"
-              style="background:#e67e2222;border:1px solid #e67e22;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#e67e2244'"
-              onmouseout="this.style.background='#e67e2222'"
-              onclick="selectReportType('road_damage', this)">
-           🕳️ Road Damage
-         </button>
-<button type="button" class="rtype-btn" data-type="accident"
-              style="background:#e74c3c22;border:1px solid #e74c3c;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#e74c3c44'"
-              onmouseout="this.style.background='#e74c3c22'"
-              onclick="selectReportType('accident', this)">
-           💥 Accident
-         </button>
-<button type="button" class="rtype-btn" data-type="heavy_traffic"
-              style="background:#f39c1222;border:1px solid #f39c12;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#f39c1244'"
-              onmouseout="this.style.background='#f39c1222'"
-              onclick="selectReportType('heavy_traffic', this)">
-           🚗 Heavy Traffic
-         </button>
-<button type="button" class="rtype-btn" data-type="road_closed"
-              style="background:#e67e2222;border:1px solid #e67e22;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#e67e2244'"
-              onmouseout="this.style.background='#e67e2222'"
-              onclick="selectReportType('road_closed', this)">
-           🚧 Road Closed
-         </button>
-<button type="button" class="rtype-btn" data-type="construction"
-              style="background:#d3540022;border:1px solid #d35400;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#d3540044'"
-              onmouseout="this.style.background='#d3540022'"
-              onclick="selectReportType('construction', this)">
-           🏗️ Construction
-         </button>
-<button type="button" class="rtype-btn" data-type="safe_spot"
-              style="background:#27ae6022;border:1px solid #27ae60;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#27ae6044'"
-              onmouseout="this.style.background='#27ae6022'"
-              onclick="selectReportType('safe_spot', this)">
-           ✅ Safe Spot / Well-Lit
-         </button>
-<button type="button" class="rtype-btn" data-type="police_visible"
-              style="background:#2980b922;border:1px solid #2980b9;
-                     color:#222;padding:7px 10px;border-radius:6px;cursor:pointer;
-                     font-size:13px;text-align:left;transition:background 0.15s;"
-              onmouseover="this.style.background='#2980b944'"
-              onmouseout="this.style.background='#2980b922'"
-              onclick="selectReportType('police_visible', this)">
-           👮 Police Visible
-         </button>
-    </div>
-
-    <div id="selected-type-display"
-      style="display:none;font-size:13px;font-weight:600;color:#2c3e50;
-             margin-bottom:8px;padding:6px 10px;border-radius:5px;background:#f5f5f5;">
-    </div>
-
-    <!-- Optional description -->
-    <textarea id="report-desc" placeholder="Optional: what did you see? (max 200 chars)"
-      maxlength="200"
-      style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;
-             resize:vertical;min-height:54px;font-size:13px;box-sizing:border-box;
-             margin-bottom:12px;"></textarea>
-
-    <!-- Hidden form fields -->
-    <input type="hidden" id="report-lat" value="">
-    <input type="hidden" id="report-lon" value="">
-    <input type="hidden" id="report-type-val" value="">
-
-    <!-- Actions -->
-    <div style="display:flex;gap:8px;">
-      <button onclick="closeReportPanel()"
-        style="flex:1;padding:9px;background:#ecf0f1;border:none;border-radius:6px;
-               cursor:pointer;font-size:13px;">Cancel</button>
-      <button id="report-submit-btn" onclick="submitReport()" disabled
-        style="flex:1;padding:9px;background:#c0392b;color:#fff;border:none;
-               border-radius:6px;cursor:pointer;font-size:13px;opacity:0.45;
-               font-weight:600;">Submit Report</button>
-    </div>
-    <div id="report-msg" style="font-size:12px;margin-top:8px;color:#27ae60;"></div>
-  </div>
-</div>
-
-<!-- ── Backdrop ──────────────────────────────────────────────────────────── -->
-<div id="report-backdrop"
-  style="display:none;position:fixed;inset:0;z-index:9997;
-         background:rgba(0,0,0,0.35);" onclick="closeReportPanel()">
-</div>
-
-<script>
-// ── Report mode state ─────────────────────────────────────────────────────
-var _reportModeActive = false;
-var _selectedReportType = null;
-
-function toggleReportMode() {
-    _reportModeActive = !_reportModeActive;
-    var btn = document.getElementById('report-mode-btn');
-    if (_reportModeActive) {
-        btn.style.transform = 'scale(1.15)';
-        btn.style.background = '#922b21';
-        btn.title = 'Click the map to place your report';
-        // Small pulsing ring via outline animation
-        btn.style.outline = '3px solid #e74c3c';
-        btn.style.outlineOffset = '3px';
-        showToast('🚨 Report mode ON — click the map where the hazard is');
-    } else {
-        btn.style.transform = '';
-        btn.style.background = '#c0392b';
-        btn.style.outline = '';
-        closeReportPanel();
-    }
-}
-
-function showToast(msg) {
-    var t = document.getElementById('report-toast');
-    if (!t) {
-        t = document.createElement('div');
-        t.id = 'report-toast';
-        t.style.cssText = 'position:fixed;bottom:90px;right:16px;z-index:9999;' +
-            'background:#2c3e50;color:#fff;padding:10px 16px;border-radius:8px;' +
-            'font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.3);' +
-            'transition:opacity 0.4s;pointer-events:none;';
-        document.body.appendChild(t);
-    }
-    t.textContent = msg;
-    t.style.opacity = '1';
-    clearTimeout(t._hide);
-    t._hide = setTimeout(function() { t.style.opacity = '0'; }, 3000);
-}
-
-function openReportPanel(lat, lon) {
-    document.getElementById('report-lat').value = lat.toFixed(6);
-    document.getElementById('report-lon').value = lon.toFixed(6);
-    document.getElementById('report-loc-text').textContent =
-        lat.toFixed(5) + ', ' + lon.toFixed(5);
-    document.getElementById('report-panel').style.display = 'block';
-    document.getElementById('report-backdrop').style.display = 'block';
-    // Reset selections
-    _selectedReportType = null;
-    document.getElementById('report-type-val').value = '';
-    document.getElementById('report-desc').value = '';
-    document.getElementById('selected-type-display').style.display = 'none';
-    document.getElementById('report-msg').textContent = '';
-    document.querySelectorAll('.rtype-btn').forEach(function(b) {
-        b.style.fontWeight = '';
-        b.style.boxShadow = '';
-    });
-    updateSubmitBtn();
-}
-
-function closeReportPanel() {
-    document.getElementById('report-panel').style.display = 'none';
-    document.getElementById('report-backdrop').style.display = 'none';
-    _reportModeActive = false;
-    var btn = document.getElementById('report-mode-btn');
-    if (btn) {
-        btn.style.transform = '';
-        btn.style.background = '#c0392b';
-        btn.style.outline = '';
-    }
-}
-
-function selectReportType(typeKey, btnEl) {
-    _selectedReportType = typeKey;
-    document.getElementById('report-type-val').value = typeKey;
-    document.querySelectorAll('.rtype-btn').forEach(function(b) {
-        b.style.fontWeight = '';
-        b.style.boxShadow = '';
-    });
-    btnEl.style.fontWeight = '700';
-    btnEl.style.boxShadow = '0 0 0 2px ' + btnEl.style.borderColor;
-    var label = btnEl.textContent.trim();
-    var disp = document.getElementById('selected-type-display');
-    disp.textContent = 'Selected: ' + label;
-    disp.style.display = 'block';
-    updateSubmitBtn();
-}
-
-function updateSubmitBtn() {
-    var latOk = document.getElementById('report-lat').value !== '';
-    var typeOk = _selectedReportType !== null;
-    var btn = document.getElementById('report-submit-btn');
-    btn.disabled = !(latOk && typeOk);
-    btn.style.opacity = (latOk && typeOk) ? '1' : '0.45';
-}
-
-function submitReport() {
-    var lat  = document.getElementById('report-lat').value;
-    var lon  = document.getElementById('report-lon').value;
-    var type = document.getElementById('report-type-val').value;
-    var desc = document.getElementById('report-desc').value;
-    if (!lat || !type) return;
-
-    fetch('/report', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'report_type=' + encodeURIComponent(type) +
-              '&lat=' + encodeURIComponent(lat) +
-              '&lon=' + encodeURIComponent(lon) +
-              '&description=' + encodeURIComponent(desc),
-    })
-    .then(function(r) { return r.ok ? r.json() : Promise.reject('HTTP ' + r.status); })
-    .then(function(data) {
-        if (!data.ok) {
-            document.getElementById('report-msg').textContent = '❌ ' + (data.message || 'Error submitting report.');
-            document.getElementById('report-msg').style.color = '#c0392b';
-            return;
-        }
-        document.getElementById('report-msg').textContent = '✅ ' + (data.message || 'Report submitted! Thank you.');
-        document.getElementById('report-msg').style.color = '#27ae60';
-        document.getElementById('report-submit-btn').disabled = true;
-        // Reload the safety overlay so the new pin appears immediately
-        if (typeof loadSafetyOverlay === 'function') setTimeout(loadSafetyOverlay, 800);
-        setTimeout(closeReportPanel, 1800);
-    })
-    .catch(function(e) {
-        document.getElementById('report-msg').textContent = '❌ Error submitting report. Try again.';
-        document.getElementById('report-msg').style.color = '#c0392b';
-    });
-}
-
-// Listen for map clicks — open panel when report mode is on
-window.addEventListener('message', function(event) {
-    if (event.data && event.data.type === 'map_click' && _reportModeActive) {
-        openReportPanel(event.data.lat, event.data.lng);
-    }
-});
-</script>
-
-<!-- reports_map_js injected server-side -->
+{{ report_panel | safe }}
+{{ reports_map_js | safe }}
 
 <!-- ── SOS Panel (panic button + drawer) ───────────────────────────────── -->
 {{ sos_panel | safe }}
