@@ -294,21 +294,29 @@ def _fetch_ndrrmc_incidents() -> list:
             "radius": 500,
         },
         {
-            "url":    "https://bwssb.gov.in/rss",  # placeholder — swap for MMDA alt
-            "name":   "MMDA-alt",
+            "url":    "https://www.mmda.gov.ph/feed",
+            "name":   "MMDA-www",
             "itype":  None,
-            "radius": 400,
+            "radius": 500,
         },
     ]
 
     headers = {
-        "User-Agent": "Mozilla/5.0 SafeRoute/1.0 (safety research)",
-        "Accept":     "application/rss+xml, application/xml, text/xml, */*",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
+        ),
+        "Accept":          "application/rss+xml, application/xml, text/xml, */*",
+        "Accept-Language": "en-US,en;q=0.9",
     }
 
-    for src in working_sources[:2]:   # only first 2 stable ones
+    for src in working_sources:
         try:
-            resp = requests.get(src["url"], headers=headers, timeout=8)
+            # verify=False is required: PH government sites (PHIVOLCS, MMDA) have
+            # broken SSL intermediate cert chains that fail Python SSL but work in
+            # browsers. This is the correct fix — do NOT add SSL certs to the bundle.
+            resp = requests.get(src["url"], headers=headers, timeout=10, verify=False)
             if resp.status_code != 200:
                 print(f"[incidents] {src['name']} returned {resp.status_code}")
                 continue

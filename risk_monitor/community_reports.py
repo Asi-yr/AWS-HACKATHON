@@ -787,8 +787,17 @@ function showToast(msg) {{
 function openReportPanel(lat, lon) {{
     document.getElementById('report-lat').value = lat.toFixed(6);
     document.getElementById('report-lon').value = lon.toFixed(6);
+    // Show coordinates immediately, then replace with reverse-geocoded area name
     document.getElementById('report-loc-text').textContent =
         lat.toFixed(5) + ', ' + lon.toFixed(5);
+    fetch('/api/reverse?lat=' + lat + '&lon=' + lon)
+        .then(function(r) {{ return r.json(); }})
+        .then(function(d) {{
+            if (d && d.address) {{
+                document.getElementById('report-loc-text').textContent = d.address;
+            }}
+        }})
+        .catch(function() {{ /* keep raw coordinates if reverse geocode fails */ }});
     document.getElementById('report-panel').style.display = 'block';
     document.getElementById('report-backdrop').style.display = 'block';
     // Reset selections

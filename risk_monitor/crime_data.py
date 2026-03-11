@@ -264,6 +264,66 @@ def _load_crime_zones() -> list:
         return _ZONES_CACHE or []
 
 
+# ── City boundary definitions (authoritative bounding boxes) ──────────────────
+#
+# These are the canonical city boundaries used to prevent zone bleed-over.
+# A zone whose name contains a city keyword is ONLY valid inside that city's box.
+# This stops e.g. "bagong silang caloocan" from matching a coordinate in Valenzuela.
+#
+# Format: city_keyword → (lat_min, lat_max, lon_min, lon_max)
+_CITY_BOUNDS = {
+    "manila":        (14.556, 14.632, 120.956, 121.015),
+    "quezon city":   (14.615, 14.768, 120.990, 121.125),
+    "caloocan":      (14.630, 14.773, 120.942, 121.010),
+    "valenzuela":    (14.676, 14.758, 120.942, 120.999),
+    "malabon":       (14.644, 14.695, 120.942, 120.982),
+    "navotas":       (14.638, 14.682, 120.930, 120.959),
+    "marikina":      (14.605, 14.688, 121.076, 121.145),
+    "pasig":         (14.544, 14.614, 121.042, 121.106),
+    "taguig":        (14.484, 14.565, 121.020, 121.085),
+    "makati":        (14.535, 14.585, 120.993, 121.053),
+    "mandaluyong":   (14.566, 14.608, 121.016, 121.055),
+    "san juan":      (14.585, 14.622, 121.016, 121.050),
+    "paranaque":     (14.463, 14.527, 120.983, 121.048),
+    "las pinas":     (14.425, 14.488, 120.963, 121.027),
+    "muntinlupa":    (14.385, 14.455, 121.009, 121.068),
+    "pasay":         (14.527, 14.573, 120.985, 121.022),
+    "pateros":       (14.538, 14.562, 121.058, 121.085),
+}
+
+# Keywords in zone names that indicate city membership — checked in order (longest first)
+_CITY_KEYWORDS = sorted(_CITY_BOUNDS.keys(), key=len, reverse=True)
+
+
+def _get_city_for_coords(lat: float, lon: float) -> str | None:
+    """Return the canonical city name for (lat, lon), or None if not matched."""
+    # Use smallest matching box (most specific city)
+    best_city  = None
+    best_area  = float("inf")
+    for city, (lat_min, lat_max, lon_min, lon_max) in _CITY_BOUNDS.items():
+        if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+            area = (lat_max - lat_min) * (lon_max - lon_min)
+            if area < best_area:
+                best_city = city
+                best_area = area
+    return best_city
+
+
+def _zone_city_keyword(zone_name: str) -> str | None:
+    """
+    Returns the city keyword embedded in a zone name, or None.
+    E.g. "bagong silang caloocan" → "caloocan"
+         "grace park west"        → None  (no city suffix; zone itself is in caloocan
+                                          but name doesn't say so — skip city gate)
+    """
+    name_lower = zone_name.lower()
+    for keyword in _CITY_KEYWORDS:
+        # Whole-word boundary match so "manila" doesn't match "mandaluyong"
+        if re.search(r'(?<![a-z])' + re.escape(keyword) + r'(?![a-z])', name_lower):
+            return keyword
+    return None
+
+
 # ── Coordinate-based zone lookup ──────────────────────────────────────────────
 
 def _coord_zone_lookup(lat: float, lon: float) -> dict | None:
@@ -272,11 +332,19 @@ def _coord_zone_lookup(lat: float, lon: float) -> dict | None:
     Zones with coords defined always beat zones without.
     Among multiple hits, the one with the smallest area (most specific) wins.
 
+    City-awareness guard:
+        If a zone's name contains a city keyword (e.g. "caloocan", "valenzuela"),
+        it is only returned when (lat, lon) falls inside that city's canonical
+        boundary box. This prevents zones from one city being attributed to an
+        adjacent city when their bounding boxes happen to overlap.
+
     A zone's coords field must be [lat_min, lat_max, lon_min, lon_max].
     Zones without coords are skipped here (handled by text lookup).
     """
-    zones = _load_crime_zones()
-    best = None
+    zones    = _load_crime_zones()
+    coord_city = _get_city_for_coords(lat, lon)   # which city is this point in?
+
+    best      = None
     best_area = float("inf")
 
     for zone in zones:
@@ -284,11 +352,23 @@ def _coord_zone_lookup(lat: float, lon: float) -> dict | None:
         if not coords or len(coords) != 4:
             continue
         lat_min, lat_max, lon_min, lon_max = coords
-        if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
-            box_area = (lat_max - lat_min) * (lon_max - lon_min)
-            if box_area < best_area:
-                best = zone
-                best_area = box_area
+        if not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
+            continue
+
+        # ── City-awareness gate ──────────────────────────────────────────────
+        # If this zone's name explicitly names a city, only accept it when the
+        # coordinate falls inside that city's canonical boundary.
+        zone_city = _zone_city_keyword(zone.get("name", ""))
+        if zone_city and coord_city and zone_city != coord_city:
+            # The zone belongs to a different city than the coordinate — skip it.
+            # Example: "bagong silang caloocan" skipped for a Valenzuela coordinate.
+            continue
+        # ────────────────────────────────────────────────────────────────────
+
+        box_area = (lat_max - lat_min) * (lon_max - lon_min)
+        if box_area < best_area:
+            best      = zone
+            best_area = box_area
 
     return best
 
@@ -510,12 +590,18 @@ def scan_route_crime_zones(waypoints) -> list:
     found      = []
 
     for lat, lon in samples:
-        best      = None
-        best_area = float("inf")
+        best       = None
+        best_area  = float("inf")
+        coord_city = _get_city_for_coords(lat, lon)   # city the waypoint is in
 
         for zone in coord_zones:
             lat_min, lat_max, lon_min, lon_max = zone["coords"]
             if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+                # City-awareness gate: skip zones whose name names a different city
+                zone_city = _zone_city_keyword(zone.get("name", ""))
+                if zone_city and coord_city and zone_city != coord_city:
+                    continue
+
                 box_area = (lat_max - lat_min) * (lon_max - lon_min)
                 # Prefer smallest (most specific) box per waypoint
                 if box_area < best_area:

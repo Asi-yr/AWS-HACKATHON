@@ -573,6 +573,33 @@ def home():
                     apply_crime_both_ends(routes_data, orig_crime, dest_crime, commuter_type)
                     apply_route_crime_to_routes(routes_data, commuter_type)
 
+                    # Real-time incidents
+                    try:
+                        _incidents = get_active_incidents()
+                        apply_incidents_to_routes(
+                            routes_data, _incidents,
+                            orig_lat, orig_lon, dest_lat, dest_lon,
+                        )
+                    except Exception: pass
+
+                    # MMDA closures
+                    try:
+                        apply_mmda_to_routes(routes_data, None)
+                    except Exception: pass
+
+                    # Seismic risk
+                    try:
+                        _eqs = get_recent_earthquakes(hours_back=12)
+                        apply_seismic_to_routes(routes_data, _eqs)
+                    except Exception: pass
+
+                    # Vulnerable commuter profile
+                    try:
+                        _profile = request.form.get('vulnerable_profile', '')
+                        if _profile and _profile in PROFILES:
+                            apply_vulnerable_profile_to_routes(routes_data, _profile, weather)
+                    except Exception: pass
+
                     # Add NOAH flood layer to map
                     add_noah_flood_layer(m)
                     folium.LayerControl().add_to(m)
@@ -896,6 +923,11 @@ def get_routes():
             profile = data.get("vulnerable_profile", "")
             if profile and profile in PROFILES:
                 apply_vulnerable_profile_to_routes(routes, profile, weather)
+                from risk_monitor.vulnerable_profiles import get_infrastructure_warnings
+                for route in routes:
+                    coords = get_flat_route_coords(route)
+                    infra_warns = get_infrastructure_warnings(profile, coords)
+                    route.setdefault("profile_warnings", []).extend(infra_warns)
                 nav_response["profile_badge"] = get_profile_badge_html(profile)
             else:
                 nav_response["profile_badge"] = ""

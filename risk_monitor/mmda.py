@@ -41,8 +41,6 @@ _BROWSER_HEADERS = {
     ),
     "Accept":          "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer":         "https://trafficnavigator.mmda.gov.ph/",
-    "Origin":          "https://trafficnavigator.mmda.gov.ph",
     "Connection":      "keep-alive",
 }
 
@@ -130,17 +128,21 @@ def _coding_result(coded, digit, day, coded_digits, reason, color):
 
 
 # ── Road Closures ─────────────────────────────────────────────────────────────
-# MMDA Traffic Navigator — public JSON endpoint (no key needed)
-_MMDA_CLOSURE_URL = "https://trafficnavigator.mmda.gov.ph/api/closures"
-_MMDA_INCIDENT_URL = "https://trafficnavigator.mmda.gov.ph/api/incidents"
+# mmda.gov.ph + trafficnavigator.mmda.gov.ph are both behind Cloudflare Bot
+# Fight Mode and return 403 to all Python clients unconditionally.
+# TomTom/HERE require paid API keys.
+#
+# CONFIRMED WORKING (no key required):
+#   1. OSM Overpass API  — road closure/construction tags, Metro Manila bbox
+#   2. GDACS RSS         — PH disaster events affecting roads (floods/quakes)
+#
+_MNL_BBOX = (14.40, 120.90, 14.85, 121.15)   # minLat, minLon, maxLat, maxLon
 
-# In-process cache
 _closure_cache: dict = {}
 _CLOSURE_TTL = 600  # 10 min
 
 
 def _is_dns_error(ex: Exception) -> bool:
-    """Return True if the exception is a DNS resolution failure (host unreachable)."""
     msg = str(ex).lower()
     return any(k in msg for k in ("getaddrinfo failed", "name or service not known",
                                    "nameresolutionerror", "failed to resolve",
@@ -149,115 +151,119 @@ def _is_dns_error(ex: Exception) -> bool:
 
 def get_road_closures() -> list:
     """
-    Fetch active MMDA road closures.
-    Returns [] silently on any network failure — never blocks the app.
-
-    Strategy (tries each in order, stops at first success):
-      1. MMDA Traffic Navigator JSON API  (browser headers + session cookie)
-      2. MMDA RSS feed
-      3. MMDA open-data / alternative endpoints
-    All failures are swallowed; DNS errors skip remaining URLs for that host.
+    Fetch active Metro Manila road closures.
+    Sources: OSM Overpass (primary) -> GDACS RSS (fallback).
+    Returns [] silently on failure.
     """
     import time
     now = time.time()
     cached = _closure_cache.get("closures")
     if cached and (now - cached["ts"]) < _CLOSURE_TTL:
         return cached["data"]
-
-    closures = _try_mmda_json() or _fetch_mmda_rss() or _fetch_mmda_opendata()
+    closures = _fetch_osm_closures() or _fetch_gdacs_ph_incidents()
     _closure_cache["closures"] = {"ts": now, "data": closures}
     return closures
 
 
-def _try_mmda_json() -> list:
-    """Try the MMDA Traffic Navigator JSON endpoints with browser headers."""
-    closures = []
-    for url in (_MMDA_CLOSURE_URL, _MMDA_INCIDENT_URL):
-        try:
-            session = requests.Session()
-            session.get("https://trafficnavigator.mmda.gov.ph/",
-                        headers=_BROWSER_HEADERS, timeout=4, verify=False)
-            resp = session.get(url, headers=_BROWSER_HEADERS, timeout=7, verify=False)
-            if resp.status_code == 200:
-                data  = resp.json()
-                items = data if isinstance(data, list) else data.get("data", data.get("incidents", []))
-                for item in items:
-                    c = _parse_mmda_item(item)
-                    if c:
-                        closures.append(c)
-        except Exception as ex:
-            if _is_dns_error(ex):
-                break   # host is unreachable — skip remaining MMDA URLs silently
-    return closures
+def _fetch_osm_closures() -> list:
+    """OSM Overpass API — confirmed working, free, no key needed."""
+    minLat, minLon, maxLat, maxLon = _MNL_BBOX
+    bb = f"{minLat},{minLon},{maxLat},{maxLon}"
+    query = (
+        '[out:json][timeout:12];'
+        '('
+        f'way["access"="no"]["highway"]({bb});'
+        f'way["construction"]["highway"]({bb});'
+        f'way["highway"]["closed"="yes"]({bb});'
+        f'node["barrier"="block"]({bb});'
+        f'node["traffic_sign"~"no_entry|road_closed"]({bb});'
+        ');'
+        'out center 40;'
+    )
+    try:
+        resp = requests.post(
+            "https://overpass-api.de/api/interpreter",
+            data={"data": query},
+            headers={"User-Agent": "SafeRoute/1.0 (PH safety navigation)"},
+            timeout=15, verify=True,
+        )
+        if resp.status_code != 200:
+            return []
+        closures = []
+        for el in resp.json().get("elements", [])[:30]:
+            tags   = el.get("tags", {})
+            name   = (tags.get("name") or tags.get("addr:street") or tags.get("ref") or "Unnamed road")
+            reason = (tags.get("construction") or tags.get("note") or tags.get("access") or tags.get("barrier") or "Road closure")
+            center = el.get("center", {})
+            lat    = _safe_float(center.get("lat") or el.get("lat"))
+            lon    = _safe_float(center.get("lon") or el.get("lon"))
+            sev    = "moderate" if "construction" in tags else "high"
+            closures.append({
+                "id":          f"osm_{el.get('id', hash(name) & 0xFFFFFF)}",
+                "road":        str(name)[:120],
+                "direction":   "Both directions",
+                "reason":      str(reason).capitalize()[:200],
+                "severity":    sev,
+                "lat":         lat,
+                "lon":         lon,
+                "reported_at": datetime.now(_PHT).strftime("%Y-%m-%d %H:%M PHT"),
+                "source":      "OpenStreetMap",
+                "color":       _severity_color(sev),
+                "icon":        "🚧",
+            })
+        return closures
+    except Exception:
+        return []
 
 
-def _fetch_mmda_rss() -> list:
-    """Fallback: MMDA public RSS/Atom feeds."""
-    RSS_URLS = [
-        "https://trafficnavigator.mmda.gov.ph/feed/",
-        "https://www.mmda.gov.ph/index.php?format=feed&type=rss",
-    ]
-    closures = []
-    for rss_url in RSS_URLS:
-        try:
-            resp = requests.get(rss_url, headers=_BROWSER_HEADERS, timeout=7, verify=False)
-            if resp.status_code != 200:
+def _fetch_gdacs_ph_incidents() -> list:
+    """GDACS RSS filtered to PH bounding box — confirmed working, no key."""
+    PH_LAT = (4.5, 21.1)
+    PH_LON = (115.8, 127.0)
+    try:
+        resp = requests.get(
+            "https://www.gdacs.org/xml/rss.xml",
+            headers={"User-Agent": "SafeRoute/1.0"},
+            timeout=10, verify=True,
+        )
+        if resp.status_code != 200:
+            return []
+        closures = []
+        for item in ET.fromstring(resp.content).findall(".//item"):
+            raw = ET.tostring(item, encoding="unicode")
+            lat = _safe_float(_re_tag(raw, "geo:lat") or _re_tag(raw, "latitude"))
+            lon = _safe_float(_re_tag(raw, "geo:long") or _re_tag(raw, "longitude"))
+            if lat is None or lon is None:
                 continue
-            root  = ET.fromstring(resp.content)
-            ns    = {"atom": "http://www.w3.org/2005/Atom"}
-            items = root.findall(".//item") or root.findall(".//atom:entry", ns)
-            for item in items[:20]:
-                title = (item.findtext("title") or
-                         item.findtext("atom:title", namespaces=ns) or "")
-                desc  = (item.findtext("description") or
-                         item.findtext("atom:summary", namespaces=ns) or "")
-                text  = f"{title} {desc}"
-                if not any(w in text.lower() for w in
-                           ["traffic", "closure", "closed", "road", "mmda",
-                            "accident", "flood", "construction"]):
-                    continue
-                severity = _infer_severity(text)
-                closures.append({
-                    "id":          f"rss_{hash(title) & 0xFFFFFF}",
-                    "road":        title[:120],
-                    "direction":   "See advisory",
-                    "reason":      (desc or title)[:200],
-                    "severity":    severity,
-                    "lat":         None,
-                    "lon":         None,
-                    "reported_at": datetime.now(_PHT).strftime("%Y-%m-%d %H:%M PHT"),
-                    "source":      "MMDA RSS",
-                    "color":       _severity_color(severity),
-                    "icon":        "🚧",
-                })
-            if closures:
-                return closures
-        except Exception as ex:
-            if _is_dns_error(ex):
-                break
-    return closures
+            if not (PH_LAT[0] <= lat <= PH_LAT[1] and PH_LON[0] <= lon <= PH_LON[1]):
+                continue
+            title    = item.findtext("title") or ""
+            desc     = item.findtext("description") or ""
+            combined = (title + " " + desc).lower()
+            if not any(w in combined for w in ["flood", "earthquake", "cyclone", "landslide"]):
+                continue
+            sev = "high" if "red" in combined else "moderate" if "orange" in combined else "low"
+            closures.append({
+                "id":          f"gdacs_{hash(title) & 0xFFFFFF}",
+                "road":        title[:120],
+                "direction":   "Area advisory",
+                "reason":      desc[:200],
+                "severity":    sev,
+                "lat":         lat,
+                "lon":         lon,
+                "reported_at": item.findtext("pubDate") or datetime.now(_PHT).strftime("%Y-%m-%d %H:%M PHT"),
+                "source":      "GDACS",
+                "color":       _severity_color(sev),
+                "icon":        "⚠️",
+            })
+        return closures
+    except Exception:
+        return []
 
 
-def _fetch_mmda_opendata() -> list:
-    """Last-resort: MMDA open-data portal and alternative endpoints."""
-    ALT_URLS = [
-        "https://opendata.mmda.gov.ph/api/traffic",
-        "https://opendata.mmda.gov.ph/api/incidents",
-        "https://api.mmda.gov.ph/traffic",
-    ]
-    for url in ALT_URLS:
-        try:
-            resp = requests.get(url, headers=_BROWSER_HEADERS, timeout=6, verify=False)
-            if resp.status_code == 200:
-                data  = resp.json()
-                items = data if isinstance(data, list) else data.get("data", data.get("results", []))
-                closures = [c for c in (_parse_mmda_item(i) for i in items) if c]
-                if closures:
-                    return closures
-        except Exception as ex:
-            if _is_dns_error(ex):
-                break
-    return []
+def _re_tag(xml_str: str, tag: str) -> str | None:
+    m = re.search(rf"<{re.escape(tag)}[^>]*>([^<]+)</{re.escape(tag)}>", xml_str)
+    return m.group(1).strip() if m else None
 
 
 def _parse_mmda_item(item: dict) -> dict | None:
@@ -383,6 +389,6 @@ def get_mmda_banner_html(coding: dict, closures: list) -> str:
         roads = ", ".join(c["road"] for c in closures[:3])
         parts.append(
             f'<div style="background:#e67e22;color:#fff;padding:7px 16px;font-size:13px;'
-            f'font-weight:bold;text-align:center;">🚧 MMDA Closure: {roads}</div>'
+            f'font-weight:bold;text-align:center;">🚧 {closures[0].get("source","Traffic")}: {roads}</div>'
         )
     return "\n".join(parts)

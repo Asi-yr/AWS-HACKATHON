@@ -162,13 +162,13 @@ def get_weather_risk(lat: float, lon: float) -> dict:
         }
     """
 
-    # return {
-    #     "ok": True, "risk_level": "storm",
-    #     "description": "TEST STORM", "temp_c": 22,
-    #     "feels_like_c": 20, "humidity_pct": 95,
-    #     "wind_kph": 85, "rain_mm": 40,
-    #     "color": "#6c3483", "fetched_at": "TEST", "error": None,
-    # }
+    return {
+        "ok": True, "risk_level": "storm",
+        "description": "TEST STORM", "temp_c": 22,
+        "feels_like_c": 20, "humidity_pct": 95,
+        "wind_kph": 85, "rain_mm": 40,
+        "color": "#6c3483", "fetched_at": "TEST", "error": None,
+    }
 
     params = {
         "latitude":            lat,
