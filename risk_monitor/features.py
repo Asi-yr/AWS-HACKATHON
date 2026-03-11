@@ -177,19 +177,15 @@ _COMMUTER_BASE = {
     # These are the MAXIMUM scores achievable on a calm, short, hazard-free trip.
     # Hazard deductions (night, crime, weather, flood) subtract from this.
     #
-    #   walk      68  — fully exposed, no crash protection, slowest (most time exposed)
-    #   bike      72  — exposed but faster; can use bike lanes / pavements
-    #   motorcycle 76 — faster but exposed; higher accident severity
-    #   transit   82  — enclosed vehicle, driver takes most risk; crowd/pickpocket exposure
-    #   car       88  — most crash protection, enclosed, controlled speed
-    #
-    # The 20-pt spread (walk 68 → car 88) is intentional and realistic:
-    # a car driver in the same crime/weather conditions is genuinely safer.
-    "walk":       68.0,
-    "bike":       72.0,
-    "motorcycle": 76.0,
-    "transit":    76.0,   # lowered: commuting = walking to stops + riding + transfers — more exposed than a private vehicle
-    "car":        88.0,
+    #   All modes start at 100. A hazard-free trip scores 100/100.
+    #   Differentiation is entirely through the penalty tables — walk and bike
+    #   take larger hits from night/crime/weather than car, reflecting real
+    #   exposure differences without baking in a starting disadvantage.
+    "walk":       100.0,
+    "bike":       100.0,
+    "motorcycle": 100.0,
+    "transit":    100.0,
+    "car":        100.0,
 }
 
 # Per-mode speed threshold: avg trip speed above this starts incurring a penalty.
