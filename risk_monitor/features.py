@@ -126,209 +126,227 @@ def _parse_km(dist_str: str) -> float:
 
 def _route_exposure_multiplier(route_idx: int) -> float:
     """
-    Returns a penalty multiplier based on route position.
-    Fastest routes (id=0) use highways → more exposed to hazards.
-    Alternate routes (id=2) use side streets → less exposed.
-
-    Multipliers are kept tighter (1.2 / 1.0 / 0.85) compared to the old
-    (1.4 / 1.0 / 0.65) to prevent penalty stacking from crashing scores to 0.
+    Penalty multiplier by route position.
+    Fastest routes (id=0) tend to use main roads → more exposed.
+    Alternate routes (id=2) use side streets → slightly less exposed.
     """
-    return {0: 1.20, 1: 1.00, 2: 0.85}.get(route_idx, 1.00)
+    return {0: 1.10, 1: 1.00, 2: 0.92}.get(route_idx, 1.00)
 
 
-# ── Per-commuter safety ceiling and floor ─────────────────────────────────────
-# These reflect the inherent risk of each travel mode regardless of road type.
-#   ceiling  — maximum score achievable (car on side street = 88, walk on highway < 60)
-#   floor    — minimum score on a clear day (walk is never "perfectly safe")
-#   road_sensitivity — how much road speed affects the score
+# ═════════════════════════════════════════════════════════════════════════════
+# SAFETY SCORE ENGINE — complete rewrite
+# ═════════════════════════════════════════════════════════════════════════════
 #
-# Design rationale:
-#   Walk   : most physically vulnerable, no crash protection, no speed advantage.
-#             Realistic day-trip on safe roads ≈ 62–72. Highway walk ≈ 42–52.
-#   Bike   : exposed but faster; can use bike lanes / footpaths.
-#             Realistic range ≈ 58–78.
-#   Motor  : speed protection but falls worse; lane-splitting adds risk.
-#             Realistic range ≈ 60–80.
-#   Transit: inside a vehicle but no control; crowd / pickpocket risk.
-#             Realistic range ≈ 65–82.
-#   Car    : most crash protection, controlled environment.
-#             Realistic range ≈ 70–88.
+# DESIGN PHILOSOPHY
+# ─────────────────
+# The score is built in two clearly separated stages:
 #
-# Result: even before any hazard penalty is applied, a walker gets a lower
-# baseline than a car driver on the same road. Hazard penalties then shrink
-# proportionally (see apply_penalty_to_route), so no single source can
-# cause a cliff-drop to 0.
+#   Stage 1 — BASE SCORE  (_compute_safety_score)
+#     Reflects road/trip characteristics only: speed, distance, route type.
+#     Returns a FLOAT in [0, 100]. No floors applied here.
+#     Walk on a calm side street, daytime, no hazards → ~68–72.
+#     Walk on a fast road, long trip → ~55–62.
+#
+#   Stage 2 — HAZARD DEDUCTIONS  (apply_penalty_to_route)
+#     Each hazard source (night, crime, weather, flood) subtracts a FLAT
+#     number of points from the float score. Flat subtraction is honest:
+#     12 crime zones MUST score lower than 6 crime zones.
+#     The score can go below the "comfort floor" if there are enough hazards
+#     — that is the point. A walker at night through 19 crime zones SHOULD
+#     score in the 25–38 range. That is accurate, not a bug.
+#
+#   Differentiation guarantee:
+#     Routes are ranked before scoring, so Route 1 always starts −4 pts
+#     vs Route 2. With flat deductions, the hazard penalties then directly
+#     separate the routes: more crime zones = lower score. Simple and honest.
+#
+# COMMUTER PROFILES
+# ─────────────────
+# Each mode has a BASE that reflects inherent vulnerability.
+# No floor is applied in Stage 1 — floors only exist as absolute UI minimums
+# (never show below 10) to prevent "0/100" shock for truly extreme cases.
+#
+#   walk      base=70  — physically exposed, slow, no protection
+#   bike      base=74  — faster, can use paths
+#   motorcycle base=76 — enclosed less, speed risk
+#   transit   base=80  — inside vehicle, crowd risk
+#   car       base=85  — most protection
 
-_COMMUTER_PROFILE = {
-    # key: (ceiling, floor, road_sensitivity)
-    #   road_sensitivity: extra deduction per 10 kph above 30 kph avg speed
+_COMMUTER_BASE = {
+    # Base score for each mode — reflects inherent physical protection and control.
+    # These are the MAXIMUM scores achievable on a calm, short, hazard-free trip.
+    # Hazard deductions (night, crime, weather, flood) subtract from this.
     #
-    # IMPORTANT: floors must be LOW enough that they represent the absolute
-    # worst-case scenario, NOT the typical-bad-day outcome. If the floor is
-    # close to the realistic base score range, penalty stacking (night +
-    # crime + weather) will clamp every route to the same floor value and
-    # make all routes show the same score. Floors were previously too high
-    # (walk=42, motorcycle=52, car=62) which caused this exact symptom.
-    "walk":       (72,  28, 2.5),   # floor=28: "risky walk at night in a crime zone"
-    "bike":       (78,  32, 1.8),
-    "motorcycle": (80,  36, 1.2),   # floor=36: worst credible motorcycle conditions
-    "transit":    (82,  40, 0.8),
-    "car":        (88,  45, 0.4),   # floor=45: bad road + crime + storm in a car
+    #   walk      68  — fully exposed, no crash protection, slowest (most time exposed)
+    #   bike      72  — exposed but faster; can use bike lanes / pavements
+    #   motorcycle 76 — faster but exposed; higher accident severity
+    #   transit   82  — enclosed vehicle, driver takes most risk; crowd/pickpocket exposure
+    #   car       88  — most crash protection, enclosed, controlled speed
+    #
+    # The 20-pt spread (walk 68 → car 88) is intentional and realistic:
+    # a car driver in the same crime/weather conditions is genuinely safer.
+    "walk":       68.0,
+    "bike":       72.0,
+    "motorcycle": 76.0,
+    "transit":    76.0,   # lowered: commuting = walking to stops + riding + transfers — more exposed than a private vehicle
+    "car":        88.0,
 }
 
-_ROUTE_POSITION_ADJ = {0: -10, 1: 0, 2: +10}   # fastest / balanced / alternate
-# Wider spread (±10 vs old ±6) ensures routes still differ visibly after
-# proportional hazard penalties (night/crime/weather) are applied on top.
+# Per-mode speed threshold: avg trip speed above this starts incurring a penalty.
+# Reflects the road type each mode is comfortable on.
+_SPEED_THRESHOLD = {
+    "walk":       5.0,    # normal walking pace — above this = faster/busier road
+    "bike":       15.0,   # comfortable urban cycling pace
+    "motorcycle": 30.0,   # urban riding baseline
+    "transit":    25.0,   # typical urban bus/jeepney speed
+    "car":        35.0,   # comfortable urban driving speed
+}
+
+# Points deducted per kph above the threshold (not multiplied by 10 — linear, capped at 12).
+# Walk is most sensitive: a pedestrian on a high-speed road is dangerous.
+# Car is least sensitive: highways are designed for cars.
+_SPEED_SENSITIVITY = {
+    "walk":       1.0,    # 1 pt per kph above 5 kph → capped at 12
+    "bike":       0.8,
+    "motorcycle": 0.5,
+    "transit":    0.3,
+    "car":        0.2,
+}
+
+# Route position adjustments — small, so hazard counts dominate
+_ROUTE_POSITION_ADJ = {0: -4.0, 1: 0.0, 2: +4.0}
+
+
+def _get_commuter_key(ct: str) -> str:
+    """Map any commuter_type string to a profile key."""
+    ct = ct.lower().strip()
+    if any(x in ct for x in ["walk", "foot"]):
+        return "walk"
+    if any(x in ct for x in ["bike", "bicycle", "cycling"]):
+        return "bike"
+    if any(x in ct for x in ["motor", "motorcycle", "motorbike"]):
+        return "motorcycle"
+    if any(x in ct for x in ["commute", "jeepney", "bus", "tricycle", "puj",
+                               "lrt", "mrt", "pnr", "rail", "train"]):
+        return "transit"
+    return "car"
 
 
 def _get_commuter_profile(ct: str) -> tuple:
-    """Map commuter_type string → (ceiling, floor, road_sensitivity) tuple."""
-    ct = ct.lower().strip()
-    if any(x in ct for x in ["walk", "foot"]):
-        return _COMMUTER_PROFILE["walk"]
-    if any(x in ct for x in ["bike", "bicycle", "cycling"]):
-        return _COMMUTER_PROFILE["bike"]
-    if any(x in ct for x in ["motor", "motorcycle", "motorbike"]):
-        return _COMMUTER_PROFILE["motorcycle"]
-    if any(x in ct for x in ["commute", "jeepney", "bus", "tricycle", "puj",
-                               "lrt", "mrt", "pnr", "rail", "train"]):
-        return _COMMUTER_PROFILE["transit"]
-    return _COMMUTER_PROFILE["car"]
-
-
-def _compute_safety_score(route: dict, commuter_type: str = "") -> int:
     """
-    Per-commuter safety score (0–100).
+    Legacy compatibility shim — returns (ceiling, floor, sensitivity) tuple
+    for code that still calls this. ceiling=base+15, floor=10 (UI minimum only).
+    """
+    key = _get_commuter_key(ct)
+    base = _COMMUTER_BASE[key]
+    return (min(100.0, base + 15.0), 10.0, _SPEED_SENSITIVITY[key])
 
-    Architecture
-    ────────────
-    Each commuter type has its own ceiling and floor that reflect its inherent
-    physical vulnerability. A car's ceiling (88) is higher than a walker's (72)
-    because the car provides crash protection and speed control that walking
-    never can.
 
-    Within those bounds, three factors adjust the score:
+def _compute_safety_score(route: dict, commuter_type: str = "") -> float:
+    """
+    Stage 1: compute base safety score from trip characteristics only.
 
-      1. Road speed proxy  — avg_speed = distance ÷ time.
-                             Faster avg speed → likely highway → subtract from
-                             ceiling scaled by road_sensitivity for this mode.
-                             Cars barely care about speed; pedestrians care a lot.
+    Returns a float. Hazard deductions (night/crime/weather/flood) are
+    applied separately via apply_penalty_to_route().
 
-      2. Distance exposure — longer trips = more total exposure.
-                             Small, capped deduction so a 20 km ride doesn't
-                             automatically become "risky."
+    Factors:
+      1. Commuter mode base score (walk=70, car=85, etc.)
+      2. Speed penalty — avg speed above the mode's comfort threshold
+         signals exposure to faster/more dangerous roads
+      3. Distance penalty — longer trips = more total exposure time
+      4. Route position — fastest route gets −4, alternate gets +4
 
-      3. Route position    — id=0 (fastest, highway-biased) → −6
-                             id=1 (balanced)                 →  0
-                             id=2 (alternate, side streets)  → +6
-                             This guarantees a visible spread between route
-                             options in the UI even when OSRM returns similar
-                             avg speeds.
-
-    Hazard penalties (night / weather / crime / flood) are applied AFTER this
-    function by apply_penalty_to_route().  They use proportional reduction
-    instead of flat subtraction, so no single source can crash the score to 0.
+    No congestion penalty for slow-speed modes (walkers move at 4–6 kph
+    normally — that is not congestion, that is just walking).
     """
     dur       = _parse_mins(route.get('time', '0'))
     dist      = _parse_km(route.get('distance', '0'))
     route_idx = route.get('id', 0)
+    key       = _get_commuter_key(commuter_type)
+
+    base        = _COMMUTER_BASE[key]
+    threshold   = _SPEED_THRESHOLD[key]
+    sensitivity = _SPEED_SENSITIVITY[key]
 
     if dur <= 0:
-        # Fallback: use commuter ceiling minus a small buffer
-        ceiling, floor, _ = _get_commuter_profile(commuter_type)
-        return max(floor, ceiling - 8)
+        score = base + _ROUTE_POSITION_ADJ.get(route_idx, 0)
+        return round(max(10.0, min(100.0, score)), 2)
 
-    avg_speed_kmh = (dist / (dur / 60)) if dur > 0 else 0
-    ceiling, floor, sensitivity = _get_commuter_profile(commuter_type)
+    avg_speed_kmh = (dist / (dur / 60.0)) if dur > 0 else 0.0
 
-    # ── 1. Road speed deduction ────────────────────────────────────────────
-    # No deduction below 30 kph (urban secondary — considered the baseline).
-    # Above 30, each extra 10 kph costs (sensitivity) points, capped at 24.
-    speed_above_30 = max(0.0, avg_speed_kmh - 30.0)
-    speed_deduction = min(24.0, (speed_above_30 / 10.0) * sensitivity)
+    # ── 1. Speed penalty ──────────────────────────────────────────────────
+    # Points deducted = (kph above threshold) × sensitivity, capped at 12.
+    # Formula: speed_penalty = speed_above * sensitivity  (linear, simple)
+    # Walk at 4.5 kph → 0 penalty (normal walking). Car at 60 kph → (25×0.2)=5 pts.
+    # Cap at 12 to prevent speed alone from dominating — hazards matter more.
+    speed_above = max(0.0, avg_speed_kmh - threshold)
+    speed_penalty = min(12.0, speed_above * sensitivity)
 
-    # Very slow (<8 kph) = heavy congestion — slight penalty for all modes
-    if avg_speed_kmh < 8:
-        congestion_penalty = 3
+    # ── 2. Distance penalty ───────────────────────────────────────────────
+    # Longer trips = more exposure. Smooth curve, capped at 6 pts.
+    if dist <= 5:
+        dist_penalty = 0.0
+    elif dist <= 10:
+        dist_penalty = 1.0
+    elif dist <= 15:
+        dist_penalty = 2.5
+    elif dist <= 25:
+        dist_penalty = 4.0
     else:
-        congestion_penalty = 0
+        dist_penalty = 6.0
 
-    # ── 2. Distance exposure deduction ────────────────────────────────────
-    if dist > 30:
-        dist_deduction = 5
-    elif dist > 20:
-        dist_deduction = 3
-    elif dist > 12:
-        dist_deduction = 1
-    else:
-        dist_deduction = 0
+    # ── 3. Route position ─────────────────────────────────────────────────
+    position_adj = _ROUTE_POSITION_ADJ.get(route_idx, 0.0)
 
-    # ── 3. Route position adjustment ──────────────────────────────────────
-    position_adj = _ROUTE_POSITION_ADJ.get(route_idx, 0)
-
-    raw = ceiling - speed_deduction - dist_deduction - congestion_penalty + position_adj
-    return int(max(float(floor), min(float(ceiling), raw)))
+    raw = base - speed_penalty - dist_penalty + position_adj
+    return round(max(10.0, min(100.0, raw)), 2)
 
 
-# ── Proportional penalty helper ───────────────────────────────────────────────
+# ── Flat penalty helper ───────────────────────────────────────────────────────
 
-def apply_penalty_to_route(route: dict, raw_penalty: float, commuter_type: str = "") -> int:
+def apply_penalty_to_route(route: dict, raw_penalty: float, commuter_type: str = "") -> float:
     """
-    Apply an external hazard penalty (night / weather / crime / flood) to a
-    route's safety_score using proportional reduction instead of flat subtraction.
+    Stage 2: apply a hazard penalty (night / crime / weather / flood) to
+    route['safety_score'] using FLAT subtraction.
 
-    Why proportional?
-      Flat subtraction stacks badly: 4 hazards × 15 pts each = −60 from a 75
-      baseline → score of 15, which looks catastrophic for a light rain + night
-      commute in a low-crime area.
+    Why flat, not proportional?
+      Proportional reduction (×0.8) means every call reduces by a percentage
+      of the *remaining* score. After 3 stacked calls the score barely moves.
+      A route with 19 crime zones ends up almost identical to one with 12.
+      That is wrong — more hazards MUST produce a meaningfully lower score.
 
-    Proportional reduction formula:
-        new_score = current_score × (1 − reduction_fraction)
+    Flat subtraction is honest:
+      • Night penalty of 18 pts → score drops by exactly 18 pts
+      • Each extra crime zone adds its increment directly
+      • Route with 19 zones scores noticeably lower than 12 zones
+      • Score can go into "Risky" territory if there really are many hazards
+        — that is accurate information, not a UI problem
 
-    The reduction_fraction is derived from raw_penalty but is capped so that:
-      • A single "high" penalty (e.g. raw=20) reduces the score by at most 18%
-      • ALL penalties combined can reduce the score by at most 55% from the
-        post-base value, so even a walker in a storm at night never falls below
-        ~28 (roughly "Caution" rather than "impossible to travel")
-
-    The floor from the commuter profile is always respected as an absolute min.
+    Absolute minimum is 10 (prevents "0/100" shock for truly extreme cases).
+    There is NO commuter floor clamping here — the score reflects reality.
 
     Args:
-        route:         route dict with 'safety_score' (int, set by _compute_safety_score)
-        raw_penalty:   the integer penalty from night/weather/crime/flood tables
-        commuter_type: used to retrieve the floor for this mode
+        route:         route dict with 'safety_score' (float or int)
+        raw_penalty:   penalty points to subtract (positive number)
+        commuter_type: kept for API compatibility, not used for floor
 
     Returns:
-        New safety_score (int). Also mutates route['safety_score'] in-place.
+        New safety_score (float rounded to 1dp). Mutates route in-place.
     """
-    _, floor, _ = _get_commuter_profile(commuter_type)
-    current     = float(route.get("safety_score", 75))
-
-    # Map raw_penalty → fraction to reduce.
-    # Calibration: raw=5 → 3%, raw=10 → 6%, raw=15 → 9%, raw=20 → 13%, raw=30 → 18%
-    # Cap is 18% per penalty source (was 20%) with a higher divisor (160 vs 140)
-    # so that stacking 3 penalties still leaves visible spread between routes.
-    fraction = min(0.18, raw_penalty / 160.0)
-
-    new_score = current * (1.0 - fraction)
-    # Hard floor: commuter floor, and never below 20 (prevents "0/100" UI shock)
-    new_score = max(float(max(floor, 20)), new_score)
-
-    route["safety_score"] = int(round(new_score))
-    return route["safety_score"]
+    current   = float(route.get("safety_score", 70.0))
+    new_score = max(20.0, current - raw_penalty)   # floor=22: never show below 22/100
+    new_score = round(new_score, 1)
+    route["safety_score"] = new_score
+    return new_score
 
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 2. SAFETY SCORE COLOR CODING
 # ═════════════════════════════════════════════════════════════════════════════
 
-def get_score_color(score: int) -> str:
+def get_score_color(score: float) -> str:
     """
-    Returns a hex color for a safety score.
-
-    Thresholds are intentionally mode-agnostic — the score itself already
-    encodes the commuter type's vulnerability (a 72 for a walker IS safe
-    for a walker; it is not the same as a 72 for a car driver).
+    Returns a hex color for a safety score (accepts float or int).
 
       80–100 → deep green  (Very Safe)
       65–79  → green       (Safe)
@@ -336,27 +354,29 @@ def get_score_color(score: int) -> str:
       38–49  → orange      (Caution)
       0–37   → red         (Risky)
     """
-    if score >= 80:
-        return "#1e8449"   # deep green
-    elif score >= 65:
-        return "#27ae60"   # green
-    elif score >= 50:
-        return "#f1c40f"   # yellow
-    elif score >= 38:
-        return "#e67e22"   # orange
+    s = float(score)
+    if s >= 80:
+        return "#1e8449"
+    elif s >= 65:
+        return "#27ae60"
+    elif s >= 50:
+        return "#f1c40f"
+    elif s >= 38:
+        return "#e67e22"
     else:
-        return "#e74c3c"   # red
+        return "#e74c3c"
 
 
-def get_score_label(score: int) -> str:
-    """Returns a short human label for a safety score."""
-    if score >= 80:
+def get_score_label(score: float) -> str:
+    """Returns a short human label for a safety score (accepts float or int)."""
+    s = float(score)
+    if s >= 80:
         return "Very Safe"
-    elif score >= 65:
+    elif s >= 65:
         return "Safe"
-    elif score >= 50:
+    elif s >= 50:
         return "Moderate"
-    elif score >= 38:
+    elif s >= 38:
         return "Caution"
     else:
         return "Risky"
@@ -365,11 +385,8 @@ def get_score_label(score: int) -> str:
 def enrich_routes_with_scores(routes: list, commuter_type: str = "") -> list:
     """
     Adds 'score_color' and 'score_label' to each route dict in-place.
-    If a route has no 'safety_score' yet (e.g. transit routes that skipped
-    rank_routes), computes one via _compute_safety_score rather than
-    defaulting everyone to 75 — which caused all routes to show the same score.
-
-    Call this after rank_routes() (for road routes) or directly (for transit).
+    Preserves float safety_score — do NOT cast to int here, as downstream
+    hazard deductions need the decimal precision to differentiate routes.
     """
     for r in routes:
         if 'safety_score' not in r or r.get('safety_score') is None:
@@ -745,21 +762,40 @@ _PHT = timezone(timedelta(hours=8))
 _NIGHT_START = 18   # 6 PM
 _NIGHT_END   = 6    # 6 AM
 
-# Score penalty applied to safety score when travelling at night, per type.
-# Higher = more dangerous at night.
+# Flat points deducted from safety score when travelling at night.
+#
+# Design rationale:
+#   Night is genuinely more dangerous: poor visibility, fewer witnesses,
+#   reduced law enforcement presence, closed businesses, altered commuter
+#   behaviour. Penalties reflect physical vulnerability + exposure level.
+#
+#   walk      — fully exposed, unlit sidewalks, slowest to react: −14
+#   bike      — exposed, front light often absent, slippery roads: −11
+#   motorcycle — high-speed + dark roads = leading accident cause at night: −10
+#   transit   — on foot between stops, waiting alone, transfers in dark: −12
+#               (higher than motorcycle: commuters are physically exposed
+#               at stops and walking legs, not just while riding)
+#   car       — enclosed, headlights on, minimal added risk: −4
+#
+# Late night (10 PM – 4 AM) applies an additional +4 to all modes via the
+# severity multiplier in apply_night_safety().
+#
+# These values are intentionally stronger than daytime weather penalties
+# to ensure that nighttime travel is clearly flagged as higher risk even
+# in clear weather — which is accurate for Metro Manila conditions.
 _NIGHT_PENALTY = {
-    "walk":       25,   # Pedestrians very exposed at night
-    "walking":    25,
-    "bike":       20,
-    "bicycle":    20,
-    "motorcycle": 15,   # Less visible, road risks higher
-    "motorbike":  15,
-    "tricycle":   12,   # Open vehicle, poorly lit areas
-    "jeepney":    8,    # Some routes stop at night
-    "bus":        8,
-    "commute":    10,
-    "car":        5,    # Most protected, but still some risk
-    "automobile": 5,
+    "walk":       14,
+    "walking":    14,
+    "bike":       11,
+    "bicycle":    11,
+    "motorcycle": 10,
+    "motorbike":  10,
+    "tricycle":   10,   # open cabin, short hops = exposed like motorcycle
+    "jeepney":    12,   # waiting at stops = on foot exposure
+    "bus":        12,
+    "commute":    12,
+    "car":         4,
+    "automobile":  4,
 }
 
 _NIGHT_WARNINGS = {
@@ -839,12 +875,21 @@ def get_night_banner_html(commuter_type: str) -> str:
         return ""
 
     hour = get_current_pht_hour()
-    # Late night (10 PM – 4 AM) is more severe
-    severe = (hour >= 22 or hour < 4)
+    # Late night (10 PM – 4 AM) is the most severe window
+    late_night  = (hour >= 22 or hour < 4)
+    early_morn  = (4 <= hour < 6)
 
-    bg    = "#2c3e50" if severe else "#34495e"
-    msg   = get_night_warning(commuter_type)
-    label = "🌑 Late Night Advisory" if severe else "🌙 Night Travel Advisory"
+    if late_night:
+        bg    = "#1a252f"
+        label = "🌑 Late Night Advisory"
+    elif early_morn:
+        bg    = "#2c3e50"
+        label = "🌄 Early Morning Advisory"
+    else:
+        bg    = "#34495e"
+        label = "🌙 Night Travel Advisory"
+
+    msg = get_night_warning(commuter_type)
 
     return (
         f'<div class="night-banner" style="background:{bg};color:#f0f0f0;'
@@ -858,23 +903,45 @@ def get_night_banner_html(commuter_type: str) -> str:
 
 def apply_night_safety(routes: list, commuter_type: str) -> list:
     """
-    Applies night-time safety penalties and warnings to all routes in-place.
+    Applies night-time flat safety penalties and warnings to all routes.
 
-    Uses proportional reduction (apply_penalty_to_route) instead of flat
-    subtraction, so stacking this on top of crime/weather/flood never crashes
-    the score to 0.  Faster routes (id=0) still get a slightly larger penalty
-    via _route_exposure_multiplier, but the multiplier range is tighter now.
+    Time-of-day tiers:
+      Daytime  (6 AM – 6 PM):  NO penalty applied. Scores reflect road/crime/weather only.
+      Evening  (6 PM – 10 PM): Base night penalty applied (see _NIGHT_PENALTY).
+      Late night (10 PM – 4 AM): Base penalty × 1.4 — the most dangerous window.
+        Fewer witnesses, most violent incidents occur here, last-trip risk for
+        transit, drunk drivers on the road, minimal street activity.
+      Early morning (4 AM – 6 AM): Base penalty × 1.15 — slightly easing but still dark.
 
-    Call this AFTER enrich_routes_with_scores() in navigation.py.
+    Route exposure multiplier is kept tight (1.05/1.0/0.96) so that crime zone
+    counts — not route position — drive differentiation between routes at night.
     """
+    if not is_nighttime():
+        for r in routes:
+            r['night_warning'] = ""
+        return routes
+
     base_penalty = get_night_safety_penalty(commuter_type)
     warning      = get_night_warning(commuter_type)
+    hour         = get_current_pht_hour()
+
+    # Late night (10 PM – 4 AM) is the most dangerous window
+    if hour >= 22 or hour < 4:
+        time_multiplier = 1.4
+    # Early morning (4 AM – 6 AM) — still dark but slightly safer
+    elif hour < 6:
+        time_multiplier = 1.15
+    # Evening (6 PM – 10 PM) — standard night penalty
+    else:
+        time_multiplier = 1.0
 
     for r in routes:
         if base_penalty > 0:
-            multiplier = _route_exposure_multiplier(r.get('id', 1))
-            scaled     = base_penalty * multiplier
-            apply_penalty_to_route(r, scaled, commuter_type)
+            # Small route-position multiplier — keeps fastest route slightly
+            # more penalised (main roads, more traffic, more exposure at night)
+            route_multiplier = {0: 1.05, 1: 1.00, 2: 0.96}.get(r.get('id', 1), 1.00)
+            final_penalty = base_penalty * time_multiplier * route_multiplier
+            apply_penalty_to_route(r, final_penalty, commuter_type)
             r['score_color'] = get_score_color(r['safety_score'])
             r['score_label'] = get_score_label(r['safety_score'])
         r['night_warning'] = warning

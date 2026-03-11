@@ -29,6 +29,31 @@ from risk_monitor.community_reports import (
 from risk_monitor.crime_data import get_crime_risk_for_area  # used by home() POST path
 from rss import build_rss
 from risk_monitor.incidents import get_active_incidents, apply_incidents_to_routes, get_incidents_map_data
+
+# ── New module integrations ────────────────────────────────────────────────────
+from risk_monitor.mmda import (
+    get_number_coding, get_road_closures,
+    apply_mmda_to_routes, get_mmda_banner_html,
+)
+from risk_monitor.phivolcs import (
+    get_recent_earthquakes, apply_seismic_to_routes,
+    get_seismic_banner_html, get_epicenter_map_js,
+)
+from risk_monitor.safe_spots import (
+    apply_safe_spots_to_routes, get_safe_spots_js,
+    get_safe_spots_near, get_route_safe_spots_js, get_flat_route_coords, get_spots_for_coords,
+)
+from risk_monitor.vulnerable_profiles import (
+    apply_vulnerable_profile_to_routes, get_profile_badge_html,
+    PROFILES,
+)
+from risk_monitor.sos import (
+    init_sos_tables, get_trusted_contacts,
+    add_trusted_contact, remove_trusted_contact,
+    log_sos_event, get_sos_panel_html,
+    get_trusted_contacts_settings_html,
+)
+
 USE_MYSQL = False
 
 if USE_MYSQL:
@@ -41,6 +66,7 @@ else:
 chDB_perf.init_db()
 init_user_tables(chDB_perf)
 init_report_tables(chDB_perf)
+init_sos_tables(chDB_perf)
 app = Flask(__name__)
 app.secret_key = 'saferoute_super_secret_key'
 
@@ -522,10 +548,30 @@ def home():
                         orig_lat, orig_lon, dest_lat, dest_lon,
                     )
 
-                    # Crime zone risk (static JSON + community report bump)
-                    from risk_monitor.crime_data import apply_crime_to_routes, get_crime_risk_with_reports
-                    crime = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
-                    apply_crime_to_routes(routes_data, crime, commuter_type)
+                    # Crime zone risk — check BOTH origin AND destination, scan route paths
+                    from risk_monitor.crime_data import (
+                        apply_crime_both_ends, get_crime_risk_with_reports,
+                        scan_route_crime_zones, apply_route_crime_to_routes,
+                    )
+                    orig_crime = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
+                    dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
+
+                    for route in routes_data:
+                        wps = []
+                        if route.get("segments"):
+                            for seg in route["segments"]:
+                                sc = seg.get("coords", [])
+                                if sc and isinstance(sc[0], list) and isinstance(sc[0][0], list):
+                                    for sub in sc:
+                                        wps.extend(sub)
+                                else:
+                                    wps.extend(sc)
+                        if not wps and route.get("coords"):
+                            wps = route["coords"]
+                        route["route_crime_zones"] = scan_route_crime_zones(wps)
+
+                    apply_crime_both_ends(routes_data, orig_crime, dest_crime, commuter_type)
+                    apply_route_crime_to_routes(routes_data, commuter_type)
 
                     # Add NOAH flood layer to map
                     add_noah_flood_layer(m)
@@ -556,6 +602,29 @@ def home():
     reports_map_js = get_reports_map_js(active_reports)
     report_panel   = get_report_panel_html()
 
+    # ── MMDA banner (number coding) ───────────────────────────────────────
+    try:
+        _mmda_closures = get_road_closures()
+        mmda_banner    = get_mmda_banner_html(None, _mmda_closures)
+    except Exception:
+        mmda_banner = ""
+
+    # ── PHIVOLCS banner (seismic) ─────────────────────────────────────────
+    try:
+        _earthquakes    = get_recent_earthquakes(hours_back=12)
+        seismic_banner  = get_seismic_banner_html(_earthquakes)
+        epicenter_js    = get_epicenter_map_js(_earthquakes)
+    except Exception:
+        seismic_banner = ""
+        epicenter_js   = ""
+
+    # ── SOS panel ─────────────────────────────────────────────────────────
+    try:
+        _sos_contacts = get_trusted_contacts(chDB_perf, session['user']) if 'user' in session else []
+        sos_panel     = get_sos_panel_html(_sos_contacts)
+    except Exception:
+        sos_panel = ""
+
     map_html = m.get_root().render()
     return render_template(
         'index.html',
@@ -566,12 +635,17 @@ def home():
         typhoon_banner=typhoon_banner,
         night_banner=night_banner,
         weather_banner=weather_banner,
+        mmda_banner=mmda_banner,
+        seismic_banner=seismic_banner,
+        epicenter_js=epicenter_js,
+        sos_panel=sos_panel,
         reports_map_js=reports_map_js,
         report_panel=report_panel,
         active_reports=active_reports,
         prefill_origin=prefill_origin,
         prefill_destination=prefill_destination,
         prefill_mode=prefill_mode,
+        vulnerable_profiles=PROFILES,
     )
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -782,6 +856,53 @@ def get_routes():
             print(f"[incidents] pipeline error: {_ie}")
             nav_response["incidents"] = []
 
+        # ── MMDA: number coding + road closures ───────────────────────────
+        try:
+            plate_raw = data.get("plate_last_digit")
+            plate_digit = int(plate_raw) if plate_raw is not None else None
+            apply_mmda_to_routes(routes, plate_digit)
+            mmda_closures = get_road_closures()
+            mmda_coding   = get_number_coding(plate_digit) if plate_digit is not None else None
+            nav_response["mmda_banner"] = get_mmda_banner_html(mmda_coding, mmda_closures)
+            nav_response["mmda_coding"] = mmda_coding
+            nav_response["mmda_closures_count"] = len(mmda_closures)
+        except Exception as _me:
+            print(f"[mmda] pipeline error: {_me}")
+            nav_response["mmda_banner"] = ""
+
+        # ── PHIVOLCS: seismic risk ─────────────────────────────────────────
+        try:
+            earthquakes = get_recent_earthquakes(hours_back=12)
+            apply_seismic_to_routes(routes, earthquakes)
+            nav_response["seismic_banner"] = get_seismic_banner_html(earthquakes)
+            nav_response["epicenter_js"]   = get_epicenter_map_js(earthquakes)
+            nav_response["earthquakes"]    = [
+                {"magnitude": e["magnitude"], "place": e["place"],
+                 "severity": e["severity"], "time_pht": e["time_pht"],
+                 "tsunami": e["tsunami"]}
+                for e in earthquakes
+            ]
+        except Exception as _pe:
+            print(f"[phivolcs] pipeline error: {_pe}")
+            nav_response["seismic_banner"] = ""
+            nav_response["epicenter_js"]   = ""
+
+        # Safe spots are loaded on-demand via /api/safe-spots/route
+        # (toggled by the user in the UI) — not run here for performance.
+        nav_response['safe_spots_js'] = ''
+
+        # ── Vulnerable commuter profile ───────────────────────────────────
+        try:
+            profile = data.get("vulnerable_profile", "")
+            if profile and profile in PROFILES:
+                apply_vulnerable_profile_to_routes(routes, profile, weather)
+                nav_response["profile_badge"] = get_profile_badge_html(profile)
+            else:
+                nav_response["profile_badge"] = ""
+        except Exception as _vpe:
+            print(f"[vulnerable_profiles] pipeline error: {_vpe}")
+            nav_response["profile_badge"] = ""
+
         # ── Color each route by safety score ──────────────────────────────
         def _safety_to_color(score):
             if score >= 80: return '#27ae60'   # green
@@ -916,7 +1037,12 @@ def settings():
         flash_msg = 'Settings saved.'
     user_settings = get_user_settings(chDB_perf, session['user'])
     profile       = get_user_profile(chDB_perf, session['user'])
-    return get_settings_page_html(user_settings, profile, flash_msg)
+    try:
+        _contacts          = get_trusted_contacts(chDB_perf, session['user'])
+        sos_contacts_html  = get_trusted_contacts_settings_html(_contacts)
+    except Exception:
+        sos_contacts_html  = ""
+    return get_settings_page_html(user_settings, profile, flash_msg, sos_contacts_html)
 
 
 @app.route('/history')
@@ -969,6 +1095,16 @@ def api_safety():
 
     crime = get_crime_risk_for_area(lat, lon, "")
 
+    # MMDA + Seismic
+    try:
+        mmda_closures = get_road_closures()
+    except Exception:
+        mmda_closures = []
+    try:
+        quakes = get_recent_earthquakes(hours_back=12)
+    except Exception:
+        quakes = []
+
     return jsonify({
         'weather': {
             'risk_level':  weather.get('risk_level'),
@@ -990,6 +1126,18 @@ def api_safety():
             'warning':    crime.get('warning'),
             'penalty':    crime.get('penalty'),
         },
+        'mmda': {
+            'closures_count': len(mmda_closures),
+            'closures':       mmda_closures[:5],
+        },
+        'seismic': {
+            'count':      len(quakes),
+            'earthquakes': [
+                {'magnitude': e['magnitude'], 'place': e['place'],
+                 'severity': e['severity'], 'tsunami': e['tsunami']}
+                for e in quakes[:3]
+            ],
+        },
         'community_penalty': penalty,
         'reports': [
             {
@@ -1008,6 +1156,146 @@ def api_safety():
             for r in reports
         ],
     })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SOS / EMERGENCY
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/sos', methods=['POST'])
+def api_sos():
+    """Trigger SOS: log event, return share link + contact count."""
+    if 'user' not in session:
+        return jsonify({'ok': False, 'message': 'Login required'}), 401
+    try:
+        body    = request.json or {}
+        lat     = float(body.get('lat', 0))
+        lon     = float(body.get('lon', 0))
+        message = body.get('message', 'SOS from SafeRoute user')
+        route_summary = body.get('route_summary', '')
+        result  = log_sos_event(chDB_perf, session['user'], lat, lon,
+                                route_summary, message)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'ok': False, 'message': str(e)}), 400
+
+
+@app.route('/api/sos/contacts', methods=['GET'])
+def api_sos_contacts_get():
+    if 'user' not in session:
+        return jsonify({'ok': False, 'message': 'Login required'}), 401
+    contacts = get_trusted_contacts(chDB_perf, session['user'])
+    return jsonify({'ok': True, 'contacts': contacts})
+
+
+@app.route('/api/sos/contacts', methods=['POST'])
+def api_sos_contacts_add():
+    if 'user' not in session:
+        return jsonify({'ok': False, 'message': 'Login required'}), 401
+    try:
+        body = request.json or {}
+        result = add_trusted_contact(
+            chDB_perf, session['user'],
+            body.get('name', ''),
+            body.get('contact_type', 'phone'),
+            body.get('contact_value', ''),
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'ok': False, 'message': str(e)}), 400
+
+
+@app.route('/api/sos/contacts/<int:contact_id>', methods=['DELETE'])
+def api_sos_contacts_delete(contact_id):
+    if 'user' not in session:
+        return jsonify({'ok': False, 'message': 'Login required'}), 401
+    result = remove_trusted_contact(chDB_perf, session['user'], contact_id)
+    return jsonify(result)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  MMDA / PHIVOLCS live data endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/mmda', methods=['GET'])
+def api_mmda():
+    """Current number coding status + active road closures."""
+    try:
+        plate_raw   = request.args.get('plate')
+        plate_digit = int(plate_raw) % 10 if plate_raw and plate_raw.isdigit() else None
+        coding   = get_number_coding(plate_digit) if plate_digit is not None else None
+        closures = get_road_closures()
+        return jsonify({
+            'coding':         coding,
+            'closures':       closures,
+            'mmda_banner':    get_mmda_banner_html(coding, closures),
+            'closures_count': len(closures),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/phivolcs', methods=['GET'])
+def api_phivolcs():
+    """Recent Philippine earthquakes from USGS/PHIVOLCS."""
+    try:
+        hours = int(request.args.get('hours', 12))
+        quakes = get_recent_earthquakes(hours_back=hours)
+        return jsonify({
+            'earthquakes':    quakes,
+            'count':          len(quakes),
+            'seismic_banner': get_seismic_banner_html(quakes),
+            'epicenter_js':   get_epicenter_map_js(quakes),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/safe-spots', methods=['GET'])
+def api_safe_spots():
+    """Safe spots (police, hospitals, fire stations, etc.) near a coordinate."""
+    try:
+        lat    = float(request.args.get('lat', 14.5995))
+        lon    = float(request.args.get('lon', 120.9842))
+        radius = int(request.args.get('radius', 1500))
+        spots  = get_safe_spots_near(lat, lon, radius_m=radius)
+        return jsonify({'spots': spots, 'count': len(spots)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/safe-spots/route', methods=['POST'])
+def api_safe_spots_for_route():
+    """
+    On-demand safe spots for a specific route.
+    Called when the user toggles safe spots ON for a selected route.
+    Accepts a route object (coords + segments) and returns Leaflet JS.
+    """
+    try:
+        route = request.json or {}
+        js = get_route_safe_spots_js(route)
+        return jsonify({'safe_spots_js': js, 'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e), 'ok': False, 'safe_spots_js': ''}), 500
+
+
+@app.route('/api/safe-spots/batch', methods=['POST'])
+def api_safe_spots_batch():
+    """
+    Fetch safe spots for a batch of sample coordinates in parallel.
+    Called by the frontend safe spots toggle for fast, progressive loading.
+    Body: { "coords": [[lat, lon], ...], "radius": 600 }
+    Returns: { "spots": [...], "ok": true }
+    """
+    try:
+        body     = request.json or {}
+        coords   = body.get('coords', [])
+        radius   = int(body.get('radius', 600))
+        # Safety cap: max 12 sample points per request
+        coords   = coords[:12]
+        spots    = get_spots_for_coords(coords, radius_m=radius)
+        return jsonify({'spots': spots, 'count': len(spots), 'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e), 'ok': False, 'spots': []}), 500
 
 
 # ══════════════════════════════════════════════════════════════════════════════

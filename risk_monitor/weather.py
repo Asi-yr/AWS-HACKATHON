@@ -314,16 +314,34 @@ def get_weather_banner_html(weather: dict, commuter_type: str = "") -> str:
 
 def get_weather_risk_penalty(weather: dict, commuter_type: str) -> int:
     """
-    Returns a safety score penalty (int) based on current weather and
-    commuter type. Used inside _compute_safety_score() in features.py.
+    Returns a safety score penalty (int) based on current weather,
+    commuter type, AND time of day.
 
-    Penalty table:
-        storm      → walk/bike: -30, motorcycle: -25, commute: -15, car: -10
-        heavy_rain → walk/bike: -20, motorcycle: -15, commute: -10, car:  -5
-        rain       → walk/bike: -10, motorcycle:  -8, commute:  -5, car:  -3
-        light_rain → walk/bike:  -5, motorcycle:  -4, commute:  -2, car:  -1
-        fog        → motorcycle: -8, car: -5, others: -3
-        clear/cloudy → 0
+    Key design principles:
+      • Daytime penalties are moderate — weather is visible and manageable.
+      • Night-time penalties are significantly higher — wet/dark roads, poor
+        visibility, fewer people around, and slower emergency response.
+      • Vulnerability order: walk > bike > motorcycle > commute/transit > car
+        Walk is most exposed (no shelter, on foot, slowest to react).
+        Motorcycle is more dangerous than transit because the rider is
+        physically exposed to rain, wind, and slippery roads.
+        Car has the most crash protection and is enclosed.
+
+    Daytime penalty table (6 AM – 6 PM):
+        storm      → walk: 18, bike: 16, motorcycle: 14, commute: 8,  train: 4, car: 5
+        heavy_rain → walk: 12, bike: 10, motorcycle:  9, commute: 5,  train: 3, car: 3
+        rain       → walk:  6, bike:  5, motorcycle:  5, commute: 3,  train: 1, car: 2
+        light_rain → walk:  3, bike:  3, motorcycle:  3, commute: 1,  train: 0, car: 1
+        fog        → walk:  2, bike:  2, motorcycle:  5, commute: 2,  train: 0, car: 3
+
+    Night-time penalty table (6 PM – 6 AM):
+        Multiplies daytime values × a per-mode night multiplier:
+          walk:        × 2.0  — unlit paths + wet = very dangerous
+          bike:        × 1.8  — reflector loss in rain + slick roads
+          motorcycle:  × 1.7  — wet+dark road is a leading crash cause
+          commute:     × 1.5  — waiting at stops in rain/dark = high exposure
+          train:       × 1.2  — minimal exposure change (sheltered platform)
+          car:         × 1.3  — headlights reduce but don't eliminate wet-road risk
     """
     if not weather.get("ok"):
         return 0
@@ -331,40 +349,69 @@ def get_weather_risk_penalty(weather: dict, commuter_type: str) -> int:
     risk  = weather.get("risk_level", "clear")
     group = _group_commuter(commuter_type)
 
-    _PENALTY = {
+    # ── Daytime base penalties ────────────────────────────────────────────────
+    # Calibrated so that even a storm during the day is a warning, not a crisis,
+    # unless you're walking. The 3–5 pt range for light rain is informative,
+    # not alarming. Night multipliers below bring these up to realistic levels.
+    _DAY_PENALTY = {
         "storm": {
-            "walk": 30, "bike": 30,
-            "motorcycle": 25,
-            "commute": 15, "train": 8,
-            "car": 10,
-        },
-        "heavy_rain": {
-            "walk": 20, "bike": 20,
-            "motorcycle": 15,
-            "commute": 10, "train": 5,
+            "walk": 18, "bike": 16,
+            "motorcycle": 14,
+            "commute": 8, "train": 4,
             "car": 5,
         },
-        "rain": {
-            "walk": 10, "bike": 10,
-            "motorcycle": 8,
-            "commute": 5, "train": 2,
+        "heavy_rain": {
+            "walk": 12, "bike": 10,
+            "motorcycle": 9,
+            "commute": 5, "train": 3,
             "car": 3,
         },
+        "rain": {
+            "walk": 6, "bike": 5,
+            "motorcycle": 5,
+            "commute": 3, "train": 1,
+            "car": 2,
+        },
         "light_rain": {
-            "walk": 5, "bike": 5,
-            "motorcycle": 4,
-            "commute": 2, "train": 0,
+            "walk": 3, "bike": 3,
+            "motorcycle": 3,
+            "commute": 1, "train": 0,
             "car": 1,
         },
         "fog": {
-            "walk": 3, "bike": 3,
-            "motorcycle": 8,
-            "commute": 3, "train": 0,
-            "car": 5,
+            "walk": 2, "bike": 2,
+            "motorcycle": 5,
+            "commute": 2, "train": 0,
+            "car": 3,
         },
     }
 
-    return _PENALTY.get(risk, {}).get(group, 0)
+    # ── Night multipliers per mode ────────────────────────────────────────────
+    # Applied when current PHT hour is 18–23 or 0–5.
+    # Walk and bike get the largest multipliers: rain + darkness + no lights
+    # is extremely hazardous for unprotected commuters.
+    _NIGHT_MULTIPLIER = {
+        "walk":       2.0,
+        "bike":       1.8,
+        "motorcycle": 1.7,
+        "commute":    1.5,
+        "train":      1.2,
+        "car":        1.3,
+    }
+
+    base = _DAY_PENALTY.get(risk, {}).get(group, 0)
+    if base == 0:
+        return 0
+
+    # Apply night multiplier when it's nighttime (reuse PHT-aware check)
+    pht_hour = datetime.now(_PHT).hour
+    is_night = (pht_hour >= 18 or pht_hour < 6)
+
+    if is_night:
+        multiplier = _NIGHT_MULTIPLIER.get(group, 1.5)
+        return round(base * multiplier)
+
+    return base
 
 
 def apply_weather_to_routes(routes: list, weather: dict, commuter_type: str) -> list:

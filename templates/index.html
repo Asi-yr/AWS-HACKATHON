@@ -19,9 +19,11 @@
 <!-- Hidden data elements so Jinja can pass server alerts to JS -->
 <script id="server-alerts-data" type="application/json">
 {
-  "typhoon_html": {{ (typhoon_banner | tojson) if typhoon_banner else '""' }},
-  "night_html":   {{ (night_banner   | tojson) if night_banner   else '""' }},
-  "weather_html": {{ (weather_banner | tojson) if weather_banner else '""' }}
+  "typhoon_html":  {{ (typhoon_banner  | tojson) if typhoon_banner  else '""' }},
+  "night_html":    {{ (night_banner    | tojson) if night_banner    else '""' }},
+  "weather_html":  {{ (weather_banner  | tojson) if weather_banner  else '""' }},
+  "mmda_html":     {{ (mmda_banner     | tojson) if mmda_banner     else '""' }},
+  "seismic_html":  {{ (seismic_banner  | tojson) if seismic_banner  else '""' }}
 }
 </script>
 
@@ -95,10 +97,42 @@
         <div class="sub-tile active" data-submode="train" id="sub-train">🚇 Train</div>
         <div class="sub-tile" data-submode="jeepney" id="sub-jeepney">🚌 Jeepney/Bus</div>
       </div>
+      <br><br>
+
+      <!-- Safe Spots toggle — available before AND after searching -->
+      <label id="safe-spots-pre-toggle"
+        style="display:flex;align-items:center;gap:8px;cursor:pointer;
+          padding:8px 10px;margin-bottom:6px;
+          border:1.5px solid #2980b9;border-radius:8px;background:#f0f7ff;
+          font-size:13px;font-weight:600;color:#2980b9;user-select:none;"
+        title="Show police stations, hospitals, pharmacies and other safe spots along your route">
+        <input type="checkbox" id="safe-spots-checkbox"
+          style="width:16px;height:16px;accent-color:#2980b9;cursor:pointer;"
+          onchange="onSafeSpotCheckboxChange()" />
+        <span id="safe-spots-label-text">🏥 Include Safe Spots</span>
+        <span style="margin-left:auto;font-size:10px;font-weight:400;color:#777;white-space:nowrap;">
+          🚔 🏥 💊
+        </span>
+      </label>
 
       <button class="btn-primary" id="find-routes-btn" disabled>
         🔍 Find Safe Routes
       </button>
+
+      <!-- ── Vulnerable profile selector ──────────────────────────────── -->
+      <label class="input-label" style="margin-top:10px;">🧑‍🤝‍🧑 Commuter Profile <span style="font-size:10px;color:#888;">(optional)</span></label>
+      <select id="vulnerable-profile-select"
+        style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:7px;font-size:13px;background:#fff;color:#2c3e50;margin-bottom:6px;">
+        <option value="">— Standard commuter —</option>
+        {% for key, p in vulnerable_profiles.items() %}
+        <option value="{{ key }}">{{ p.icon }} {{ p.label }}</option>
+        {% endfor %}
+      </select>
+
+      <!-- ── Plate number (for MMDA coding check) ──────────────────────── -->
+      <label class="input-label">🚗 Plate Last Digit <span style="font-size:10px;color:#888;">(for coding check)</span></label>
+      <input id="plate-digit-input" type="number" min="0" max="9" placeholder="e.g. 3"
+        style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:7px;font-size:13px;margin-bottom:6px;" />
     </div>
 
     <!-- Route results -->
@@ -114,11 +148,15 @@
             <a href="https://noah.up.edu.ph/" target="_blank" style="background:#117a65;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">NOAH Floods</a>
             <a href="https://open-meteo.com/" target="_blank" style="background:#1f618d;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">Open-Meteo</a>
             <a href="https://bagong.pagasa.dost.gov.ph/" target="_blank" style="background:#6c3483;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">PAGASA</a>
+            <a href="https://trafficnavigator.mmda.gov.ph/" target="_blank" style="background:#c0392b;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">MMDA</a>
+            <a href="https://www.phivolcs.dost.gov.ph/" target="_blank" style="background:#784212;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">PHIVOLCS</a>
         </div>
         <div style="color:#888;font-size:10px;line-height:1.5;">
             Incidents refresh every 10 min · Weather every search · Crime zones from PNP data · Community reports peer-verified
         </div>
         <div id="incident-status" style="margin-top:6px;font-size:10px;color:#888;">🔄 Checking incident feeds…</div>
+        <div id="mmda-coding-status" style="margin-top:4px;font-size:10px;color:#888;">🚗 Checking number coding…</div>
+        <div id="seismic-status" style="margin-top:4px;font-size:10px;color:#888;">🌍 Checking seismic activity…</div>
     </div>
 
   </div><!-- /sidebar -->
@@ -358,6 +396,7 @@ function clearRoutes() {
   _routePathPts = [];
   ++_overlayGeneration;   // cancel any in-flight async safety fetch
   clearCrimeOverlay();    // remove all crime/flood circles
+  clearSafeSpotMarkers(); // remove all safe spot markers on new search
 }
 
 // ── Mode selector ─────────────────────────────────────────────────────────────
@@ -620,6 +659,11 @@ async function findRoutes() {
       drawAreaSafetyOverlay(lastOrigCoords, lastDestCoords, data.routes[0]);
       // Update live weather/flood banners from API response
       updateLiveBanners(data);
+      // Auto-show safe spots if checkbox was already checked
+      _ssActive = !!(document.getElementById('safe-spots-checkbox') || {checked:false}).checked;
+      clearSafeSpotMarkers();
+      if (_ssActive) showSafeSpotsForRoute(data.routes[0]);
+      _ssUpdateLabel();
     } else {
       showError('No routes found.');
     }
@@ -776,12 +820,14 @@ function renderRouteCards(routes) {
   const container = document.getElementById('route-results');
   container.innerHTML = '';
 
-  routes.forEach(route => {
+  routes.forEach((route, routeIdx) => {
     const card = document.createElement('div');
     card.className  = 'route-card';
     card.dataset.id = route.id;
     // Left border reflects safety score, not route line color
     card.style.borderLeftColor = route.score_color || route.color;
+    // Use numbered display name instead of descriptive names like "Walking Route"
+    const displayName = `Route ${routeIdx + 1}`;
 
     // ── Header row: colored line dot + name ──────────────────────────────
     const isTransfer = (route.line || '').includes('+');
@@ -804,7 +850,7 @@ function renderRouteCards(routes) {
           <div class="route-line-header">
             <span class="line-dot" style="background:${route.color}"></span>
             <span class="line-dot secondary" style="background:${route.secondary_color || '#999'}"></span>
-            <span class="route-title">${escHtml(route.name)}</span>
+            <span class="route-title">${escHtml(displayName)}</span>
             ${modeBadge}
           </div>
           <div class="route-subtitle">${escHtml(route.subtitle || '')}</div>`;
@@ -812,7 +858,7 @@ function renderRouteCards(routes) {
         headerHTML = `
           <div class="route-line-header">
             <span class="line-dot" style="background:${route.color}"></span>
-            <span class="route-title">${escHtml(route.name)}</span>
+            <span class="route-title">${escHtml(displayName)}</span>
             <span class="line-subtitle-badge">${escHtml(route.subtitle || '')}</span>
             ${modeBadge}
           </div>`;
@@ -821,7 +867,7 @@ function renderRouteCards(routes) {
       headerHTML = `
         <div class="route-line-header">
           <span class="line-dot" style="background:${route.color}"></span>
-          <span class="route-title">${escHtml(route.name)}</span>
+          <span class="route-title">${escHtml(displayName)}</span>
           ${modeBadge}
         </div>`;
     }
@@ -836,6 +882,9 @@ function renderRouteCards(routes) {
     // ── Safety badge ─────────────────────────────────────────────────────
     // ── Safety badge ─────────────────────────────────────────────────────────
     const sc = route.safety_score || 0;
+    // Round to whole number for clean display — decimal precision served its
+    // purpose internally for differentiation; users just need the integer.
+    const scDisplay = (typeof sc === 'number') ? Math.round(sc) : sc;
     let warningLines = '';
     if (route.night_warning)    warningLines += `<div class="route-warning night-warning">🌙 ${escHtml(route.night_warning)}</div>`;
     if (route.weather_warning)  warningLines += `<div class="route-warning weather-warning">🌦️ ${escHtml(route.weather_warning)}</div>`;
@@ -867,7 +916,7 @@ function renderRouteCards(routes) {
     const fareDisp = route.fare ? route.fare.display : '';
     const safetyHTML = `
   <div class="route-safety" style="color:${safetyColor(sc)}">
-    🛡️ Safety Score: ${sc}/100
+    🛡️ Safety Score: ${scDisplay}/100
     ${fareDisp ? `<span class="fare-badge">💸 ${escHtml(fareDisp)}</span>` : ''}
   </div>
   ${warningLines}
@@ -951,6 +1000,10 @@ function renderRouteCards(routes) {
         c.classList.toggle('selected', c.dataset.id == route.id));
       // Instantly swap crime zone circles for the selected route — no async fetch
       drawRouteZoneOverlay(route);
+      // Refresh safe spots for newly selected route if toggle is ON
+      if (typeof _ssActive !== 'undefined' && _ssActive) {
+        showSafeSpotsForRoute(route);
+      }
     });
 
     container.appendChild(card);
@@ -2196,5 +2249,426 @@ map.on('zoomend', function () {
 </script>
 {{ report_panel | safe }}
 {{ reports_map_js | safe }}
+
+<!-- ── SOS Panel (panic button + drawer) ───────────────────────────────── -->
+{{ sos_panel | safe }}
+
+<!-- ── Epicenter markers on page load (from Jinja) ─────────────────────── -->
+{% if epicenter_js %}
+<script>
+// Run after map is ready
+window.addEventListener('load', function() {
+  setTimeout(function() {
+    try { {{ epicenter_js | safe }} } catch(e) { console.warn('epicenter_js load error', e); }
+  }, 1200);
+});
+</script>
+{% endif %}
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+//  New module integrations: MMDA, PHIVOLCS, Safe Spots, Vulnerable Profile
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Pass new fields to route search payload ───────────────────────────────
+// Monkey-patch findRoutes to inject plate digit + vulnerable profile.
+// Runs after the main script block so it can wrap the existing buildPayload.
+(function patchFindRoutes() {
+  const _origFind = window.findRoutes;
+  if (typeof _origFind !== 'function') return;
+
+  window.findRoutes = async function() {
+    // Inject extra fields into the next fetch by overriding the payload builder
+    const _origBuildPayload = window._buildRoutePayload;
+    window._buildRoutePayload = function(base) {
+      const payload = _origBuildPayload ? _origBuildPayload(base) : base;
+      const plateVal = document.getElementById('plate-digit-input')?.value.trim();
+      if (plateVal !== '' && plateVal !== undefined) {
+        payload.plate_last_digit = parseInt(plateVal);
+      }
+      const profileVal = document.getElementById('vulnerable-profile-select')?.value;
+      if (profileVal) {
+        payload.vulnerable_profile = profileVal;
+      }
+      return payload;
+    };
+    return _origFind.apply(this, arguments);
+  };
+})();
+
+// ── Handle new API response fields in renderRouteCards ────────────────────
+// Extend updateLiveBanners to also show MMDA and seismic banners
+const _origUpdateLiveBanners = window.updateLiveBanners;
+window.updateLiveBanners = function(data) {
+  if (_origUpdateLiveBanners) _origUpdateLiveBanners(data);
+
+  // MMDA number coding banner
+  ['mmda_live'].forEach(id => {
+    const el = document.getElementById('alert-card-' + id);
+    if (el) el.remove();
+  });
+  if (data.mmda_banner && data.mmda_banner.trim()) {
+    const text = data.mmda_banner.replace(/<[^>]+>/g, '').trim();
+    showAlertCard('mmda_live', 'mmda', '🚗 MMDA Alert', text, 'moderate', false);
+  }
+
+  // PHIVOLCS seismic banner
+  ['seismic_live'].forEach(id => {
+    const el = document.getElementById('alert-card-' + id);
+    if (el) el.remove();
+  });
+  if (data.seismic_banner && data.seismic_banner.trim()) {
+    const text = data.seismic_banner.replace(/<[^>]+>/g, '').trim();
+    showAlertCard('seismic_live', 'seismic', '🌍 PHIVOLCS', text, 'high', true);
+  }
+
+  // Safe spot markers are handled on-demand by toggleSafeSpots()
+  // (server no longer sends safe_spots_js in the route API response)
+
+  // Epicenter markers — re-render after every search so map stays current
+  if (data.epicenter_js) {
+    try { eval(data.epicenter_js); } catch(e) { console.warn('epicenter_js error:', e); }
+  }
+
+  // Profile badge
+  if (data.profile_badge && data.profile_badge.trim()) {
+    let badgeEl = document.getElementById('profile-badge-container');
+    if (!badgeEl) {
+      badgeEl = document.createElement('div');
+      badgeEl.id = 'profile-badge-container';
+      badgeEl.style.cssText = 'padding:4px 8px;';
+      const resultsEl = document.getElementById('route-results');
+      if (resultsEl) resultsEl.insertAdjacentElement('beforebegin', badgeEl);
+    }
+    badgeEl.innerHTML = data.profile_badge;
+  }
+};
+
+// ── Extend renderRouteCards to show new warnings ──────────────────────────
+// Hook into the warningLines build — done via the existing route card renderer.
+// We patch it so MMDA coding + seismic + profile warnings appear in cards.
+const _origRenderRouteCards = window.renderRouteCards;
+window.renderRouteCards = function(routes) {
+  if (_origRenderRouteCards) {
+    // Augment each route with new warning lines before rendering
+    routes.forEach(route => {
+      // MMDA number coding warning
+      if (route.number_coded && route.number_coding_info) {
+        const info = route.number_coding_info;
+        route.report_warnings = route.report_warnings || [];
+        route.report_warnings.unshift('🚗 ' + info.reason);
+      }
+      // MMDA road closures
+      if (route.mmda_closures && route.mmda_closures.length > 0) {
+        route.report_warnings = route.report_warnings || [];
+        route.mmda_closures.slice(0, 2).forEach(c => {
+          route.report_warnings.push('🚧 MMDA Closure: ' + c.road + ' — ' + c.reason);
+        });
+      }
+      // Seismic warning
+      if (route.seismic_warning) {
+        route.report_warnings = route.report_warnings || [];
+        route.report_warnings.push('🌍 ' + route.seismic_warning);
+      }
+      // Vulnerable profile warnings
+      if (route.profile_warnings && route.profile_warnings.length) {
+        route.report_warnings = route.report_warnings || [];
+        route.profile_warnings.forEach(w => route.report_warnings.push(w));
+      }
+    });
+    _origRenderRouteCards(routes);
+  }
+};
+
+// ── MMDA coding status on page load ──────────────────────────────────────
+(function pollMmdaStatus() {
+  const el = document.getElementById('mmda-coding-status');
+  if (!el) return;
+  fetch('/api/mmda')
+    .then(r => r.json())
+    .then(data => {
+      if (data.coding && data.coding.coded) {
+        el.innerHTML = `🚗 <b style="color:#c0392b;">Coding active</b> — Plates ending in ${data.coding.coded_digits.join('/')} coded today`;
+        el.style.color = '#c0392b';
+      } else if (data.coding) {
+        el.innerHTML = `🚗 No coding active now · ${data.closures_count || 0} closure(s) reported`;
+        el.style.color = '#27ae60';
+      } else {
+        el.innerHTML = `🚗 MMDA: ${data.closures_count || 0} road closure(s) reported`;
+      }
+    })
+    .catch(() => { el.textContent = '🚗 MMDA data unavailable'; });
+})();
+
+// ── PHIVOLCS seismic status on page load ─────────────────────────────────
+(function pollSeismicStatus() {
+  const el = document.getElementById('seismic-status');
+  if (!el) return;
+  fetch('/api/phivolcs')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.earthquakes || data.earthquakes.length === 0) {
+        el.innerHTML = '🌍 No significant seismic activity in last 12h';
+        el.style.color = '#27ae60';
+      } else {
+        const top = data.earthquakes.reduce((a, b) => a.magnitude >= b.magnitude ? a : b);
+        const tsunamiNote = top.tsunami ? ' ⚠️ TSUNAMI WARNING' : '';
+        el.innerHTML = `🌍 <b style="color:${top.severity === 'critical' ? '#6c1a1a' : '#e74c3c'};">M${top.magnitude}</b> quake — ${top.place}${tsunamiNote}`;
+        el.style.color = '#e74c3c';
+        el.style.fontWeight = 'bold';
+        if (top.severity === 'high' || top.severity === 'critical') {
+          const tsunNote = top.tsunami ? ' — ⚠️ TSUNAMI WARNING ACTIVE' : '';
+          showAlertCard('seismic_init', 'seismic', '🌍 PHIVOLCS Alert',
+            `M${top.magnitude} earthquake near ${top.place}${tsunNote}`, 'high', true);
+        }
+      }
+      // Draw epicenter markers on the map regardless of severity
+      if (data.epicenter_js) {
+        setTimeout(function() {
+          try { eval(data.epicenter_js); } catch(e) { console.warn('epicenter poll error:', e); }
+        }, 1500);
+      }
+    })
+    .catch(() => { el.textContent = '🌍 Seismic data unavailable'; });
+})();
+
+// ── Init server-side MMDA + seismic alerts from Jinja data ───────────────
+(function initNewAlertCards() {
+  try {
+    const raw  = document.getElementById('server-alerts-data');
+    if (!raw) return;
+    const data = JSON.parse(raw.textContent);
+    if (data.mmda_html && data.mmda_html.trim()) {
+      const text = data.mmda_html.replace(/<[^>]+>/g, '').trim();
+      showAlertCard('mmda_init', 'mmda', '🚗 MMDA Alert', text, 'moderate', false);
+    }
+    if (data.seismic_html && data.seismic_html.trim()) {
+      const text = data.seismic_html.replace(/<[^>]+>/g, '').trim();
+      showAlertCard('seismic_srv', 'seismic', '🌍 PHIVOLCS', text, 'high', true);
+    }
+  } catch(e) { /* ok */ }
+})();
+</script>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+//  Safe Spots — geographic distance sampling, per-route layers, stale-load safe
+// ══════════════════════════════════════════════════════════════════════════════
+
+var _ssActive    = false;  // checkbox state
+var _ssGroups    = {};     // routeId -> L.layerGroup
+var _ssCurrentId = null;   // routeId whose group is on map
+var _ssLoading   = false;  // true while fetching
+var _ssToken     = 0;      // incremented on each new load; stale responses check this
+
+// ── UI sync ───────────────────────────────────────────────────────────────────
+function _ssUpdateLabel() {
+  var cb    = document.getElementById('safe-spots-checkbox');
+  var label = document.getElementById('safe-spots-label-text');
+  var wrap  = document.getElementById('safe-spots-pre-toggle');
+  if (!cb) return;
+  if (cb.checked !== _ssActive) cb.checked = _ssActive;
+  if (_ssLoading) {
+    if (wrap)  { wrap.style.background = '#ddeeff'; wrap.style.color = '#1a5276'; wrap.style.borderColor = '#2980b9'; }
+    if (label) label.textContent = '⏳ Loading safe spots…';
+  } else if (_ssActive) {
+    if (wrap)  { wrap.style.background = '#2980b9'; wrap.style.color = '#fff'; wrap.style.borderColor = '#2471a3'; }
+    if (label) label.textContent = '🏥 Safe Spots: ON';
+  } else {
+    if (wrap)  { wrap.style.background = '#f0f7ff'; wrap.style.color = '#2980b9'; wrap.style.borderColor = '#2980b9'; }
+    if (label) label.textContent = '🏥 Include Safe Spots';
+  }
+}
+// Aliases so ANY caller from older code works without errors
+function updateSafeSpotsBtn() { _ssUpdateLabel(); }
+function _ssUpdateBtn()       { _ssUpdateLabel(); }
+
+// ── Checkbox change ───────────────────────────────────────────────────────────
+function onSafeSpotCheckboxChange() {
+  _ssActive = document.getElementById('safe-spots-checkbox').checked;
+  _ssUpdateLabel();
+  if (!_ssActive) {
+    _ssHideAll();
+  } else {
+    var r = _ssCurrentRoute();
+    if (r) showSafeSpotsForRoute(r);
+  }
+}
+
+function toggleSafeSpots() {
+  var cb = document.getElementById('safe-spots-checkbox');
+  if (cb) { cb.checked = !cb.checked; onSafeSpotCheckboxChange(); }
+}
+
+function _ssCurrentRoute() {
+  return (window.allRoutes || []).find(function(r){ return r.id === window.activeRouteId; })
+      || (window.allRoutes || [])[0] || null;
+}
+
+// ── Layer management ──────────────────────────────────────────────────────────
+function _ssHideAll() {
+  // Remove ALL groups from map (used on new search)
+  Object.values(_ssGroups).forEach(function(g) { try { map.removeLayer(g); } catch(e) {} });
+  _ssCurrentId = null;
+}
+
+function _ssHideCurrent() {
+  if (_ssCurrentId !== null && _ssGroups[_ssCurrentId]) {
+    try { map.removeLayer(_ssGroups[_ssCurrentId]); } catch(e) {}
+  }
+  _ssCurrentId = null;
+}
+
+// Called by clearRoutes() on every new search
+function clearSafeSpotMarkers() {
+  ++_ssToken;          // invalidate any in-flight fetches
+  _ssLoading = false;
+  _ssHideAll();
+  _ssGroups = {};
+  // Keep _ssActive — preserve the user's checkbox preference
+}
+
+// ── Coord extraction — handles ALL route types ────────────────────────────────
+function _extractRouteCoords(route) {
+  var pts = [];
+  function push(c) {
+    if (Array.isArray(c) && c.length === 2
+        && typeof c[0] === 'number' && typeof c[1] === 'number'
+        && isFinite(c[0]) && isFinite(c[1])) pts.push(c);
+  }
+  if (route.segments && route.segments.length) {
+    route.segments.forEach(function(seg) {
+      var sc = seg.coords;
+      if (!sc || !sc.length) return;
+      if (Array.isArray(sc[0]) && sc[0].length && Array.isArray(sc[0][0])) {
+        // Train-style: [ [[lat,lon],...], ... ]
+        sc.forEach(function(sub) { sub.forEach(push); });
+      } else {
+        sc.forEach(push);
+      }
+    });
+  }
+  // Fallback for road/walk routes with top-level coords array
+  if (!pts.length && route.coords) route.coords.forEach(push);
+  return pts;
+}
+
+// ── Geographic distance sampling ──────────────────────────────────────────────
+// Samples by cumulative route distance, not array index.
+// This is the ONLY correct approach for Manila routes where the first segment
+// has hundreds of tight-turn waypoints (dense) but covers a short distance,
+// while later segments have few waypoints but cover most of the route.
+function _sampleByDistance(coords, n) {
+  if (!coords.length) return [];
+  if (coords.length <= n) return coords.slice();
+
+  var cum = [0];
+  for (var i = 1; i < coords.length; i++) {
+    var dLat = coords[i][0] - coords[i-1][0];
+    var dLon = coords[i][1] - coords[i-1][1];
+    cum.push(cum[i-1] + Math.sqrt(dLat*dLat + dLon*dLon));
+  }
+  var total = cum[cum.length - 1];
+  if (total === 0) return [coords[0]];
+
+  var out = [];
+  for (var k = 0; k < n; k++) {
+    var target = (k / (n - 1)) * total;
+    var lo = 0, hi = cum.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (cum[mid] < target) lo = mid + 1; else hi = mid;
+    }
+    out.push(coords[lo]);
+  }
+  return out;
+}
+
+// ── Marker renderer ───────────────────────────────────────────────────────────
+function _renderSafeSpotMarker(spot, group) {
+  var s = 'background:' + spot.color + ';color:#fff;border-radius:50%;'
+    + 'width:28px;height:28px;display:flex;align-items:center;justify-content:center;'
+    + 'font-size:15px;box-shadow:0 2px 8px rgba(0,0,0,0.45);border:2px solid rgba(255,255,255,0.85);';
+  var icon = L.divIcon({
+    className: '',
+    html: '<div style="' + s + '">' + spot.icon + '</div>',
+    iconSize: [28,28], iconAnchor: [14,14],
+  });
+  var name = spot.name || spot.label || '';
+  var addr = spot.address || '';
+  var oh   = spot.open_24h ? 'Yes' : 'Unknown';
+  L.marker([spot.lat, spot.lon], { icon: icon, pane: 'hazardMarkers', zIndexOffset: 800 })
+    .bindPopup('<b>' + name + '</b><br>' + spot.label
+      + (addr ? '<br><small>' + addr + '</small>' : '')
+      + '<br><span style="color:#27ae60;font-size:11px;">&#10003; Safe refuge</span>'
+      + '<br><span style="font-size:10px;color:#888;">Open 24h: ' + oh + '</span>')
+    .bindTooltip(spot.icon + ' ' + name)
+    .addTo(group);
+}
+
+// ── Core load function ────────────────────────────────────────────────────────
+async function showSafeSpotsForRoute(route) {
+  if (!route) return;
+
+  var rid = (route.id != null) ? route.id : 0;
+
+  // Hide whatever is currently shown
+  _ssHideCurrent();
+
+  // Cache hit — show immediately, no fetch needed
+  if (_ssGroups[rid]) {
+    _ssGroups[rid].addTo(map);
+    _ssCurrentId = rid;
+    _ssLoading   = false;
+    _ssUpdateLabel();
+    return;
+  }
+
+  _ssLoading = true;
+  var myToken = ++_ssToken;  // capture token; stale responses will see a different value
+  _ssUpdateLabel();
+
+  var allCoords = _extractRouteCoords(route);
+  var samples   = _sampleByDistance(allCoords, 12);
+
+  if (!samples.length) {
+    _ssLoading = false;
+    _ssUpdateLabel();
+    return;
+  }
+
+  // Create and register layer group immediately so switching routes
+  // during load will call _ssHideCurrent() which removes this group cleanly
+  var group = L.layerGroup().addTo(map);
+  _ssGroups[rid] = group;
+  _ssCurrentId   = rid;
+
+  var seenIds = new Set();
+  var RADIUS  = 700;
+
+  await Promise.all(samples.map(function(pt) {
+    return fetch('/api/safe-spots?lat=' + pt[0].toFixed(5)
+                              + '&lon=' + pt[1].toFixed(5)
+                              + '&radius=' + RADIUS)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        // Stale check: if user switched routes/search since we started, discard
+        if (myToken !== _ssToken) return;
+        (d.spots || []).forEach(function(spot) {
+          if (!seenIds.has(spot.id)) {
+            seenIds.add(spot.id);
+            _renderSafeSpotMarker(spot, group);
+          }
+        });
+      })
+      .catch(function() {});
+  }));
+
+  if (myToken !== _ssToken) return; // load was superseded
+  _ssLoading = false;
+  _ssUpdateLabel();
+}
+</script>
+
 </body>
 </html>

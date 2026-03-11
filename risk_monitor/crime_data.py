@@ -70,9 +70,9 @@ _CRIME_COLORS = {
 
 _CRIME_PENALTY = {
     "none":     0,
-    "low":      6,
-    "moderate": 14,
-    "high":     24,
+    "low":      3,    # endpoint in low-crime area: −3 pts
+    "moderate": 6,    # endpoint in moderate area: −6 pts
+    "high":     10,   # endpoint in high-crime area: −10 pts
 }
 
 _CRIME_WARNINGS = {
@@ -413,7 +413,65 @@ def _sample_waypoints(waypoints: list, max_samples: int = 60) -> list[tuple[floa
     return [points[int(i * step)] for i in range(max_samples)]
 
 
-def scan_route_crime_zones(waypoints) -> list[dict]:
+def _is_contained_within(inner_coords: list, outer_coords: list) -> bool:
+    """
+    Returns True if inner_coords bounding box is fully contained within
+    outer_coords bounding box.
+    coords format: [lat_min, lat_max, lon_min, lon_max]
+    """
+    i_lat_min, i_lat_max, i_lon_min, i_lon_max = inner_coords
+    o_lat_min, o_lat_max, o_lon_min, o_lon_max = outer_coords
+    return (
+        i_lat_min >= o_lat_min and i_lat_max <= o_lat_max and
+        i_lon_min >= o_lon_min and i_lon_max <= o_lon_max
+    )
+
+
+def _deduplicate_zones(zones: list) -> list:
+    """
+    Remove zones whose bounding box is fully contained within another zone
+    in the list that has equal or higher risk.
+
+    Solves parent/child duplication:
+      - Tondo (large bbox, high) contains Gagalangin (small bbox, high)
+        => keep Tondo only, drop Gagalangin
+      - Navotas (large bbox, high) contains navotas fish port
+        => keep Navotas only, drop sub-zones
+      - Exception: child with HIGHER risk than parent is kept
+        (a high-risk sub-zone inside a moderate parent is genuinely additional)
+    """
+    if len(zones) <= 1:
+        return zones
+
+    keep = []
+    for candidate in zones:
+        c_coords = candidate.get("coords")
+        c_risk   = _RISK_ORDER.get(candidate.get("risk", "none"), 0)
+
+        if not c_coords:
+            keep.append(candidate)
+            continue
+
+        absorbed = False
+        for other in zones:
+            if other is candidate:
+                continue
+            o_coords = other.get("coords")
+            o_risk   = _RISK_ORDER.get(other.get("risk", "none"), 0)
+            if not o_coords:
+                continue
+            # Drop candidate if it lives inside `other` at same/higher risk
+            if o_risk >= c_risk and _is_contained_within(c_coords, o_coords):
+                absorbed = True
+                break
+
+        if not absorbed:
+            keep.append(candidate)
+
+    return keep
+
+
+def scan_route_crime_zones(waypoints) -> list:
     """
     Scans waypoints along a route and returns a deduplicated list of crime zone
     dicts for every distinct zone the route passes through.
@@ -424,15 +482,19 @@ def scan_route_crime_zones(waypoints) -> list[dict]:
     Only zones with bounding box coords defined in crime_zones.json are checked.
     Zones of risk 'none' are omitted.
 
-    Anti-spam: a zone is only included once even if the route crosses its
-    bounding box multiple times, and consecutive duplicate detections are
-    collapsed.
+    Anti-spam:
+      1. A zone is only included once even if the route crosses its bounding box
+         multiple times.
+      2. Parent/child deduplication: if zone A fully contains zone B and A has
+         equal or higher risk, zone B is dropped. This prevents Tondo + every
+         Tondo sub-street from each generating separate penalties for the same
+         geographic hazard. Same applies to Navotas and its barangays, etc.
 
     Args:
         waypoints: route geometry in any format accepted by _sample_waypoints()
 
     Returns:
-        List of zone dicts, sorted worst-risk-first.
+        List of zone dicts, sorted worst-risk-first, parent/child deduplicated.
     """
     if not waypoints:
         return []
@@ -444,8 +506,8 @@ def scan_route_crime_zones(waypoints) -> list[dict]:
     zones       = _load_crime_zones()
     coord_zones = [z for z in zones if z.get("coords") and len(z["coords"]) == 4]
 
-    seen_names: set[str] = set()
-    found: list[dict]    = []
+    seen_names = set()
+    found      = []
 
     for lat, lon in samples:
         best      = None
@@ -455,7 +517,7 @@ def scan_route_crime_zones(waypoints) -> list[dict]:
             lat_min, lat_max, lon_min, lon_max = zone["coords"]
             if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
                 box_area = (lat_max - lat_min) * (lon_max - lon_min)
-                # Prefer smallest (most specific) box
+                # Prefer smallest (most specific) box per waypoint
                 if box_area < best_area:
                     best      = zone
                     best_area = box_area
@@ -478,12 +540,19 @@ def scan_route_crime_zones(waypoints) -> list[dict]:
             "summary": best.get("summary", ""),
             "color":   _CRIME_COLORS.get(risk, "#7f8c8d"),
             "coords":  best["coords"],
-            "hit_lat": lat,   # actual route point that triggered this zone
+            "hit_lat": lat,
             "hit_lon": lon,
         })
 
     # Sort worst first
     found.sort(key=lambda z: -_RISK_ORDER.get(z["risk"], 0))
+
+    # ── Parent/child deduplication ────────────────────────────────────────────
+    # Remove any zone whose bbox is fully inside another zone at equal or higher
+    # risk. This is what prevents Tondo + all its sub-streets, or Navotas +
+    # all its barangays, from each counting as separate penalty events.
+    found = _deduplicate_zones(found)
+
     return found
 
 
@@ -644,19 +713,17 @@ def get_crime_warning_html(crime: dict, commuter_type: str = "") -> str:
 
 def apply_crime_to_routes(routes: list, crime: dict, commuter_type: str) -> list:
     """
-    Applies a single crime-zone safety penalty to all routes in-place.
+    Applies a single crime-zone flat safety penalty to all routes in-place.
     Use apply_crime_both_ends() when you have separate origin/destination lookups.
-    Uses proportional reduction so stacking with other hazards stays bounded.
     """
-    from risk_monitor.features import get_score_color, get_score_label, apply_penalty_to_route, _route_exposure_multiplier
+    from risk_monitor.features import get_score_color, get_score_label, apply_penalty_to_route
 
-    penalty = crime.get("penalty", 0)
+    penalty = float(crime.get("penalty", 0))
     warning = get_crime_warning(crime, commuter_type)
 
     for r in routes:
         if penalty > 0:
-            multiplier = _route_exposure_multiplier(r.get('id', 1))
-            apply_penalty_to_route(r, penalty * multiplier, commuter_type)
+            apply_penalty_to_route(r, penalty, commuter_type)
             r["score_color"] = get_score_color(r["safety_score"])
             r["score_label"] = get_score_label(r["safety_score"])
         r["crime_warning"] = warning if penalty > 0 else ""
@@ -716,9 +783,10 @@ def apply_crime_both_ends(
 
     for r in routes:
         if base_penalty > 0:
-            multiplier = _route_exposure_multiplier(r.get('id', 1))
-            scaled     = base_penalty * multiplier
-            apply_penalty_to_route(r, scaled, commuter_type)
+            # Flat penalty — same for all routes since the endpoint crime zone
+            # is the same for all routes. Crime zone path scanning (below)
+            # provides the per-route differentiation.
+            apply_penalty_to_route(r, float(base_penalty), commuter_type)
             r["score_color"] = get_score_color(r["safety_score"])
             r["score_label"] = get_score_label(r["safety_score"])
         r["crime_warning"]          = warning if base_penalty > 0 else ""
@@ -770,55 +838,98 @@ def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
         endpoint_risk = r.get("_endpoint_crime_risk", "none")
         endpoint_ord  = _RISK_ORDER.get(endpoint_risk, 0)
 
-        # Collect scanned zones that represent genuinely NEW exposure:
-        #   - risk level is HIGHER than endpoint, OR
-        #   - risk level is same but it is not a sub-zone of the endpoint area
+        # ── Deduplicate scanned zones before scoring ─────────────────────────
+        # scan_route_crime_zones() already removes parent/child duplicates at
+        # scan time, but apply_crime_both_ends() may have set an endpoint risk
+        # for a large zone (e.g. Tondo) that also contains zones in route_zones.
+        # We run a second dedup pass here to cover that case:
+        #   - Remove any route zone that is spatially inside the endpoint zone
+        #     at equal or lower risk.
+        #   - Remove any route zone that is spatially inside ANOTHER route zone
+        #     at equal or higher risk (belt-and-suspenders for the scan dedup).
+        orig_zone_name      = (r.get("orig_crime") or {}).get("area", "").lower()
+        dest_zone_name      = (r.get("dest_crime") or {}).get("area", "").lower()
+        endpoint_zone_names = {orig_zone_name, dest_zone_name} - {""}
+
+        # Build a combined set of "already-covered" zones: endpoint zones +
+        # all zones from the scan list that would cover other scan-list zones.
+        # We treat the scanned zones as a pool and deduplicate against each other
+        # as well as against endpoint zones.
+        def _is_covered_by_endpoint(z_name, z_coords, z_ord):
+            """True if this zone is inside an endpoint zone at same/higher risk."""
+            if not z_coords:
+                return False
+            for ep_name in endpoint_zone_names:
+                ep_coords = coord_zones.get(ep_name)
+                ep_risk   = coord_zones.get(ep_name + "__risk__")  # not used, see below
+                # We don't have endpoint risk in coord_zones dict directly,
+                # use endpoint_ord which was computed from _endpoint_crime_risk
+                if ep_coords and endpoint_ord >= z_ord:
+                    if _is_contained_within(z_coords, ep_coords):
+                        return True
+            return False
+
+        # Full dedup of route_zones: remove zones inside any higher/equal-risk
+        # sibling zone OR inside the endpoint zone.
+        deduped_route_zones = []
+        for candidate in route_zones:
+            c_name   = candidate["name"].lower()
+            c_coords = candidate.get("coords")
+            c_risk   = candidate.get("risk", "none")
+            c_ord    = _RISK_ORDER.get(c_risk, 0)
+
+            if c_ord == 0:
+                continue
+
+            # Skip if it's literally the endpoint zone
+            if c_name in endpoint_zone_names:
+                continue
+
+            # Skip if absorbed by endpoint zone
+            if _is_covered_by_endpoint(c_name, c_coords, c_ord):
+                continue
+
+            # Skip if absorbed by another zone in the scan list
+            absorbed = False
+            if c_coords:
+                for other in route_zones:
+                    if other is candidate:
+                        continue
+                    o_coords = other.get("coords")
+                    o_ord    = _RISK_ORDER.get(other.get("risk", "none"), 0)
+                    if o_coords and o_ord >= c_ord and _is_contained_within(c_coords, o_coords):
+                        absorbed = True
+                        break
+            if absorbed:
+                continue
+
+            deduped_route_zones.append(candidate)
+
+        # Collect incremental penalty for genuinely new hazard zones
         extra_penalty_total = 0.0
         notable             = []
         applied_zone_names  = set()
 
-        # If origin/dest itself was a zone, record it to check containment
-        orig_zone_name = (r.get("orig_crime") or {}).get("area", "").lower()
-        dest_zone_name = (r.get("dest_crime") or {}).get("area", "").lower()
-        endpoint_zone_names = {orig_zone_name, dest_zone_name} - {""}
+        # Per-zone flat penalties (calibrated for flat-subtraction system):
+        #   high zone on route:   2.0 pts
+        #   moderate zone:        1.0 pts
+        #   low zone:             0.4 pts
+        # Each unique zone that's not a sub-zone of something already counted
+        # adds exactly this much. Zone count matters; zone geography doesn't.
+        _PER_ZONE_PENALTY = {"high": 2.0, "moderate": 1.0, "low": 0.4}
 
-        for zone in route_zones:
+        for zone in deduped_route_zones:
             z_name = zone["name"].lower()
             z_risk = zone.get("risk", "none")
             z_ord  = _RISK_ORDER.get(z_risk, 0)
 
-            if z_ord == 0:
-                continue   # 'none' risk zones are irrelevant
-
-            # Skip if this zone IS one of the endpoint zones (already penalised)
-            if z_name in endpoint_zone_names:
-                continue
-
-            # Skip if this zone is spatially contained within a higher/equal-risk
-            # endpoint zone (classic Gagalangin ⊂ Tondo case).
-            z_coords = coord_zones.get(z_name)
-            if z_coords and z_ord <= endpoint_ord:
-                is_subzone = False
-                for ep_name in endpoint_zone_names:
-                    ep_coords = coord_zones.get(ep_name)
-                    if ep_coords:
-                        ep_lat_min, ep_lat_max, ep_lon_min, ep_lon_max = ep_coords
-                        z_lat_min,  z_lat_max,  z_lon_min,  z_lon_max  = z_coords
-                        if (z_lat_min >= ep_lat_min and z_lat_max <= ep_lat_max and
-                                z_lon_min >= ep_lon_min and z_lon_max <= ep_lon_max):
-                            is_subzone = True
-                            break
-                if is_subzone:
-                    continue
-
-            # This zone is a genuinely new hazard.
-            # Apply an INCREMENTAL penalty = difference vs endpoint level,
-            # but only if worse, or a flat small penalty if same level new zone.
             if z_ord > endpoint_ord:
-                incremental = _CRIME_PENALTY.get(z_risk, 0) - _CRIME_PENALTY.get(endpoint_risk, 0)
+                # Zone is worse than endpoint: add difference + per-zone penalty
+                diff        = _CRIME_PENALTY.get(z_risk, 0) - _CRIME_PENALTY.get(endpoint_risk, 0)
+                incremental = diff + _PER_ZONE_PENALTY.get(z_risk, 1.0)
             else:
-                # Same risk level, genuinely different zone → small additive penalty
-                incremental = _CRIME_PENALTY.get(z_risk, 0) * 0.35
+                # Same or lower level: flat per-zone penalty only
+                incremental = _PER_ZONE_PENALTY.get(z_risk, 0.5)
 
             if incremental > 0 and z_name not in applied_zone_names:
                 extra_penalty_total += incremental

@@ -65,9 +65,15 @@ _CONFIRM_THRESHOLD = 2
 # DB SETUP
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _is_mysql(db) -> bool:
+    """Detect whether db is a MySQL (msql) or SQLite (nsql) instance."""
+    return hasattr(db, 'DB_HOST')
+
+
 def init_report_tables(db) -> None:
     """
     Creates community_reports and report_confirmations tables.
+    Handles both SQLite (nsql) and MySQL (msql) from db_opt.py automatically.
 
     Args:
         db: nsql or msql instance from db_opt.py
@@ -76,33 +82,69 @@ def init_report_tables(db) -> None:
         from risk_monitor.community_reports import init_report_tables
         init_report_tables(chDB_perf)
     """
+    mysql = _is_mysql(db)
+
+    if mysql:
+        auto_inc  = "INT AUTO_INCREMENT"
+        text_type = "VARCHAR(255)"
+        real_type = "DOUBLE"
+        int_type  = "INT"
+    else:
+        auto_inc  = "INTEGER"      # SQLite: INTEGER PRIMARY KEY = rowid alias (auto-increments)
+        text_type = "TEXT"
+        real_type = "REAL"
+        int_type  = "INTEGER"
+
     conn, c = db.get_db_connection()
     try:
-        c.execute("""
+        db.execute_query(c, f"""
             CREATE TABLE IF NOT EXISTS community_reports (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                username     TEXT NOT NULL,
-                report_type  TEXT NOT NULL,
-                lat          REAL NOT NULL,
-                lon          REAL NOT NULL,
-                description  TEXT DEFAULT '',
-                confirmations INTEGER DEFAULT 0,
-                reported_at  TEXT NOT NULL,
-                expires_at   TEXT NOT NULL,
-                active       INTEGER DEFAULT 1
+                id            {auto_inc} PRIMARY KEY,
+                username      {text_type} NOT NULL,
+                report_type   {text_type} NOT NULL,
+                lat           {real_type} NOT NULL,
+                lon           {real_type} NOT NULL,
+                description   {text_type} DEFAULT '',
+                confirmations {int_type}  DEFAULT 0,
+                reported_at   {text_type} NOT NULL,
+                expires_at    {text_type} NOT NULL,
+                active        {int_type}  DEFAULT 1
             )
         """)
 
-        c.execute("""
+        db.execute_query(c, f"""
             CREATE TABLE IF NOT EXISTS report_confirmations (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                report_id INTEGER NOT NULL,
-                username  TEXT NOT NULL,
-                confirmed_at TEXT NOT NULL
+                id           {auto_inc} PRIMARY KEY,
+                report_id    {int_type}  NOT NULL,
+                username     {text_type} NOT NULL,
+                confirmed_at {text_type} NOT NULL
             )
         """)
 
         conn.commit()
+
+        # ── Migrate old "PHT"-suffixed timestamps to ISO-8601 ────────────────
+        # Old code stored "2025-01-15 14:30 PHT"; string < comparison only
+        # works reliably with ISO-8601.  Fix any existing rows on startup.
+        try:
+            c.execute(
+                "SELECT id, expires_at, reported_at FROM community_reports "
+                "WHERE expires_at LIKE '% PHT'"
+            )
+            old_rows = c.fetchall()
+            for row_id, exp_at, rep_at in old_rows:
+                new_exp = exp_at.replace(" PHT", ":00") if exp_at else exp_at
+                new_rep = rep_at.replace(" PHT", ":00") if rep_at else rep_at
+                db.execute_query(c,
+                    "UPDATE community_reports SET expires_at=?, reported_at=? WHERE id=?",
+                    (new_exp, new_rep, row_id)
+                )
+            if old_rows:
+                conn.commit()
+                print(f"🔧 Migrated {len(old_rows)} report(s) to ISO timestamp format.")
+        except Exception:
+            pass  # migration is best-effort; don't block startup
+
         print("🟢 community_reports tables ready.")
     except Exception as e:
         print(f"🔴 community_reports init error: {e}")
@@ -151,8 +193,9 @@ def submit_report(
     rtype    = REPORT_TYPES[report_type]
     now      = datetime.now(_PHT)
     expires  = now + timedelta(hours=rtype["expiry_hours"])
-    now_str  = now.strftime("%Y-%m-%d %H:%M PHT")
-    exp_str  = expires.strftime("%Y-%m-%d %H:%M PHT")
+    # Store as ISO-8601 so string comparison in _expire_old_reports works correctly
+    now_str  = now.strftime("%Y-%m-%d %H:%M:%S")
+    exp_str  = expires.strftime("%Y-%m-%d %H:%M:%S")
     desc     = str(description)[:200]
 
     conn, c = db.get_db_connection()
@@ -165,13 +208,18 @@ def submit_report(
         )
         conn.commit()
 
-        # Get the inserted ID
-        db.execute_query(c,
-            "SELECT id FROM community_reports WHERE username=? ORDER BY id DESC LIMIT 1",
-            (username,)
-        )
-        row = c.fetchone()
-        report_id = row[0] if row else None
+        # Get the inserted ID — use lastrowid first (works for both SQLite and MySQL)
+        report_id = getattr(c, 'lastrowid', None)
+        if not report_id:
+            db.execute_query(c,
+                "SELECT id FROM community_reports WHERE username=? ORDER BY id DESC LIMIT 1",
+                (username,)
+            )
+            row = c.fetchone()
+            report_id = row[0] if row else None
+
+        if report_id is None:
+            return {"ok": False, "message": "Report insert appeared to succeed but no ID returned.", "report_id": None}
 
         return {
             "ok":        True,
@@ -179,7 +227,11 @@ def submit_report(
             "report_id": report_id,
         }
     except Exception as e:
-        return {"ok": False, "message": f"Error: {str(e)}", "report_id": None}
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return {"ok": False, "message": f"Error saving report: {str(e)}", "report_id": None}
     finally:
         c.close()
         conn.close()
@@ -224,7 +276,7 @@ def confirm_report(db, report_id: int, username: str) -> dict:
             return {"ok": False, "message": "You already confirmed this report.", "confirmations": row[1]}
 
         # Add confirmation
-        now_str = datetime.now(_PHT).strftime("%Y-%m-%d %H:%M PHT")
+        now_str = datetime.now(_PHT).strftime("%Y-%m-%d %H:%M:%S")
         db.execute_query(c,
             "INSERT INTO report_confirmations (report_id, username, confirmed_at) VALUES (?, ?, ?)",
             (report_id, username, now_str)
@@ -252,7 +304,7 @@ def confirm_report(db, report_id: int, username: str) -> dict:
 
 def _expire_old_reports(db, c, conn) -> None:
     """Mark expired reports as inactive. Called automatically on queries."""
-    now_str = datetime.now(_PHT).strftime("%Y-%m-%d %H:%M PHT")
+    now_str = datetime.now(_PHT).strftime("%Y-%m-%d %H:%M:%S")
     try:
         db.execute_query(c,
             "UPDATE community_reports SET active=0 WHERE expires_at < ? AND active=1",
@@ -378,23 +430,7 @@ def get_area_safety_penalty(db, lat: float, lon: float) -> int:
         Integer penalty to subtract from safety score (can be negative = bonus).
     """
     reports = get_reports_near(db, lat, lon)
-    if not reports:
-        return 0
-
-    total = 0
-    for r in reports:
-        meta    = REPORT_TYPES.get(r["report_type"], {})
-        penalty = meta.get("base_penalty", 0)
-
-        # Unverified reports count at 50% weight
-        weight = 1.0 if r["verified"] else 0.5
-        # High-confirmation reports count more
-        boost = min(1.5, 1.0 + (r["confirmations"] * 0.1))
-
-        total += int(penalty * weight * boost)
-
-    # Cap penalty at -40 (can't make area perfectly safe or completely dead)
-    return max(-15, min(40, total))
+    return _calc_penalty_from_reports(reports)
 
 
 def apply_reports_to_routes(
@@ -405,7 +441,7 @@ def apply_reports_to_routes(
 ) -> list:
     """
     Applies community report safety penalties to routes.
-    Checks reports near both origin and destination.
+    Checks reports near origin, destination, AND waypoints along each route path.
     Adds 'report_warnings' list to each route.
 
     Call this AFTER apply_weather_to_routes() in navigation.py.
@@ -421,35 +457,79 @@ def apply_reports_to_routes(
     """
     from risk_monitor.features import get_score_color, get_score_label
 
+    # Collect reports at origin and destination
     orig_reports = get_reports_near(db, orig_lat, orig_lon)
     dest_reports = get_reports_near(db, dest_lat, dest_lon)
 
-    orig_penalty = get_area_safety_penalty(db, orig_lat, orig_lon)
-    dest_penalty = get_area_safety_penalty(db, dest_lat, dest_lon)
-
-    # Use the worse of the two areas
-    penalty = max(orig_penalty, dest_penalty)
-
-    # Build warning strings from verified/high-confirmation reports
-    warnings = []
-    all_nearby = orig_reports + dest_reports
-    seen_types = set()
-    for r in sorted(all_nearby, key=lambda x: -x["confirmations"]):
-        if r["report_type"] not in seen_types and r["category"] != "positive":
-            seen_types.add(r["report_type"])
-            conf_text = f" ({r['confirmations']} confirmed)" if r["verified"] else ""
-            warnings.append(f"{r['icon']} {r['label']}{conf_text} reported nearby")
-        if len(warnings) >= 3:
-            break
+    # Also collect ALL active reports once, for path-based scanning
+    all_active = get_all_active_reports(db, limit=200)
 
     for r in routes:
-        if penalty > 0:
-            r["safety_score"] = max(0, r.get("safety_score", 75) - penalty)
+        # ── 1. Sample waypoints along this route's path ───────────────────
+        midpoint_reports = []
+        waypoints = []
+        if r.get("segments"):
+            for seg in r["segments"]:
+                coords = seg.get("coords", [])
+                # train segments may be nested: [[[lat,lon],...],...]
+                if coords and isinstance(coords[0], list) and \
+                        coords[0] and isinstance(coords[0][0], list):
+                    for sub in coords:
+                        waypoints.extend(sub)
+                else:
+                    waypoints.extend(coords)
+        elif r.get("coords"):
+            waypoints = r["coords"]
+
+        # Sample up to 10 evenly spaced midpoints (skip first/last — already checked)
+        if len(waypoints) > 2:
+            step = max(1, len(waypoints) // 10)
+            sample_pts = waypoints[step:-1:step][:10]
+            seen_ids = {rep["id"] for rep in orig_reports + dest_reports}
+            for wp in sample_pts:
+                if isinstance(wp, (list, tuple)) and len(wp) >= 2:
+                    wp_lat, wp_lon = float(wp[0]), float(wp[1])
+                    for active_rep in all_active:
+                        if active_rep["id"] in seen_ids:
+                            continue
+                        if (abs(active_rep["lat"] - wp_lat) <= _REPORT_RADIUS_DEG and
+                                abs(active_rep["lon"] - wp_lon) <= _REPORT_RADIUS_DEG):
+                            midpoint_reports.append(active_rep)
+                            seen_ids.add(active_rep["id"])
+
+        # ── 2. Compute penalty from all sources ───────────────────────────
+        orig_penalty = _calc_penalty_from_reports(orig_reports)
+        dest_penalty = _calc_penalty_from_reports(dest_reports)
+        path_penalty = _calc_penalty_from_reports(midpoint_reports)
+
+        # Use worst endpoint penalty + any additional path penalty
+        endpoint_penalty = max(orig_penalty, dest_penalty)
+        # Path penalty is additive but capped so it doesn't dominate alone
+        total_penalty = min(50, endpoint_penalty + min(20, path_penalty))
+
+        # ── 3. Build warning strings ──────────────────────────────────────
+        warnings = []
+        all_nearby = orig_reports + dest_reports + midpoint_reports
+        seen_types = set()
+        for rep in sorted(all_nearby, key=lambda x: -x["confirmations"]):
+            if rep["report_type"] not in seen_types and rep["category"] != "positive":
+                seen_types.add(rep["report_type"])
+                conf_text = f" ({rep['confirmations']} confirmed)" if rep["verified"] else ""
+                loc_hint = ""
+                if rep in midpoint_reports and rep not in orig_reports + dest_reports:
+                    loc_hint = " along route"
+                warnings.append(f"{rep['icon']} {rep['label']}{conf_text} reported{loc_hint} nearby")
+            if len(warnings) >= 4:
+                break
+
+        # ── 4. Apply to route ─────────────────────────────────────────────
+        if total_penalty > 0:
+            r["safety_score"] = max(0, r.get("safety_score", 75) - total_penalty)
             r["score_color"]  = get_score_color(r["safety_score"])
             r["score_label"]  = get_score_label(r["safety_score"])
         r["report_warnings"] = warnings
 
-        # Separate fire warning — shown prominently with alternative route hint
+        # Fire warning — shown prominently with alternative route hint
         fire_reports = [rep for rep in all_nearby if rep["report_type"] == "fire"]
         if fire_reports:
             fr = fire_reports[0]
@@ -462,6 +542,20 @@ def apply_reports_to_routes(
             r["fire_warning"] = ""
 
     return routes
+
+
+def _calc_penalty_from_reports(reports: list) -> int:
+    """Calculate a cumulative safety penalty from a list of report dicts."""
+    if not reports:
+        return 0
+    total = 0
+    for rep in reports:
+        meta    = REPORT_TYPES.get(rep["report_type"], {})
+        penalty = meta.get("base_penalty", 0)
+        weight  = 1.0 if rep["verified"] else 0.5
+        boost   = min(1.5, 1.0 + (rep["confirmations"] * 0.1))
+        total  += int(penalty * weight * boost)
+    return max(-15, min(40, total))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
