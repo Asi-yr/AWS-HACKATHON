@@ -38,24 +38,33 @@ _PHT = timezone(timedelta(hours=8))
 
 REPORT_TYPES = {
     # Safety hazards
-    "flooding":      {"label": "Flooding",           "icon": "🌊", "expiry_hours": 3,  "base_penalty": 30, "color": "#1a5276", "category": "hazard"},
-    "fire":          {"label": "Fire / Blaze",        "icon": "🔥", "expiry_hours": 2,  "base_penalty": 45, "color": "#c0392b", "category": "hazard"},
-    "dark_area":     {"label": "Dark / Unlit Area",   "icon": "🌑", "expiry_hours": 12, "base_penalty": 15, "color": "#2c3e50", "category": "safety"},
-    "crime":         {"label": "Crime / Snatching",   "icon": "🚨", "expiry_hours": 6,  "base_penalty": 25, "color": "#c0392b", "category": "safety"},
-    "harassment":    {"label": "Harassment",           "icon": "⚠️", "expiry_hours": 6,  "base_penalty": 20, "color": "#e74c3c", "category": "safety"},
-    "road_damage":   {"label": "Road Damage",          "icon": "🕳️", "expiry_hours": 24, "base_penalty": 10, "color": "#e67e22", "category": "hazard"},
-    "accident":      {"label": "Accident",             "icon": "💥", "expiry_hours": 2,  "base_penalty": 20, "color": "#e74c3c", "category": "hazard"},
+    # affect_radius_m: how far FROM THE ROUTE PATH this report must be to count.
+    # Tight (≤40m)   = road-specific — only matters if you're ON that road.
+    # Medium (60–120m) = some spillover (crowd, blocked junction, visible hazard).
+    # Wide (150–250m) = area-wide threats that affect nearby roads too.
+    "flooding":      {"label": "Flooding",           "icon": "🌊", "expiry_hours": 3,  "base_penalty": 30, "color": "#1a5276", "category": "hazard",  "affect_radius_m": 200},
+    "fire":          {"label": "Fire / Blaze",        "icon": "🔥", "expiry_hours": 2,  "base_penalty": 45, "color": "#c0392b", "category": "hazard",  "affect_radius_m": 250},
+    "dark_area":     {"label": "Dark / Unlit Area",   "icon": "🌑", "expiry_hours": 12, "base_penalty": 15, "color": "#2c3e50", "category": "safety",  "affect_radius_m": 35},
+    "crime":         {"label": "Crime / Snatching",   "icon": "🚨", "expiry_hours": 6,  "base_penalty": 25, "color": "#c0392b", "category": "safety",  "affect_radius_m": 80},
+    "harassment":    {"label": "Harassment",           "icon": "⚠️", "expiry_hours": 6,  "base_penalty": 20, "color": "#e74c3c", "category": "safety",  "affect_radius_m": 60},
+    "road_damage":   {"label": "Road Damage",          "icon": "🕳️", "expiry_hours": 24, "base_penalty": 10, "color": "#e67e22", "category": "hazard",  "affect_radius_m": 30},
+    "accident":      {"label": "Accident",             "icon": "💥", "expiry_hours": 2,  "base_penalty": 20, "color": "#e74c3c", "category": "hazard",  "affect_radius_m": 40},
     # Traffic
-    "heavy_traffic": {"label": "Heavy Traffic",        "icon": "🚗", "expiry_hours": 1,  "base_penalty": 10, "color": "#f39c12", "category": "traffic"},
-    "road_closed":   {"label": "Road Closed",          "icon": "🚧", "expiry_hours": 6,  "base_penalty": 20, "color": "#e67e22", "category": "traffic"},
-    "construction":  {"label": "Construction",         "icon": "🏗️", "expiry_hours": 48, "base_penalty": 8,  "color": "#d35400", "category": "traffic"},
+    "heavy_traffic": {"label": "Heavy Traffic",        "icon": "🚗", "expiry_hours": 1,  "base_penalty": 10, "color": "#f39c12", "category": "traffic", "affect_radius_m": 120},
+    "road_closed":   {"label": "Road Closed",          "icon": "🚧", "expiry_hours": 6,  "base_penalty": 20, "color": "#e67e22", "category": "traffic", "affect_radius_m": 50},
+    "construction":  {"label": "Construction",         "icon": "🏗️", "expiry_hours": 48, "base_penalty": 8,  "color": "#d35400", "category": "traffic", "affect_radius_m": 50},
     # Community info
-    "safe_spot":     {"label": "Safe Spot / Well-Lit", "icon": "✅", "expiry_hours": 24, "base_penalty": -10,"color": "#27ae60", "category": "positive"},
-    "police_visible":{"label": "Police Visible",       "icon": "👮", "expiry_hours": 2,  "base_penalty": -8, "color": "#2980b9", "category": "positive"},
+    "safe_spot":     {"label": "Safe Spot / Well-Lit", "icon": "✅", "expiry_hours": 24, "base_penalty": -10,"color": "#27ae60", "category": "positive","affect_radius_m": 80},
+    "police_visible":{"label": "Police Visible",       "icon": "👮", "expiry_hours": 2,  "base_penalty": -8, "color": "#2980b9", "category": "positive","affect_radius_m": 100},
 }
 
-# How far (in degrees, ~111km per degree) a report affects nearby routes
-_REPORT_RADIUS_DEG = 0.003   # ~330 meters
+# DB fetch radius — wide enough to catch all types as candidates.
+# Actual match threshold is per-type affect_radius_m, checked precisely below.
+# 250m max / 111,000m per degree ≈ 0.00225 → 0.003 gives a safe margin.
+_REPORT_RADIUS_DEG = 0.003   # ~330m — used for DB queries only
+
+# Metres per degree latitude (constant). Lon correction applied per-point below.
+_M_PER_DEG_LAT = 111_000.0
 
 # Minimum confirmations before a report is considered "verified"
 _CONFIRM_THRESHOLD = 2
@@ -433,6 +442,59 @@ def get_area_safety_penalty(db, lat: float, lon: float) -> int:
     return _calc_penalty_from_reports(reports)
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# PRECISE ROUTE-MATCHING GEOMETRY
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _pt_to_segment_dist_m(plat, plon, alat, alon, blat, blon):
+    """
+    Perpendicular distance in metres from point P to segment A->B.
+    Flat-earth approximation, accurate within ~1% for distances < 50km.
+    This is what makes reports road-specific: a dark_area (radius 35m) on a
+    side street won't match a highway segment 60m away.
+    """
+    import math
+    cos_lat = math.cos(math.radians((alat + blat) / 2.0))
+    m_per_deg_lon = _M_PER_DEG_LAT * cos_lat
+    bx = (blon - alon) * m_per_deg_lon
+    by = (blat - alat) * _M_PER_DEG_LAT
+    px = (plon - alon) * m_per_deg_lon
+    py = (plat - alat) * _M_PER_DEG_LAT
+    seg_len_sq = bx * bx + by * by
+    if seg_len_sq < 1e-6:
+        return math.sqrt(px * px + py * py)
+    t = max(0.0, min(1.0, (px * bx + py * by) / seg_len_sq))
+    dx = px - t * bx
+    dy = py - t * by
+    return math.sqrt(dx * dx + dy * dy)
+
+
+def _report_hits_route(rep_lat, rep_lon, report_type, waypoints):
+    """
+    True if the report falls within its type-specific affect_radius_m of
+    any segment of the route polyline.
+
+    Replaces the old bounding-box check. A dark_area (35m radius) on a
+    parallel side street won't bleed onto the adjacent highway. Fire/flooding
+    (200-250m radius) will still propagate to nearby roads as expected.
+    """
+    import math
+    radius_m = REPORT_TYPES.get(report_type, {}).get("affect_radius_m", 80)
+    n = len(waypoints)
+    if n == 0:
+        return False
+    if n == 1:
+        cos_lat = math.cos(math.radians(rep_lat))
+        dx = (rep_lon - waypoints[0][1]) * _M_PER_DEG_LAT * cos_lat
+        dy = (rep_lat - waypoints[0][0]) * _M_PER_DEG_LAT
+        return math.sqrt(dx * dx + dy * dy) <= radius_m
+    for i in range(n - 1):
+        a, b = waypoints[i], waypoints[i + 1]
+        if _pt_to_segment_dist_m(rep_lat, rep_lon, a[0], a[1], b[0], b[1]) <= radius_m:
+            return True
+    return False
+
+
 def apply_reports_to_routes(
     routes: list,
     db,
@@ -457,9 +519,22 @@ def apply_reports_to_routes(
     """
     from risk_monitor.features import get_score_color, get_score_label
 
-    # Collect reports at origin and destination
-    orig_reports = get_reports_near(db, orig_lat, orig_lon)
-    dest_reports = get_reports_near(db, dest_lat, dest_lon)
+    # Collect reports at origin and destination using per-type radius filter.
+    # get_reports_near does a wide DB fetch; we then filter by affect_radius_m.
+    def _filter_by_radius(reports, pt_lat, pt_lon):
+        import math
+        out = []
+        for rep in reports:
+            radius_m = REPORT_TYPES.get(rep["report_type"], {}).get("affect_radius_m", 80)
+            cos_lat = math.cos(math.radians(pt_lat))
+            dx = (rep["lon"] - pt_lon) * _M_PER_DEG_LAT * cos_lat
+            dy = (rep["lat"] - pt_lat) * _M_PER_DEG_LAT
+            if math.sqrt(dx * dx + dy * dy) <= radius_m:
+                out.append(rep)
+        return out
+
+    orig_reports = _filter_by_radius(get_reports_near(db, orig_lat, orig_lon), orig_lat, orig_lon)
+    dest_reports = _filter_by_radius(get_reports_near(db, dest_lat, dest_lon), dest_lat, dest_lon)
 
     # Also collect ALL active reports once, for path-based scanning
     all_active = get_all_active_reports(db, limit=200)
@@ -481,21 +556,28 @@ def apply_reports_to_routes(
         elif r.get("coords"):
             waypoints = r["coords"]
 
-        # Sample up to 10 evenly spaced midpoints (skip first/last — already checked)
-        if len(waypoints) > 2:
-            step = max(1, len(waypoints) // 10)
-            sample_pts = waypoints[step:-1:step][:10]
-            seen_ids = {rep["id"] for rep in orig_reports + dest_reports}
-            for wp in sample_pts:
-                if isinstance(wp, (list, tuple)) and len(wp) >= 2:
-                    wp_lat, wp_lon = float(wp[0]), float(wp[1])
-                    for active_rep in all_active:
-                        if active_rep["id"] in seen_ids:
-                            continue
-                        if (abs(active_rep["lat"] - wp_lat) <= _REPORT_RADIUS_DEG and
-                                abs(active_rep["lon"] - wp_lon) <= _REPORT_RADIUS_DEG):
-                            midpoint_reports.append(active_rep)
-                            seen_ids.add(active_rep["id"])
+        # ── Precise segment-based matching ───────────────────────────────
+        # Each active report is tested against the FULL route polyline using
+        # perpendicular point-to-segment distance, capped by per-type radius.
+        # This prevents a dark_area on a side street (radius=35m) from bleeding
+        # onto an adjacent highway 60m away, while fire/flooding (radius=200-250m)
+        # still correctly propagates to nearby roads.
+        seen_ids = {rep["id"] for rep in orig_reports + dest_reports}
+        clean_wps = [
+            (float(wp[0]), float(wp[1]))
+            for wp in waypoints
+            if isinstance(wp, (list, tuple)) and len(wp) >= 2
+        ]
+        for active_rep in all_active:
+            if active_rep["id"] in seen_ids:
+                continue
+            if _report_hits_route(
+                active_rep["lat"], active_rep["lon"],
+                active_rep["report_type"],
+                clean_wps,
+            ):
+                midpoint_reports.append(active_rep)
+                seen_ids.add(active_rep["id"])
 
         # ── 2. Compute penalty from all sources ───────────────────────────
         orig_penalty = _calc_penalty_from_reports(orig_reports)
