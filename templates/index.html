@@ -1087,12 +1087,19 @@ function safetyLineColor(score) {
 
 function drawAllRoutes(routes) {
   routes.forEach(route => {
-    const layers = [];
-    // Use safety-score colour for all polylines; fallback to route.color if score missing
-    const lineColor = safetyLineColor(route.safety_score || 75);
+    const layers =[];
+    const safetyC = safetyLineColor(route.safety_score || 75);
+    const fallbackColor = route.color || safetyC;
 
     if (route.type === 'transit' && route.segments) {
       route.segments.forEach((seg, idx) => {
+        let scolor = seg.color || fallbackColor;
+        // Keep transit lines their original type coloring properly visually identified 
+        if (seg.type === 'train')        scolor = seg.color || '#27ae60';
+        else if (seg.type === 'jeepney') scolor = seg.color || '#e67e22';
+        else if (seg.type === 'bus')     scolor = seg.color || '#16a085';
+        else if (seg.type === 'walk')    scolor = '#555';
+        
         // Draw the polyline for this segment
         if (seg.type === 'train') {
           const coordSets = Array.isArray(seg.coords[0]) && Array.isArray(seg.coords[0][0])
@@ -1100,33 +1107,32 @@ function drawAllRoutes(routes) {
           coordSets.forEach(cs => {
             if (cs && cs.length >= 2) {
               layers.push(L.polyline(cs, {
-                color: lineColor, weight: 6, opacity: 0.9,
+                color: scolor, weight: 6, opacity: 0.9,
                 dashArray: '12, 5',
               }).addTo(map));
             }
           });
           // Station pins
-          (seg.stations || []).forEach((st, i) => {
+          (seg.stations ||[]).forEach((st, i) => {
             const isEnd = (i === 0 || i === seg.stations.length - 1);
             layers.push(L.circleMarker([st.lat, st.lon], {
               radius: isEnd ? 8 : 5,
-              color: lineColor,
-              fillColor: isEnd ? lineColor : 'white',
+              color: scolor,
+              fillColor: isEnd ? scolor : 'white',
               fillOpacity: 1, weight: 2,
             }).addTo(map).bindPopup(st.name));
           });
         } else if ((seg.type === 'jeepney' || seg.type === 'bus') && seg.coords && seg.coords.length >= 2) {
-          const segColor = seg.type === 'bus' ? '#16a085' : '#e67e22';
           layers.push(L.polyline(seg.coords, {
-            color: lineColor, weight: 5, opacity: 0.88,
+            color: scolor, weight: 5, opacity: 0.88,
           }).addTo(map));
           // Board/alight markers for surface transit
-          const stList = seg.stations || [];
+          const stList = seg.stations ||[];
           if (stList.length >= 2) {
             [stList[0], stList[stList.length-1]].forEach((st, i) => {
               if (!st || !st.lat) return;
               layers.push(L.circleMarker([st.lat, st.lon], {
-                radius: 6, color: segColor, fillColor: i === 0 ? segColor : 'white',
+                radius: 6, color: scolor, fillColor: i === 0 ? scolor : 'white',
                 fillOpacity: 1, weight: 2,
               }).addTo(map).bindPopup((i===0?'Board: ':'Alight: ') + (st.name||'')));
             });
@@ -1151,9 +1157,9 @@ function drawAllRoutes(routes) {
         }
       });
     } else if (route.coords && route.coords.length >= 2) {
-      // Road/car/motorcycle route — thicker for first (best) route
+      // Road/car/motorcycle route — use standard scoring visualization mapping path threat metrics
       layers.push(L.polyline(route.coords, {
-        color: lineColor, weight: route.id === 0 ? 7 : 5, opacity: 0.85,
+        color: fallbackColor, weight: route.id === 0 ? 7 : 5, opacity: 0.85,
       }).addTo(map));
     }
 
@@ -1161,7 +1167,7 @@ function drawAllRoutes(routes) {
   });
 
   // Fit map to all routes
-  const allCoords = routes.flatMap(r => r.coords || []);
+  const allCoords = routes.flatMap(r => r.coords ||[]);
   if (allCoords.length) {
     map.fitBounds(L.latLngBounds(allCoords), {padding: [40, 40]});
   }
