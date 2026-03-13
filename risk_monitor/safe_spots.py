@@ -224,7 +224,7 @@ def get_safe_spots_along_route(route_coords: list,
                     all_spots.append(s)
 
     all_spots.sort(key=lambda s: (s["priority"], s["dist_m"]))
-    return all_spots[:40]   # up to 40 spots for good coverage
+    return all_spots[:80]   # up to 80 spots for full route coverage
 
 
 def get_flat_route_coords(route: dict) -> list:
@@ -290,7 +290,7 @@ def get_spots_for_coords(coord_list: list, radius_m: int = 600) -> list:
                     seen_ids.add(s["id"])
                     all_spots.append(s)
     all_spots.sort(key=lambda s: (s["priority"], s["dist_m"]))
-    return all_spots[:40]
+    return all_spots[:80]
 
 
 def get_safe_spots_js(spots: list) -> str:

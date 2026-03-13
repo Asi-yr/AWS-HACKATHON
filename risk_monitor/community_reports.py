@@ -671,7 +671,7 @@ def get_report_panel_html() -> str:
 <button id="report-mode-btn"
   onclick="toggleReportMode()"
   title="Report a hazard"
-  style="position:absolute;bottom:24px;right:16px;z-index:1000;
+  style="position:absolute;bottom:24px;left:16px;z-index:1000;
          background:#c0392b;color:white;border:none;border-radius:50%;
          width:48px;height:48px;font-size:22px;cursor:pointer;
          box-shadow:0 3px 8px rgba(0,0,0,0.35);transition:transform 0.15s;">
@@ -772,7 +772,7 @@ function showToast(msg) {{
     if (!t) {{
         t = document.createElement('div');
         t.id = 'report-toast';
-        t.style.cssText = 'position:fixed;bottom:90px;right:16px;z-index:9999;' +
+        t.style.cssText = 'position:fixed;bottom:90px;left:16px;z-index:9999;' +
             'background:#2c3e50;color:#fff;padding:10px 16px;border-radius:8px;' +
             'font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.3);' +
             'transition:opacity 0.4s;pointer-events:none;';
