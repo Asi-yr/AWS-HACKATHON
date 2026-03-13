@@ -1,0 +1,1011 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../../core/app_colors.dart';
+import '../../core/custom_theme.dart';
+import '../../core/theme_controller.dart';
+import '../../models/travel_history_model.dart';
+import '../../models/user_model.dart';
+import '../../widgets/shared_widgets.dart';
+import 'profile_controller.dart';
+
+class ProfileView extends StatelessWidget {
+  const ProfileView({super.key});
+  @override
+  Widget build(BuildContext context) => ChangeNotifierProvider(
+    create: (_) => ProfileController(),
+    child: const _ProfileBody(),
+  );
+}
+
+class _ProfileBody extends StatelessWidget {
+  const _ProfileBody();
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<ProfileController>();
+    final t    = context.lt;
+    return Scaffold(
+      backgroundColor: t.bg,
+      body: Stack(children: [
+        Column(children: [
+          LigtasHeader(
+            title: 'Profile & Settings',
+            trailing: _EditBtn(),
+          ),
+          Expanded(child: ListView(
+            // FIX: Add bottom padding = nav height (72) + extra breathing room (16)
+            // so the Log Out button is never hidden behind the bottom nav bar.
+            padding: const EdgeInsets.only(bottom: 88),
+            children: [
+              _ProfileHero(),
+              _StatsRow(),
+              const SectionLabel('SAFETY & NAVIGATION'),
+              SettingsCard(children: [
+                ToggleRow(
+                  icon: Icons.security_rounded, 
+                  title: 'AI Safety Assistant', 
+                  subtitle: 'Real-time incident detection', 
+                  value: ctrl.user.preferences.aiSafety, 
+                  onChanged: (_) => ctrl.toggleAiSafety()
+                ),
+                const RowDivider(),
+                ChevronRow(icon: Icons.download_for_offline_rounded, title: 'Offline Maps', subtitle: 'Manage downloaded regions', trailing: '1.2 GB', onTap: ctrl.showComingSoon),
+                const RowDivider(),
+                ChevronRow(icon: Icons.history_rounded, title: 'Travel History', subtitle: 'Past routes and safety logs', onTap: ctrl.openTravelHistory),
+              ]),
+              const SectionLabel('PREFERENCES'),
+              SettingsCard(children: [
+                ToggleRow(
+                  icon: Icons.dark_mode_rounded, 
+                  title: 'Night Mode', 
+                  subtitle: 'Auto-detect based on sunset', 
+                  value: context.watch<ThemeController>().isDark, 
+                  onChanged: (_) => ctrl.toggleTheme(context)
+                ),
+                const RowDivider(),
+                ChevronRow(icon: Icons.notifications_rounded, title: 'Notifications', subtitle: 'Alerts and announcements', onTap: ctrl.showComingSoon),
+              ]),
+              const SectionLabel('ACCOUNT'),
+              SettingsCard(children: [
+                ChevronRow(icon: Icons.lock_rounded, title: 'Password & Security', subtitle: 'Password, Email, Two-Factor Auth', onTap: ctrl.openSecurity),
+                const RowDivider(),
+                ChevronRow(icon: Icons.logout_rounded, title: 'Log Out', danger: true, onTap: () => ctrl.logOut(context)),
+              ]),
+            ],
+          )),
+        ]),
+        if (ctrl.travelHistoryOpen) const _TravelHistoryPanel(),
+        if (ctrl.securityOpen)     const _SecurityPanel(),
+        if (ctrl.passwordOpen)     const _PasswordScreen(),
+        if (ctrl.emailOpen)        const _EmailScreen(),
+        if (ctrl.twoFAOpen)        const _TwoFAScreen(),
+        if (ctrl.comingSoon) Positioned.fill(child: ComingSoonOverlay(onDismiss: ctrl.hideComingSoon)),
+        LigtasToast(visible: ctrl.toastVis, message: ctrl.toastMsg, type: ctrl.toastType),
+      ]),
+    );
+  }
+}
+
+class _EditBtn extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.read<ProfileController>();
+    final t    = context.lt;
+    return GestureDetector(
+      onTap: () => showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => ChangeNotifierProvider.value(
+          value: ctrl,
+          child: const _EditProfileSheet(),
+        ),
+      ),
+      child: Container(
+        width: 38, height: 38,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppColors.tealDim,
+          border: Border.all(color: t.border)),
+        child: Icon(Icons.edit_rounded,
+          color: AppColors.primaryTeal(context.isDark), size: 17),
+      ),
+    );
+  }
+}
+
+class _ProfileHero extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final user = context.watch<ProfileController>().user;
+    final t    = context.lt;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 28),
+      child: Column(children: [
+        Stack(children: [
+          Container(
+            width: 84, height: 84,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.primaryTeal(context.isDark), width: 2.5)),
+            child: ClipOval(child: user.avatarUrl != null
+              ? Image.network(user.avatarUrl!, fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => _fallback())
+              : _fallback()),
+          ),
+          Positioned(bottom: 0, right: 0,
+            child: Container(
+              width: 22, height: 22,
+              decoration: BoxDecoration(
+                color: AppColors.primaryTeal(context.isDark),
+                shape: BoxShape.circle),
+              child: const Icon(Icons.check_rounded, color: Colors.white, size: 13),
+            )),
+        ]),
+        const SizedBox(height: 12),
+        Text(user.name, style: t.title(size: 20, w: FontWeight.w900)),
+        const SizedBox(height: 4),
+        Text(user.role, style: t.body(size: 13, color: t.text2)),
+      ]),
+    );
+  }
+  Widget _fallback() => Container(
+    color: AppColors.tealDim,
+    child: const Icon(Icons.person_rounded, color: AppColors.teal, size: 40));
+}
+
+class _StatsRow extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final user = context.watch<ProfileController>().user;
+    final t    = context.lt;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: Container(
+        decoration: BoxDecoration(
+          color: t.card,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: t.border)),
+        child: Row(children: [
+          _statCell('${user.stats.trips}',   'TRIPS',   t),
+          _divider(t.border),
+          _statCell('${user.stats.reports}', 'REPORTS', t),
+          _divider(t.border),
+          _trustCell(user.trustRank, t),
+        ]),
+      ),
+    );
+  }
+
+  Widget _statCell(String val, String label, dynamic t) => Expanded(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Column(children: [
+        Text(val, style: GoogleFonts.plusJakartaSans(
+          fontSize: 22, fontWeight: FontWeight.w900, color: t.text)),
+        const SizedBox(height: 2),
+        Text(label, style: t.label()),
+      ]),
+    ),
+  );
+
+  Widget _trustCell(TrustRank rank, dynamic t) {
+    final color = rank == TrustRank.lighthouse ? AppColors.rankLighthouse
+                : rank == TrustRank.lantern    ? AppColors.rankLantern
+                : AppColors.rankCandle;
+    final icon  = rank == TrustRank.lighthouse ? Icons.wb_sunny_rounded
+                : rank == TrustRank.lantern    ? Icons.flashlight_on_rounded
+                : Icons.local_fire_department_rounded;
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Column(children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: 2),
+          Text(rank.label, style: GoogleFonts.plusJakartaSans(
+            fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+          const SizedBox(height: 1),
+          Text('TRUST RANK', style: t.label()),
+        ]),
+      ),
+    );
+  }
+
+  Widget _divider(Color c) => Container(width: 1, height: 58, color: c);
+}
+
+class _EditProfileSheet extends StatefulWidget {
+  const _EditProfileSheet();
+  @override State<_EditProfileSheet> createState() => _EditProfileSheetState();
+}
+
+class _EditProfileSheetState extends State<_EditProfileSheet> {
+  late final TextEditingController _name, _username;
+  String _commuterType = 'Normal Commuter';
+  String _gender = 'Prefer not to say';
+
+  static const _commuterOpts = [
+    'Normal Commuter','Student Commuter','Women Commuter',
+    'LGBTQ+ Commuter','Disabled / Elderly Commuter','Minor Commuter',
+  ];
+  static const _genderOpts = [
+    'Prefer not to say','Male','Female','Non-binary','Other',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    final u = context.read<ProfileController>().user;
+    _name     = TextEditingController(text: u.name);
+    _username = TextEditingController(text: u.username);
+    _commuterType = _commuterOpts.contains(u.role) ? u.role : _commuterOpts.first;
+  }
+
+  @override
+  void dispose() {
+    _name.dispose(); _username.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.read<ProfileController>();
+    final t    = context.lt;
+    return Container(
+      decoration: BoxDecoration(
+        color: t.card,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
+      padding: EdgeInsets.fromLTRB(20, 0, 20,
+        MediaQuery.of(context).viewInsets.bottom + 28),
+      child: SingleChildScrollView(child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 36, height: 4, margin: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(color: t.border,
+              borderRadius: BorderRadius.circular(2))),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text('Edit Profile', style: t.title()),
+            IconButton(
+              icon: Icon(Icons.close_rounded, color: t.text2),
+              onPressed: () => Navigator.pop(context)),
+          ]),
+          const SizedBox(height: 12),
+          GestureDetector(
+            onTap: () => ctrl.pickProfileImage(),
+            child: Stack(children: [
+              Container(
+                width: 80, height: 80,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.primaryTeal(context.isDark), width: 2.5)),
+                child: ClipOval(child: ctrl.user.avatarUrl != null
+                  ? Image.network(ctrl.user.avatarUrl!, fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => _avatarFallback())
+                  : _avatarFallback()),
+              ),
+              Positioned.fill(child: ClipOval(child: Container(
+                color: Colors.black38,
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.camera_alt_rounded, color: Colors.white, size: 20),
+                    SizedBox(height: 2),
+                    Text('CHANGE', style: TextStyle(
+                      color: Colors.white, fontSize: 8, fontWeight: FontWeight.w800)),
+                  ],
+                ),
+              ))),
+            ]),
+          ),
+          const SizedBox(height: 20),
+          _field('Full Name',    _name,     'Your full name',  false, t),
+          const SizedBox(height: 12),
+          _field('Username',     _username, '@username',       false, t),
+          const SizedBox(height: 12),
+          _dropdown('Commuter Type', _commuterType, _commuterOpts, t,
+            (v) => setState(() => _commuterType = v!)),
+          const SizedBox(height: 12),
+          _dropdown('Gender', _gender, _genderOpts, t,
+            (v) => setState(() => _gender = v!)),
+          const SizedBox(height: 24),
+          TealButton(
+            label: 'Save Changes',
+            onTap: () {
+              ctrl.saveProfile(
+                name: _name.text.trim(),
+                username: _username.text.trim(),
+                commuterType: _commuterType,
+              );
+              Navigator.pop(context);
+            },
+          ),
+        ],
+      )),
+    );
+  }
+
+  Widget _avatarFallback() => Container(
+    color: AppColors.tealDim,
+    child: const Icon(Icons.person_rounded, color: AppColors.teal, size: 36));
+
+  Widget _field(String label, TextEditingController ctrl, String hint,
+      bool obscure, dynamic t) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: t.body(size: 12, w: FontWeight.w600, color: t.text2)),
+      const SizedBox(height: 6),
+      TextField(
+        controller: ctrl, obscureText: obscure,
+        style: t.body(size: 14),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: t.body(size: 14, color: t.text2),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: t.border)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: t.border)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: AppColors.primaryTeal(context.isDark), width: 1.5)),
+          filled: true, fillColor: t.bg,
+        ),
+      ),
+    ],
+  );
+
+  Widget _dropdown(String label, String value, List<String> opts, dynamic t,
+      ValueChanged<String?> onChanged) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: t.body(size: 12, w: FontWeight.w600, color: t.text2)),
+      const SizedBox(height: 6),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: t.border),
+          color: t.bg),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: opts.contains(value) ? value : opts.first,
+            isExpanded: true,
+            style: t.body(size: 14),
+            dropdownColor: t.card,
+            items: opts.map((o) => DropdownMenuItem(value: o,
+              child: Text(o, style: t.body(size: 14)))).toList(),
+            onChanged: onChanged,
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Security Sheet — Password, Email, 2FA
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Security Panel — full-screen overlay, same layout as Travel History
+// ─────────────────────────────────────────────────────────────────────────────
+class _SecurityPanel extends StatelessWidget {
+  const _SecurityPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<ProfileController>();
+    final t    = context.lt;
+    return Positioned.fill(
+      child: Material(
+        color: t.bg,
+        child: Column(children: [
+          LigtasHeader(
+            title: 'Password & Security',
+            leading: GestureDetector(
+              onTap: ctrl.closeSecurity,
+              child: Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: t.border)),
+                child: Icon(Icons.arrow_back_rounded, size: 16, color: t.text),
+              ),
+            ),
+          ),
+          Expanded(child: ListView(
+            padding: const EdgeInsets.fromLTRB(0, 16, 0, 24),
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 16, bottom: 12),
+                child: _subLabel('Security', t),
+              ),
+              SettingsCard(children: [
+                ChevronRow(
+                  icon: Icons.key_rounded,
+                  title: 'Password',
+                  subtitle: 'Change your login password',
+                  onTap: ctrl.openPassword,
+                ),
+                const RowDivider(),
+                ChevronRow(
+                  icon: Icons.email_rounded,
+                  title: 'Email Address',
+                  subtitle: 'Update your account email',
+                  onTap: ctrl.openEmail,
+                ),
+                const RowDivider(),
+                ChevronRow(
+                  icon: Icons.security_rounded,
+                  title: 'Two-Factor Authentication',
+                  subtitle: ctrl.twoFactorEnabled ? 'Enabled' : 'Not enabled',
+                  onTap: ctrl.openTwoFA,
+                ),
+              ]),
+            ],
+          )),
+        ]),
+      ),
+    );
+  }
+
+  Widget _subLabel(String s, dynamic t) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Text(s, style: GoogleFonts.plusJakartaSans(
+      fontSize: 12, fontWeight: FontWeight.w700,
+      color: t.text3, letterSpacing: 0.06)),
+  );
+}
+
+// ── Password Screen ──────────────────────────────────────────────────────────
+class _PasswordScreen extends StatefulWidget {
+  const _PasswordScreen();
+  @override State<_PasswordScreen> createState() => _PasswordScreenState();
+}
+class _PasswordScreenState extends State<_PasswordScreen> {
+  final _currentPw  = TextEditingController();
+  final _newPw      = TextEditingController();
+  final _confirmPw  = TextEditingController();
+  bool _showCurrent = false, _showNew = false, _showConfirm = false;
+
+  @override
+  void dispose() {
+    _currentPw.dispose(); _newPw.dispose(); _confirmPw.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.read<ProfileController>();
+    final t    = context.lt;
+    return Positioned.fill(
+      child: Material(
+        color: t.bg,
+        child: Column(children: [
+          LigtasHeader(
+            title: 'Change Password',
+            leading: GestureDetector(
+              onTap: ctrl.closePassword,
+              child: Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: t.border)),
+                child: Icon(Icons.arrow_back_rounded, size: 16, color: t.text),
+              ),
+            ),
+          ),
+          Expanded(child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _pwField('Current Password', _currentPw, _showCurrent,
+                () => setState(() => _showCurrent = !_showCurrent), t, context),
+              const SizedBox(height: 14),
+              _pwField('New Password', _newPw, _showNew,
+                () => setState(() => _showNew = !_showNew), t, context),
+              const SizedBox(height: 14),
+              _pwField('Confirm New Password', _confirmPw, _showConfirm,
+                () => setState(() => _showConfirm = !_showConfirm), t, context),
+              const SizedBox(height: 28),
+              TealButton(
+                label: 'Update Password',
+                onTap: () => ctrl.changePassword(
+                  context: context,
+                  currentPassword: _currentPw.text,
+                  newPassword:     _newPw.text,
+                  confirmPassword: _confirmPw.text,
+                  onSuccess: () {
+                    _currentPw.clear(); _newPw.clear(); _confirmPw.clear();
+                    ctrl.closePassword();
+                  },
+                ),
+              ),
+            ]),
+          )),
+        ]),
+      ),
+    );
+  }
+}
+
+// ── Email Screen ──────────────────────────────────────────────────────────────
+class _EmailScreen extends StatefulWidget {
+  const _EmailScreen();
+  @override State<_EmailScreen> createState() => _EmailScreenState();
+}
+class _EmailScreenState extends State<_EmailScreen> {
+  final _newEmail = TextEditingController();
+  final _emailPw  = TextEditingController();
+  bool  _showPw   = false;
+
+  @override
+  void dispose() { _newEmail.dispose(); _emailPw.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.read<ProfileController>();
+    final t    = context.lt;
+    return Positioned.fill(
+      child: Material(
+        color: t.bg,
+        child: Column(children: [
+          LigtasHeader(
+            title: 'Change Email',
+            leading: GestureDetector(
+              onTap: ctrl.closeEmail,
+              child: Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: t.border)),
+                child: Icon(Icons.arrow_back_rounded, size: 16, color: t.text),
+              ),
+            ),
+          ),
+          Expanded(child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _inputField('New Email Address', _newEmail, Icons.email_outlined,
+                false, null, t, context),
+              const SizedBox(height: 14),
+              _pwField('Current Password', _emailPw, _showPw,
+                () => setState(() => _showPw = !_showPw), t, context),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.tealDim,
+                  borderRadius: BorderRadius.circular(10)),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Icon(Icons.info_outline_rounded,
+                    size: 15, color: AppColors.primaryTeal(context.isDark)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(
+                    'A verification link will be sent to your new email. '
+                    'The change takes effect after you confirm it.',
+                    style: t.body(size: 12, color: t.text2))),
+                ]),
+              ),
+              const SizedBox(height: 28),
+              TealButton(
+                label: 'Send Verification',
+                onTap: () => ctrl.changeEmail(
+                  context: context,
+                  newEmail:        _newEmail.text.trim(),
+                  currentPassword: _emailPw.text,
+                  onSuccess: () {
+                    _newEmail.clear(); _emailPw.clear();
+                    ctrl.closeEmail();
+                  },
+                ),
+              ),
+            ]),
+          )),
+        ]),
+      ),
+    );
+  }
+}
+
+// ── 2FA Screen ────────────────────────────────────────────────────────────────
+class _TwoFAScreen extends StatelessWidget {
+  const _TwoFAScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl    = context.watch<ProfileController>();
+    final t       = context.lt;
+    final enabled = ctrl.twoFactorEnabled;
+    final teal    = AppColors.primaryTeal(context.isDark);
+    return Positioned.fill(
+      child: Material(
+        color: t.bg,
+        child: Column(children: [
+          LigtasHeader(
+            title: 'Two-Factor Authentication',
+            leading: GestureDetector(
+              onTap: ctrl.closeTwoFA,
+              child: Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: t.border)),
+                child: Icon(Icons.arrow_back_rounded, size: 16, color: t.text),
+              ),
+            ),
+          ),
+          Expanded(child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Status badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: enabled ? teal.withValues(alpha: 0.10) : t.card,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: enabled ? teal.withValues(alpha: 0.4) : t.border)),
+                child: Row(children: [
+                  Icon(
+                    enabled ? Icons.verified_user_rounded : Icons.shield_outlined,
+                    size: 22, color: enabled ? teal : t.text2),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(enabled ? '2FA is enabled' : '2FA is disabled',
+                        style: t.title(size: 15)),
+                      Text(
+                        enabled
+                          ? 'Your account has extra protection.'
+                          : 'Enable 2FA for stronger account security.',
+                        style: t.body(size: 12, color: t.text2)),
+                    ],
+                  )),
+                ]),
+              ),
+              if (!enabled) ...[
+                const SizedBox(height: 24),
+                Text('How it works', style: t.title(size: 14)),
+                const SizedBox(height: 12),
+                _step('1', 'You log in with your password as usual.', t, teal),
+                _step('2', 'A one-time code is sent to your registered email.', t, teal),
+                _step('3', 'Enter the code to complete sign-in.', t, teal),
+              ],
+              const SizedBox(height: 28),
+              if (!enabled)
+                TealButton(label: 'Enable 2FA', onTap: () => ctrl.toggle2FA(context))
+              else
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFDC2626),
+                      side: const BorderSide(color: Color(0xFFDC2626), width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () => ctrl.toggle2FA(context),
+                    child: Text('Disable 2FA',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontWeight: FontWeight.w700, fontSize: 14)),
+                  ),
+                ),
+              if (enabled)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    'To fully remove 2FA, confirm via the link sent to your email.',
+                    style: t.body(size: 12, color: t.text2),
+                    textAlign: TextAlign.center)),
+            ]),
+          )),
+        ]),
+      ),
+    );
+  }
+
+  Widget _step(String n, String text, dynamic t, Color teal) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(
+        width: 24, height: 24,
+        decoration: BoxDecoration(
+          color: teal.withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+          border: Border.all(color: teal.withValues(alpha: 0.3))),
+        child: Center(child: Text(n, style: TextStyle(
+          color: teal, fontSize: 11, fontWeight: FontWeight.w800)))),
+      const SizedBox(width: 10),
+      Expanded(child: Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: Text(text, style: t.body(size: 13, color: t.text2)))),
+    ]),
+  );
+}
+
+// ── Shared field helpers ──────────────────────────────────────────────────────
+
+Widget _pwField(String label, TextEditingController c, bool visible,
+    VoidCallback onToggle, dynamic t, BuildContext context) =>
+  _inputField(label, c, Icons.lock_outline_rounded, !visible,
+    IconButton(
+      icon: Icon(visible ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+        size: 18, color: t.text2),
+      onPressed: onToggle,
+    ), t, context);
+
+Widget _inputField(String label, TextEditingController c,
+    IconData prefixIcon, bool obscure, Widget? suffix,
+    dynamic t, BuildContext context) =>
+  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text(label, style: t.body(size: 12, w: FontWeight.w600, color: t.text2)),
+    const SizedBox(height: 6),
+    TextField(
+      controller: c,
+      obscureText: obscure,
+      style: t.body(size: 14),
+      decoration: InputDecoration(
+        prefixIcon: Icon(prefixIcon, size: 18, color: t.text2),
+        suffixIcon: suffix,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: t.border)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: t.border)),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(
+            color: AppColors.primaryTeal(context.isDark), width: 1.5)),
+        filled: true, fillColor: t.bg,
+      ),
+    ),
+  ]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TravelHistoryPanel extends StatelessWidget {
+  const _TravelHistoryPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<ProfileController>();
+    final t    = context.lt;
+    return Positioned.fill(
+      child: Material(
+        color: t.bg,
+        child: Column(children: [
+          LigtasHeader(
+            title: 'Travel History',
+            leading: GestureDetector(
+              onTap: ctrl.closeTravelHistory,
+              child: Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: t.border)),
+                child: Icon(Icons.arrow_back_rounded, size: 16, color: t.text),
+              ),
+            ),
+          ),
+          Expanded(child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            children: [
+              _subLabel('Saved Routes', t),
+              ...ctrl.history.saved.map((r) => _TravelCard(route: r)),
+              const SizedBox(height: 8),
+              Container(height: 1, color: t.divider),
+              const SizedBox(height: 16),
+              _subLabel('History', t),
+              ...ctrl.history.history.map((r) => _TravelCard(route: r)),
+            ],
+          )),
+        ]),
+      ),
+    );
+  }
+
+  Widget _subLabel(String s, dynamic t) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Text(s, style: GoogleFonts.plusJakartaSans(
+      fontSize: 12, fontWeight: FontWeight.w700,
+      color: t.text3, letterSpacing: 0.06)),
+  );
+}
+
+class _TravelCard extends StatelessWidget {
+  final TravelRoute route;
+  const _TravelCard({required this.route});
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.read<ProfileController>();
+    final t    = context.lt;
+    final iconColor = route.saved ? AppColors.yellow : AppColors.primaryTeal(context.isDark);
+    return GestureDetector(
+      onTap: () => showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => ChangeNotifierProvider.value(
+          value: ctrl,
+          child: _TravelDetailSheet(route: route)),
+      ),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(
+          color: t.card2,
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: t.border)),
+        child: Row(children: [
+          Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10)),
+            child: Icon(route.saved ? Icons.star_rounded : Icons.history_rounded,
+              color: iconColor, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${route.origin} → ${route.destination}',
+                style: t.title(size: 13)),
+              Text('${route.modes} · ${route.date}',
+                style: t.body(size: 11, color: t.text2)),
+            ],
+          )),
+          Icon(Icons.chevron_right_rounded, size: 18, color: t.text2),
+        ]),
+      ),
+    );
+  }
+}
+
+class _TravelDetailSheet extends StatelessWidget {
+  final TravelRoute route;
+  const _TravelDetailSheet({required this.route});
+
+  @override
+  Widget build(BuildContext context) {
+    final t          = context.lt;
+    final meta       = route.safetyMeta;
+    final safeColor  = Color(meta.color);
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.78, maxChildSize: 0.95, minChildSize: 0.4,
+      builder: (_, scrollCtrl) => Container(
+        decoration: BoxDecoration(
+          color: t.card,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: Border(top: BorderSide(color: t.border))),
+        child: ListView(
+          controller: scrollCtrl,
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+          children: [
+            Center(child: Container(
+              width: 36, height: 4, margin: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(color: t.border, borderRadius: BorderRadius.circular(2)))),
+            Row(children: [
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: t.border)),
+                  child: Icon(Icons.arrow_back_rounded, size: 15, color: t.text)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text('${route.origin} → ${route.destination}',
+                style: t.title(size: 14),
+                overflow: TextOverflow.ellipsis)),
+            ]),
+            const SizedBox(height: 14),
+            Container(
+              height: 110,
+              decoration: BoxDecoration(
+                color: safeColor.withValues(alpha: 0.09),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: safeColor.withValues(alpha: 0.25))),
+              child: Center(child: Icon(Icons.map_rounded, color: safeColor, size: 44)),
+            ),
+            const SizedBox(height: 12),
+            Text('via ${route.modes}',
+              style: t.body(size: 13, color: t.text2)),
+            const SizedBox(height: 12),
+            Row(children: [
+              _glance('₱${route.fare}',       'Fare', t),
+              _glance('${route.minutes} min', 'Time', t),
+              _glance(route.date,             'Date', t),
+            ]),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: safeColor.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: safeColor.withValues(alpha: 0.25))),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Text('${route.safetyScore}%',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 22, fontWeight: FontWeight.w900, color: safeColor)),
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: safeColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(50)),
+                    child: Text(meta.label,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11, fontWeight: FontWeight.w700, color: safeColor)),
+                  ),
+                ]),
+                const SizedBox(height: 6),
+                Text(route.safetyNote,
+                  style: t.body(size: 12, color: t.text2)),
+              ]),
+            ),
+            const SizedBox(height: 16),
+            Text('Route Breakdown', style: t.title(size: 13)),
+            const SizedBox(height: 10),
+            ...route.steps.asMap().entries.map((e) => _StepRow(
+              step: e.value, index: e.key,
+              isLast: e.key == route.steps.length - 1, t: t,
+            )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _glance(String val, String label, dynamic t) => Expanded(
+    child: Column(children: [
+      Text(val, style: t.title(size: 13),
+        maxLines: 1, overflow: TextOverflow.ellipsis),
+      Text(label, style: t.body(size: 11, color: t.text2)),
+    ]),
+  );
+}
+
+class _StepRow extends StatelessWidget {
+  final TravelStep step;
+  final int index;
+  final bool isLast;
+  final dynamic t;
+  const _StepRow({required this.step, required this.index,
+    required this.isLast, required this.t});
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Column(children: [
+        Container(
+          width: 26, height: 26,
+          decoration: BoxDecoration(
+            color: AppColors.primaryTeal(context.isDark),
+            shape: BoxShape.circle),
+          child: Center(child: Text('${index + 1}',
+            style: GoogleFonts.plusJakartaSans(
+              color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800))),
+        ),
+        if (!isLast)
+          Container(width: 2, height: 26, color: t.divider),
+      ]),
+      const SizedBox(width: 12),
+      Expanded(child: Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(step.name, style: t.title(size: 13)),
+          Text(step.desc, style: t.body(size: 11, color: t.text2)),
+        ]),
+      )),
+    ]),
+  );
+}
