@@ -210,7 +210,7 @@ def get_safe_spots_along_route(route_coords: list,
     all_spots = []
 
     # Parallel Overpass queries — each independent, safe to run concurrently
-    with ThreadPoolExecutor(max_workers=min(len(sample), 6)) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(sample), 10)) as pool:
         futures = {pool.submit(get_safe_spots_near, pt[0], pt[1], radius_m): pt
                    for pt in sample}
         for fut in as_completed(futures):
@@ -224,7 +224,7 @@ def get_safe_spots_along_route(route_coords: list,
                     all_spots.append(s)
 
     all_spots.sort(key=lambda s: (s["priority"], s["dist_m"]))
-    return all_spots[:80]   # up to 80 spots for full route coverage
+    return all_spots   # no cap — return everything found along the full route
 
 
 def get_flat_route_coords(route: dict) -> list:
@@ -277,7 +277,7 @@ def get_spots_for_coords(coord_list: list, radius_m: int = 600) -> list:
         return []
     seen_ids  = set()
     all_spots = []
-    with ThreadPoolExecutor(max_workers=min(len(coord_list), 6)) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(coord_list), 10)) as pool:
         futures = {pool.submit(get_safe_spots_near, pt[0], pt[1], radius_m): pt
                    for pt in coord_list}
         for fut in as_completed(futures):
@@ -290,7 +290,7 @@ def get_spots_for_coords(coord_list: list, radius_m: int = 600) -> list:
                     seen_ids.add(s["id"])
                     all_spots.append(s)
     all_spots.sort(key=lambda s: (s["priority"], s["dist_m"]))
-    return all_spots[:80]
+    return all_spots   # no cap — caller (frontend cluster) handles rendering limits
 
 
 def get_safe_spots_js(spots: list) -> str:
