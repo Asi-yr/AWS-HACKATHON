@@ -169,14 +169,17 @@ def _fetch_osm_closures() -> list:
     """OSM Overpass API — confirmed working, free, no key needed."""
     minLat, minLon, maxLat, maxLon = _MNL_BBOX
     bb = f"{minLat},{minLon},{maxLat},{maxLon}"
+    # Only fetch ways/nodes that have a name, ref, or addr:street tag so we
+    # never end up with a pile of "Unnamed road" entries in the closure list.
     query = (
         '[out:json][timeout:12];'
         '('
-        f'way["access"="no"]["highway"]({bb});'
-        f'way["construction"]["highway"]({bb});'
-        f'way["highway"]["closed"="yes"]({bb});'
-        f'node["barrier"="block"]({bb});'
-        f'node["traffic_sign"~"no_entry|road_closed"]({bb});'
+        f'way["access"="no"]["highway"]["name"]({bb});'
+        f'way["access"="no"]["highway"]["ref"]({bb});'
+        f'way["construction"]["highway"]["name"]({bb});'
+        f'way["construction"]["highway"]["ref"]({bb});'
+        f'way["highway"]["closed"="yes"]["name"]({bb});'
+        f'way["highway"]["closed"="yes"]["ref"]({bb});'
         ');'
         'out center 40;'
     )
@@ -192,7 +195,9 @@ def _fetch_osm_closures() -> list:
         closures = []
         for el in resp.json().get("elements", [])[:30]:
             tags   = el.get("tags", {})
-            name   = (tags.get("name") or tags.get("addr:street") or tags.get("ref") or "Unnamed road")
+            name   = (tags.get("name") or tags.get("ref") or tags.get("addr:street") or "").strip()
+            if not name:
+                continue   # skip — no usable label to show the user
             reason = (tags.get("construction") or tags.get("note") or tags.get("access") or tags.get("barrier") or "Road closure")
             center = el.get("center", {})
             lat    = _safe_float(center.get("lat") or el.get("lat"))
@@ -386,9 +391,11 @@ def get_mmda_banner_html(coding: dict, closures: list) -> str:
             f'font-weight:bold;text-align:center;">🚗 Number Coding: {coding["reason"]}</div>'
         )
     if closures:
-        roads = ", ".join(c["road"] for c in closures[:3])
-        parts.append(
-            f'<div style="background:#e67e22;color:#fff;padding:7px 16px;font-size:13px;'
-            f'font-weight:bold;text-align:center;">🚧 {closures[0].get("source","Traffic")}: {roads}</div>'
-        )
+        named = [c for c in closures if c["road"].strip().lower() not in ("unnamed road", "")]
+        if named:
+            roads = ", ".join(c["road"] for c in named[:3])
+            parts.append(
+                f'<div style="background:#e67e22;color:#fff;padding:7px 16px;font-size:13px;'
+                f'font-weight:bold;text-align:center;">🚧 Road Closure: {roads}</div>'
+            )
     return "\n".join(parts)
