@@ -2920,18 +2920,29 @@ async function showSafeSpotsForRoute(route) {
   var myToken = ++_ssToken;
   _ssUpdateLabel();
 
-  // Always include origin + destination so neither end is ever skipped,
-  // then fill 28 evenly-spaced points for full route coverage.
-  var innerSamples = _sampleByDistance(allCoords, 28);
+  // ── Gap-free sampling: one point every STEP_M meters along the route ────
+  // RADIUS=1200m + STEP_M=800m → adjacent circles overlap by 400m, so
+  // there are zero dead zones regardless of route length or type.
+  var RADIUS = 1200;
+  var STEP_M = 800;
+
   var samples = [];
   var _seenSample = new Set();
   var _addSample = function(pt) {
     var k = pt[0].toFixed(4) + ',' + pt[1].toFixed(4);
     if (!_seenSample.has(k)) { _seenSample.add(k); samples.push(pt); }
   };
-  if (allCoords.length > 0) _addSample(allCoords[0]);                       // force origin
-  innerSamples.forEach(_addSample);                                          // evenly spaced
-  if (allCoords.length > 1) _addSample(allCoords[allCoords.length - 1]);    // force destination
+
+  _addSample(allCoords[0]);  // always include origin
+  var distAccum = 0;
+  for (var i = 1; i < allCoords.length; i++) {
+    distAccum += _haversineM(allCoords[i-1], allCoords[i]);
+    if (distAccum >= STEP_M) {
+      _addSample(allCoords[i]);
+      distAccum = 0;
+    }
+  }
+  if (allCoords.length > 1) _addSample(allCoords[allCoords.length - 1]);  // always include destination
 
   if (!samples.length) {
     _ssLoading = false;
@@ -2946,11 +2957,9 @@ async function showSafeSpotsForRoute(route) {
   _ssCurrentId   = rid;
 
   var seenIds = new Set();
-  var RADIUS  = 900;
 
-  // Debug: log sample coords so you can verify they cover the full route
-  console.log('[SafeSpots] Sampling', samples.length, 'points across route:',
-    samples.map(function(p){ return p[0].toFixed(4)+','+p[1].toFixed(4); }).join(' | '));
+  // Debug: log sample count and coverage
+  console.log('[SafeSpots] Gap-free sampling:', samples.length, 'points (every', STEP_M, 'm), radius', RADIUS, 'm | route length ~' + Math.round(samples.length * STEP_M / 1000) + 'km');
 
   // Use batch endpoint — one POST instead of 12 individual GETs.
   // The backend processes all sample points in parallel threads.
