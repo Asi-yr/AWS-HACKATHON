@@ -7,6 +7,10 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- MarkerCluster — groups overlapping safe spot markers automatically -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 </head>
 <body>
 <!-- ── Corner Alert Panel — modern notification cards instead of top banners ── -->
@@ -125,6 +129,23 @@
           🚔 🏥 💊
         </span>
       </label>
+      <!-- Per-type filter — only visible when safe spots are ON -->
+      <div id="safe-spots-filter" style="display:none;margin:-2px 0 8px 0;padding:8px 10px;
+        background:#eaf4ff;border:1.5px solid #aecde8;border-top:none;border-radius:0 0 8px 8px;
+        font-size:12px;color:#2c3e50;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 6px;">
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="police" checked /> 👮 Police</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="hospital" checked /> 🏥 Hospital</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="fire_station" checked /> 🚒 Fire Station</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="clinic" checked /> 🏥 Clinic</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="pharmacy" checked /> 💊 Pharmacy</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="barangay_hall" checked /> 🏛️ Barangay Hall</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="community_centre" /> 🏛️ Community Ctr</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="evacuation_centre" checked /> ⛺ Evacuation Ctr</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="supermarket" /> 🛒 Supermarket</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="convenience" /> 🏪 7-Eleven etc.</label>
+        </div>
+      </div>
 
       <button class="btn-primary" id="find-routes-btn" disabled>
         🔍 Find Safe Routes
@@ -606,7 +627,7 @@ function setupAutocomplete(inputId, onSelect) {
 
   input.addEventListener('input', () => {
     const q = input.value.trim();
-    if (!q) { onSelect(null); removeDropdown(); checkEnableButton(); return; }
+    if (!q) { removeDropdown(); checkEnableButton(); return; }
     checkEnableButton();
     clearTimeout(debounceTimer);
     if (q.length < 3) { removeDropdown(); return; }
@@ -654,11 +675,19 @@ setupAutocomplete('dest-input', result => {
 
 // ── Input change listeners ────────────────────────────────────────────────────
 document.getElementById('origin-input').addEventListener('input', () => {
-  if (!document.getElementById('origin-input').value.trim()) origCoords = null;
+  const val = document.getElementById('origin-input').value.trim();
+  if (!val) {
+    origCoords = null;
+    if (origMarker) { map.removeLayer(origMarker); origMarker = null; }
+  }
   checkEnableButton();
 });
 document.getElementById('dest-input').addEventListener('input', () => {
-  if (!document.getElementById('dest-input').value.trim()) destCoords = null;
+  const val = document.getElementById('dest-input').value.trim();
+  if (!val) {
+    destCoords = null;
+    if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+  }
   checkEnableButton();
 });
 
@@ -2246,12 +2275,39 @@ map.on('zoomend', function () {
   var prefillOrigin = {{ (prefill_origin | default("")) | tojson }};
   var prefillDest   = {{ (prefill_destination | default("")) | tojson }};
 
-  // Populate input fields from prefill values
+  // Populate input fields from prefill values and geocode to place markers
   if (prefillOrigin) {
     document.getElementById('origin-input').value = prefillOrigin;
+    fetch('/api/suggest?q=' + encodeURIComponent(prefillOrigin))
+      .then(function(r) { return r.json(); })
+      .then(function(results) {
+        if (results && results[0]) {
+          var lat = parseFloat(results[0].lat);
+          var lon = parseFloat(results[0].lon);
+          origCoords = { lat: lat, lon: lon };
+          if (origMarker) map.removeLayer(origMarker);
+          origMarker = L.marker([lat, lon], { icon: mkPin(ORIGIN_COLOR, 'A'), pane: 'endpointPins' })
+            .addTo(map).bindPopup('Origin');
+          map.flyTo([lat, lon], 14, { animate: true, duration: 0.8 });
+          checkEnableButton();
+        }
+      }).catch(function() {});
   }
   if (prefillDest) {
     document.getElementById('dest-input').value = prefillDest;
+    fetch('/api/suggest?q=' + encodeURIComponent(prefillDest))
+      .then(function(r) { return r.json(); })
+      .then(function(results) {
+        if (results && results[0]) {
+          var lat = parseFloat(results[0].lat);
+          var lon = parseFloat(results[0].lon);
+          destCoords = { lat: lat, lon: lon };
+          if (destMarker) map.removeLayer(destMarker);
+          destMarker = L.marker([lat, lon], { icon: mkPin(DEST_COLOR, 'B'), pane: 'endpointPins' })
+            .addTo(map).bindPopup('Destination');
+          checkEnableButton();
+        }
+      }).catch(function() {});
   }
 
   if (!prefillMode) {
@@ -2538,25 +2594,53 @@ window.renderRouteCards = function(routes) {
 
 <script>
 // ══════════════════════════════════════════════════════════════════════════════
-//  Safe Spots — geographic distance sampling, per-route layers, stale-load safe
+//  Safe Spots — clustering + zoom-gating + priority filtering
+//  Changes from v1:
+//    • L.markerClusterGroup instead of L.layerGroup → collapses overlapping pins
+//    • Zoom-gating: markers hidden below zoom 14 (city overview), shown at street level
+//    • Priority filter: radio buttons let user choose Critical / +Fire / All
 // ══════════════════════════════════════════════════════════════════════════════
 
-var _ssActive    = false;  // checkbox state
-var _ssGroups    = {};     // routeId -> L.layerGroup
-var _ssCurrentId = null;   // routeId whose group is on map
-var _ssLoading   = false;  // true while fetching
-var _ssToken     = 0;      // incremented on each new load; stale responses check this
+var _ssActive      = false;   // checkbox state
+var _ssGroups      = {};      // routeId -> { cluster, allSpots[] }
+var _ssCurrentId   = null;    // routeId whose cluster is on map
+var _ssLoading     = false;   // true while fetching
+var _ssToken       = 0;       // incremented on each new load to cancel stale responses
+var _SS_MIN_ZOOM   = 14;      // hide safe spots below this zoom level
+var _ssZoomGated   = false;   // true when hidden due to zoom (not user toggle)
+
+// ── Type filter helper ───────────────────────────────────────────────────────
+function _ssGetEnabledTypes() {
+  var checked = document.querySelectorAll('input[name="ss-type"]:checked');
+  var types = new Set();
+  checked.forEach(function(el) { types.add(el.value); });
+  return types;
+}
+
+// Wire up type checkboxes — instant re-render on toggle, no refetch needed
+document.querySelectorAll('input[name="ss-type"]').forEach(function(cb) {
+  cb.addEventListener('change', function() {
+    if (_ssActive && _ssCurrentId !== null && _ssGroups[_ssCurrentId]) {
+      _ssRebuildCluster(_ssCurrentId);
+    }
+  });
+});
 
 // ── UI sync ───────────────────────────────────────────────────────────────────
 function _ssUpdateLabel() {
-  var cb    = document.getElementById('safe-spots-checkbox');
-  var label = document.getElementById('safe-spots-label-text');
-  var wrap  = document.getElementById('safe-spots-pre-toggle');
+  var cb     = document.getElementById('safe-spots-checkbox');
+  var label  = document.getElementById('safe-spots-label-text');
+  var wrap   = document.getElementById('safe-spots-pre-toggle');
+  var filter = document.getElementById('safe-spots-filter');
   if (!cb) return;
   if (cb.checked !== _ssActive) cb.checked = _ssActive;
+  if (filter) filter.style.display = _ssActive ? 'block' : 'none';
   if (_ssLoading) {
     if (wrap)  { wrap.style.background = '#ddeeff'; wrap.style.color = '#1a5276'; wrap.style.borderColor = '#2980b9'; }
     if (label) label.textContent = '⏳ Loading safe spots…';
+  } else if (_ssActive && _ssZoomGated) {
+    if (wrap)  { wrap.style.background = '#f5f0ff'; wrap.style.color = '#7d3c98'; wrap.style.borderColor = '#9b59b6'; }
+    if (label) label.textContent = '🏥 Safe Spots (zoom in to see)';
   } else if (_ssActive) {
     if (wrap)  { wrap.style.background = '#2980b9'; wrap.style.color = '#fff'; wrap.style.borderColor = '#2471a3'; }
     if (label) label.textContent = '🏥 Safe Spots: ON';
@@ -2565,13 +2649,39 @@ function _ssUpdateLabel() {
     if (label) label.textContent = '🏥 Include Safe Spots';
   }
 }
-// Aliases so ANY caller from older code works without errors
 function updateSafeSpotsBtn() { _ssUpdateLabel(); }
 function _ssUpdateBtn()       { _ssUpdateLabel(); }
 
-// ── Checkbox change ───────────────────────────────────────────────────────────
+// ── Zoom gating ───────────────────────────────────────────────────────────────
+// map is a const defined earlier on this page; attach zoom listener directly.
+var _ssProgrammaticZoom = false;  // suppresses zoom gate during cluster click flyTo
+
+function _ssAttachZoomGate() {
+  map.on('zoomend', function() {
+    if (!_ssActive) return;
+    if (_ssProgrammaticZoom) return;  // ignore flyTo-triggered zoomend events
+    var z = map.getZoom();
+    if (z < _SS_MIN_ZOOM && !_ssZoomGated) {
+      _ssZoomGated = true;
+      if (_ssCurrentId !== null && _ssGroups[_ssCurrentId]) {
+        try { map.removeLayer(_ssGroups[_ssCurrentId].cluster); } catch(e) {}
+      }
+      _ssUpdateLabel();
+    } else if (z >= _SS_MIN_ZOOM && _ssZoomGated) {
+      _ssZoomGated = false;
+      if (_ssCurrentId !== null && _ssGroups[_ssCurrentId]) {
+        try { _ssGroups[_ssCurrentId].cluster.addTo(map); } catch(e) {}
+      }
+      _ssUpdateLabel();
+    }
+  });
+}
+_ssAttachZoomGate();
+
+// ── Checkbox / toggle ─────────────────────────────────────────────────────────
 function onSafeSpotCheckboxChange() {
   _ssActive = document.getElementById('safe-spots-checkbox').checked;
+  _ssZoomGated = false;
   _ssUpdateLabel();
   if (!_ssActive) {
     _ssHideAll();
@@ -2593,25 +2703,102 @@ function _ssCurrentRoute() {
 
 // ── Layer management ──────────────────────────────────────────────────────────
 function _ssHideAll() {
-  // Remove ALL groups from map (used on new search)
-  Object.values(_ssGroups).forEach(function(g) { try { map.removeLayer(g); } catch(e) {} });
+  Object.values(_ssGroups).forEach(function(g) {
+    try { map.removeLayer(g.cluster); } catch(e) {}
+  });
   _ssCurrentId = null;
 }
 
 function _ssHideCurrent() {
   if (_ssCurrentId !== null && _ssGroups[_ssCurrentId]) {
-    try { map.removeLayer(_ssGroups[_ssCurrentId]); } catch(e) {}
+    try { map.removeLayer(_ssGroups[_ssCurrentId].cluster); } catch(e) {}
   }
   _ssCurrentId = null;
 }
 
-// Called by clearRoutes() on every new search
 function clearSafeSpotMarkers() {
-  ++_ssToken;          // invalidate any in-flight fetches
-  _ssLoading = false;
+  ++_ssToken;
+  _ssLoading   = false;
+  _ssZoomGated = false;
   _ssHideAll();
   _ssGroups = {};
-  // Keep _ssActive — preserve the user's checkbox preference
+}
+
+// ── Rebuild cluster from cached spots (after type filter change) ─────────────
+function _ssRebuildCluster(rid) {
+  var entry = _ssGroups[rid];
+  if (!entry) return;
+  try { map.removeLayer(entry.cluster); } catch(e) {}
+
+  var enabledTypes = _ssGetEnabledTypes();
+  var cluster      = _makeCluster();
+  entry.allSpots.forEach(function(spot) {
+    // spot.type is the raw OSM key (e.g. "police", "convenience")
+    // also accept by amenity/shop field stored on spot
+    var t = spot.type || spot.amenity || spot.shop || '';
+    if (enabledTypes.has(t)) _renderSafeSpotMarker(spot, cluster);
+  });
+  entry.cluster = cluster;
+
+  // Re-attach click handler on every rebuild
+  cluster.on('clusterclick', _ssOnClusterClick);
+
+  if (_ssActive && !_ssZoomGated && map.getZoom() >= _SS_MIN_ZOOM) {
+    cluster.addTo(map);
+  }
+}
+
+// ── Cluster factory ───────────────────────────────────────────────────────────
+// ── Cluster click handler ────────────────────────────────────────────────────
+function _ssOnClusterClick(e) {
+  var layer       = e.layer;
+  var latlng      = layer.getLatLng();
+  var currentZoom = map.getZoom();
+  var count       = layer.getChildCount();
+
+  // For small clusters or when already zoomed in, go straight to max zoom
+  var targetZoom = (count <= 3 || currentZoom >= 15) ? 17 : Math.min(currentZoom + 3, 17);
+
+  // Suppress zoom gate so flyTo doesn't hide the cluster mid-animation
+  _ssProgrammaticZoom = true;
+
+  // If zoom-gated, add cluster back before zooming so markers are ready
+  var entry = _ssCurrentId !== null ? _ssGroups[_ssCurrentId] : null;
+  if (entry && entry.cluster && !map.hasLayer(entry.cluster)) {
+    entry.cluster.addTo(map);
+  }
+
+  map.flyTo(latlng, targetZoom, { duration: 0.4, easeLinearity: 0.5 });
+
+  // Once animation finishes: clear flag + force cluster refresh
+  map.once('moveend', function() {
+    _ssProgrammaticZoom = false;
+    var entry = _ssCurrentId !== null ? _ssGroups[_ssCurrentId] : null;
+    if (entry && entry.cluster) {
+      try { map.removeLayer(entry.cluster); entry.cluster.addTo(map); } catch(ex) {}
+    }
+  });
+}
+
+function _makeCluster() {
+  return L.markerClusterGroup({
+    maxClusterRadius: 50,          // px — tighter grouping than default 80
+    disableClusteringAtZoom: 17,   // individual markers at very close zoom
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    zoomToBoundsOnClick: false, // handled manually below for precise zoom-to-spot
+    iconCreateFunction: function(cluster) {
+      var count = cluster.getChildCount();
+      var size  = count < 5 ? 22 : count < 15 ? 26 : 30;
+      return L.divIcon({
+        html: '<div class="ss-cluster-icon" style="width:' + size + 'px;height:' + size + 'px;">'
+              + '<span>' + count + '</span></div>',
+        className: '',
+        iconSize: [size, size],
+        iconAnchor: [size/2, size/2],
+      });
+    },
+  });
 }
 
 // ── Coord extraction — handles ALL route types ────────────────────────────────
@@ -2627,27 +2814,20 @@ function _extractRouteCoords(route) {
       var sc = seg.coords;
       if (!sc || !sc.length) return;
       if (Array.isArray(sc[0]) && sc[0].length && Array.isArray(sc[0][0])) {
-        // Train-style: [ [[lat,lon],...], ... ]
         sc.forEach(function(sub) { sub.forEach(push); });
       } else {
         sc.forEach(push);
       }
     });
   }
-  // Fallback for road/walk routes with top-level coords array
   if (!pts.length && route.coords) route.coords.forEach(push);
   return pts;
 }
 
 // ── Geographic distance sampling ──────────────────────────────────────────────
-// Samples by cumulative route distance, not array index.
-// This is the ONLY correct approach for Manila routes where the first segment
-// has hundreds of tight-turn waypoints (dense) but covers a short distance,
-// while later segments have few waypoints but cover most of the route.
 function _sampleByDistance(coords, n) {
   if (!coords.length) return [];
   if (coords.length <= n) return coords.slice();
-
   var cum = [0];
   for (var i = 1; i < coords.length; i++) {
     var dLat = coords[i][0] - coords[i-1][0];
@@ -2656,7 +2836,6 @@ function _sampleByDistance(coords, n) {
   }
   var total = cum[cum.length - 1];
   if (total === 0) return [coords[0]];
-
   var out = [];
   for (var k = 0; k < n; k++) {
     var target = (k / (n - 1)) * total;
@@ -2697,13 +2876,11 @@ async function showSafeSpotsForRoute(route) {
   if (!route) return;
 
   var rid = (route.id != null) ? route.id : 0;
-
-  // Hide whatever is currently shown
   _ssHideCurrent();
 
-  // Cache hit — show immediately, no fetch needed
+  // Cache hit — rebuild cluster with current priority filter and show
   if (_ssGroups[rid]) {
-    _ssGroups[rid].addTo(map);
+    _ssRebuildCluster(rid);
     _ssCurrentId = rid;
     _ssLoading   = false;
     _ssUpdateLabel();
@@ -2711,7 +2888,7 @@ async function showSafeSpotsForRoute(route) {
   }
 
   _ssLoading = true;
-  var myToken = ++_ssToken;  // capture token; stale responses will see a different value
+  var myToken = ++_ssToken;
   _ssUpdateLabel();
 
   var allCoords = _extractRouteCoords(route);
@@ -2723,10 +2900,10 @@ async function showSafeSpotsForRoute(route) {
     return;
   }
 
-  // Create and register layer group immediately so switching routes
-  // during load will call _ssHideCurrent() which removes this group cleanly
-  var group = L.layerGroup().addTo(map);
-  _ssGroups[rid] = group;
+  // Register entry immediately so route-switching cleans up correctly
+  var enabledTypes = _ssGetEnabledTypes();
+  var cluster      = _makeCluster();
+  _ssGroups[rid] = { cluster: cluster, allSpots: [] };
   _ssCurrentId   = rid;
 
   var seenIds = new Set();
@@ -2738,19 +2915,33 @@ async function showSafeSpotsForRoute(route) {
                               + '&radius=' + RADIUS)
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        // Stale check: if user switched routes/search since we started, discard
-        if (myToken !== _ssToken) return;
+        if (myToken !== _ssToken) return;   // stale — another load started
         (d.spots || []).forEach(function(spot) {
           if (!seenIds.has(spot.id)) {
             seenIds.add(spot.id);
-            _renderSafeSpotMarker(spot, group);
+            _ssGroups[rid].allSpots.push(spot);    // cache ALL spots always
+            if (enabledTypes.has(spot.type || '')) {
+              _renderSafeSpotMarker(spot, cluster); // render only enabled types
+            }
           }
         });
       })
       .catch(function() {});
   }));
 
-  if (myToken !== _ssToken) return; // load was superseded
+  if (myToken !== _ssToken) return;
+
+  // Respect zoom gate — attach cluster only if zoomed in enough
+  var zoom = map.getZoom();
+  if (zoom >= _SS_MIN_ZOOM) {
+    cluster.addTo(map);
+    _ssZoomGated = false;
+  } else {
+    _ssZoomGated = true;
+  }
+
+  cluster.on('clusterclick', _ssOnClusterClick);
+
   _ssLoading = false;
   _ssUpdateLabel();
 }
