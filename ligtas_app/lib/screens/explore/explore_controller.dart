@@ -7,6 +7,7 @@ import '../../core/theme_controller.dart';
 import '../../models/explore_models.dart';
 import '../../data/mock_data.dart';
 import '../../core/session_manager.dart';
+import '../../core/api_client.dart';
 
 // ── Safety overlay models ─────────────────────────────────────────────────────
 // BACKEND: populate these from your API responses.
@@ -208,7 +209,7 @@ class ExploreController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void searchRoutes() {
+  Future<void> searchRoutes() async {
     // Both fields should be filled to search
     if (_currentLocationText.isEmpty || _destinationText.isEmpty) {
       if (_currentLocationText.isEmpty) {
@@ -221,6 +222,32 @@ class ExploreController extends ChangeNotifier {
     _state = AppState.state2;
     showToast('Finding routes...', 'teal');
     notifyListeners();
+
+    // Attempt to fetch live routes from the Flask backend.
+    try {
+      final routes = await ApiClient.instance.searchRoutes(
+        origin: _currentLocationText,
+        destination: _destinationText,
+        mode: 'commute',
+      );
+
+      if (routes.isNotEmpty) {
+        setAllRoutes(routes);
+        return;
+      }
+
+      // No routes returned – fall back to the built-in mock routes
+      // so the UI remains usable.
+      setAllRoutes(mockRoutes);
+      showToast('No routes from server — showing sample routes', 'teal');
+    } catch (_) {
+      // On any error (offline, server down, bad JSON), keep the existing
+      // mock behaviour and surface a gentle message.
+      _allRoutes = mockRoutes;
+      _applyFilters();
+      showToast('Could not reach server — using sample routes', 'red');
+      notifyListeners();
+    }
   }
 
   void clearSearch() {
