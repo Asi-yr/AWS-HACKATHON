@@ -108,13 +108,14 @@ _PHT = timezone(timedelta(hours=8))
 # ── Default user settings ─────────────────────────────────────────────────────
 
 DEFAULT_SETTINGS = {
-    "default_commuter_type": "commute",
-    "show_flood_overlay":    True,
-    "show_weather_banner":   True,
-    "show_night_warnings":   True,
-    "preferred_name":        "",    # display name override
-    "home_address":          "",
-    "work_address":          "",
+    "default_commuter_type":  "commute",
+    "show_flood_overlay":     True,
+    "show_weather_banner":    True,
+    "show_night_warnings":    True,
+    "preferred_name":         "",    # display name override
+    "home_address":           "",
+    "work_address":           "",
+    "auto_search_history":    False, # auto-run search when using History "Use Again"
 }
 
 # Max route history entries to keep per user
@@ -555,6 +556,7 @@ def extract_settings_from_form(form) -> dict:
         "show_flood_overlay":    bool(form.get("show_flood_overlay")),
         "show_weather_banner":   bool(form.get("show_weather_banner")),
         "show_night_warnings":   bool(form.get("show_night_warnings")),
+        "auto_search_history":   bool(form.get("auto_search_history")),
     }
 
 
@@ -641,6 +643,12 @@ def get_settings_form_html(settings: dict) -> str:
       <input type="checkbox" name="show_night_warnings" value="1"
              {checked(settings.get('show_night_warnings', True))}>
       Show Night Safety Warnings
+    </label>
+
+    <label class="checkbox-label">
+      <input type="checkbox" name="auto_search_history" value="1"
+             {checked(settings.get('auto_search_history', False))}>
+      Auto-search when using History "Use Again"
     </label>
 
     <hr style="margin:15px 0;">

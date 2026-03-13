@@ -2348,8 +2348,8 @@ map.on('zoomend', function () {
   // Enable button if both fields are filled
   checkEnableButton();
 
-  // Auto-trigger the search if both origin and destination are set
-  if (prefillOrigin && prefillDest) {
+  // Auto-trigger the search if both origin and destination are set AND user has enabled auto-search
+  if (prefillOrigin && prefillDest && {{ 'true' if auto_search_history else 'false' }}) {
     // Short delay to let map finish initialising
     setTimeout(function() {
       document.getElementById('find-routes-btn').disabled = false;
