@@ -2824,18 +2824,33 @@ function _extractRouteCoords(route) {
   return pts;
 }
 
-// ── Geographic distance sampling ──────────────────────────────────────────────
+// ── Haversine distance (meters) between two [lat,lon] points ─────────────────
+function _haversineM(a, b) {
+  var R = 6371000;
+  var dLat = (b[0] - a[0]) * Math.PI / 180;
+  var dLon = (b[1] - a[1]) * Math.PI / 180;
+  var lat1 = a[0] * Math.PI / 180;
+  var lat2 = b[0] * Math.PI / 180;
+  var s = Math.sin(dLat/2) * Math.sin(dLat/2)
+        + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon/2) * Math.sin(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+// ── Geographic distance sampling ─────────────────────────────────────────────
+// Uses real haversine meters so every km of route gets equal representation.
+// Critical fix: OSRM walk segments have ~100x more points per km than train/
+// jeepney waypoints — degree-based math makes samples bunch at the walk start.
 function _sampleByDistance(coords, n) {
   if (!coords.length) return [];
   if (coords.length <= n) return coords.slice();
+
   var cum = [0];
   for (var i = 1; i < coords.length; i++) {
-    var dLat = coords[i][0] - coords[i-1][0];
-    var dLon = coords[i][1] - coords[i-1][1];
-    cum.push(cum[i-1] + Math.sqrt(dLat*dLat + dLon*dLon));
+    cum.push(cum[i-1] + _haversineM(coords[i-1], coords[i]));
   }
   var total = cum[cum.length - 1];
   if (total === 0) return [coords[0]];
+
   var out = [];
   for (var k = 0; k < n; k++) {
     var target = (k / (n - 1)) * total;
@@ -2909,25 +2924,53 @@ async function showSafeSpotsForRoute(route) {
   var seenIds = new Set();
   var RADIUS  = 700;
 
-  await Promise.all(samples.map(function(pt) {
-    return fetch('/api/safe-spots?lat=' + pt[0].toFixed(5)
-                              + '&lon=' + pt[1].toFixed(5)
-                              + '&radius=' + RADIUS)
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        if (myToken !== _ssToken) return;   // stale — another load started
-        (d.spots || []).forEach(function(spot) {
-          if (!seenIds.has(spot.id)) {
-            seenIds.add(spot.id);
-            _ssGroups[rid].allSpots.push(spot);    // cache ALL spots always
-            if (enabledTypes.has(spot.type || '')) {
-              _renderSafeSpotMarker(spot, cluster); // render only enabled types
+  // Debug: log sample coords so you can verify they cover the full route
+  console.log('[SafeSpots] Sampling', samples.length, 'points across route:',
+    samples.map(function(p){ return p[0].toFixed(4)+','+p[1].toFixed(4); }).join(' | '));
+
+  // Use batch endpoint — one POST instead of 12 individual GETs.
+  // The backend processes all sample points in parallel threads.
+  try {
+    var batchResp = await fetch('/api/safe-spots/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coords: samples, radius: RADIUS })
+    });
+    var batchData = await batchResp.json();
+    if (myToken !== _ssToken) { _ssLoading = false; _ssUpdateLabel(); return; }
+    (batchData.spots || []).forEach(function(spot) {
+      if (!seenIds.has(spot.id)) {
+        seenIds.add(spot.id);
+        _ssGroups[rid].allSpots.push(spot);
+        if (enabledTypes.has(spot.type || '')) {
+          _renderSafeSpotMarker(spot, cluster);
+        }
+      }
+    });
+    console.log('[SafeSpots] Loaded', seenIds.size, 'unique spots for route', rid);
+  } catch(batchErr) {
+    // Fallback: individual requests if batch endpoint fails
+    console.warn('[SafeSpots] Batch failed, falling back to individual fetches:', batchErr);
+    await Promise.all(samples.map(function(pt) {
+      return fetch('/api/safe-spots?lat=' + pt[0].toFixed(5)
+                                + '&lon=' + pt[1].toFixed(5)
+                                + '&radius=' + RADIUS)
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (myToken !== _ssToken) return;
+          (d.spots || []).forEach(function(spot) {
+            if (!seenIds.has(spot.id)) {
+              seenIds.add(spot.id);
+              _ssGroups[rid].allSpots.push(spot);
+              if (enabledTypes.has(spot.type || '')) {
+                _renderSafeSpotMarker(spot, cluster);
+              }
             }
-          }
-        });
-      })
-      .catch(function() {});
-  }));
+          });
+        })
+        .catch(function() {});
+    }));
+  }
 
   if (myToken !== _ssToken) return;
 
