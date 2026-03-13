@@ -1,3 +1,9 @@
+import time
+import logging
+
+print("[DEBUG] [INIT] Starting application initialization...")
+t_init_start = time.time()
+
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from navigation import geocode_location, get_navigation_data
@@ -11,7 +17,6 @@ from risk_monitor.user_data       import (
     get_user_profile, save_user_profile, change_password,
     extract_settings_from_form, get_settings_page_html, get_history_page_html,
 )
-
 
 from risk_monitor.features         import (
     get_typhoon_signal, get_banner_html,
@@ -55,28 +60,40 @@ from risk_monitor.sos import (
 )
 
 USE_MYSQL = False
+print(f"[DEBUG] [INIT] USE_MYSQL is set to: {USE_MYSQL}")
 
 if USE_MYSQL:
+    print("[DEBUG] [INIT] Importing msql from db_opt...")
     from db_opt import msql
     chDB_perf = msql()
 else:
+    print("[DEBUG] [INIT] Importing nsql from db_opt...")
     from db_opt import nsql
     chDB_perf = nsql()
 
+print("[DEBUG] [INIT] Initializing databases...")
+t_db_init = time.time()
 chDB_perf.init_db()
 init_user_tables(chDB_perf)
 init_report_tables(chDB_perf)
 init_sos_tables(chDB_perf)
+print(f"[DEBUG] [INIT] Database initialization took {time.time() - t_db_init:.4f}s")
+
 app = Flask(__name__)
 app.secret_key = 'saferoute_super_secret_key'
 
+print(f"[DEBUG] [INIT] Application setup complete in {time.time() - t_init_start:.4f}s")
 
 # ── Map factory ───────────────────────────────────────────────────────────────
 
 def get_base_map(center_lat=14.605, center_lon=120.985, zoom=13):
+    t_start = time.time()
+    print(f"[DEBUG] [get_base_map] Creating base map at center_lat={center_lat}, center_lon={center_lon}, zoom={zoom}")
     m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, tiles="OpenStreetMap")
+    print("[DEBUG][get_base_map] Map instance created. Adding LocateControl plugin...")
     plugins.LocateControl(auto_start=False, strings={"title": "Use my current location"}).add_to(m)
 
+    print("[DEBUG][get_base_map] Injecting custom Javascript map interaction handlers...")
     click_js = """
     <script>
         var originMarker = null;
@@ -84,12 +101,12 @@ def get_base_map(center_lat=14.605, center_lon=120.985, zoom=13):
         var greenIcon = new L.Icon({
             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
             shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-            iconSize: [25,41], iconAnchor: [12,41], popupAnchor: [1,-34], shadowSize: [41,41]
+            iconSize: [25,41], iconAnchor:[12,41], popupAnchor: [1,-34], shadowSize: [41,41]
         });
         var redIcon = new L.Icon({
             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
             shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-            iconSize: [25,41], iconAnchor: [12,41], popupAnchor: [1,-34], shadowSize: [41,41]
+            iconSize: [25,41], iconAnchor: [12,41], popupAnchor: [1,-34], shadowSize:[41,41]
         });
 
         setTimeout(function() {
@@ -116,23 +133,21 @@ def get_base_map(center_lat=14.605, center_lon=120.985, zoom=13):
     """.replace('{{MAP_ID}}', m.get_name())
 
     m.get_root().html.add_child(Element(click_js))
+    print(f"[DEBUG][get_base_map] Finished creating base map in {time.time() - t_start:.4f}s")
     return m
 
 
 # ── Route renderers ───────────────────────────────────────────────────────────
 
 def _draw_train_route(route, m):
-    """
-    Draw track polyline + ordered station pins for a train route.
-    !! DO NOT modify the station/track rendering logic here without
-       also verifying against get_osm_railway_geometry() in navigation.py.
-       The station list is ordered and trimmed there — this just renders it.
-    """
-    route_layer = folium.FeatureGroup(name=route['name'])
+    t_start = time.time()
+    print(f"[DEBUG][_draw_train_route] Starting for route: {route.get('name', 'Unknown')}")
+    route_layer = folium.FeatureGroup(name=route.get('name', 'Unknown Train Route'))
     line_color  = route.get('color', '#8e44ad')
 
-    # Track polyline (dashed to feel like rail tracks)
-    for segment in route.get('coords', []):
+    coords = route.get('coords', [])
+    print(f"[DEBUG] [_draw_train_route] Drawing track polyline with {len(coords)} segments. Color: {line_color}")
+    for segment in coords:
         if len(segment) >= 2:
             folium.PolyLine(
                 locations=segment,
@@ -140,11 +155,11 @@ def _draw_train_route(route, m):
                 weight=5,
                 opacity=0.85,
                 dash_array='10 6',
-                tooltip=route['name'],
+                tooltip=route.get('name', ''),
             ).add_to(route_layer)
 
-    # Ordered station pins — from OSM relation member sequence
     stations = route.get('stations', [])
+    print(f"[DEBUG][_draw_train_route] Drawing {len(stations)} station pins.")
     for idx, station in enumerate(stations):
         is_terminal = (idx == 0 or idx == len(stations) - 1)
         folium.CircleMarker(
@@ -164,48 +179,51 @@ def _draw_train_route(route, m):
         ).add_to(route_layer)
 
     route_layer.add_to(m)
+    print(f"[DEBUG] [_draw_train_route] Completed in {time.time() - t_start:.4f}s")
 
 
 def _draw_road_route(route, m):
-    """Draw a standard OSRM road/bus/car polyline (no multi-leg support needed)."""
-    route_layer = folium.FeatureGroup(name=route['name'])
+    t_start = time.time()
+    print(f"[DEBUG] [_draw_road_route] Starting for route: {route.get('name', 'Unknown')}")
+    route_layer = folium.FeatureGroup(name=route.get('name', 'Unknown Road Route'))
+    
+    coords = route.get('coords', [])
+    print(f"[DEBUG] [_draw_road_route] Drawing polyline with {len(coords)} coordinates.")
     folium.PolyLine(
-        locations=route['coords'],
-        color=route['color'],
-        weight=7 if route['id'] == 0 else 5,
+        locations=coords,
+        color=route.get('color', '#3388ff'),
+        weight=7 if route.get('id') == 0 else 5,
         opacity=0.9,
-        tooltip=f"{route['name']} ({route.get('time', '')})",
+        tooltip=f"{route.get('name', '')} ({route.get('time', '')})",
     ).add_to(route_layer)
+    
     route_layer.add_to(m)
+    print(f"[DEBUG][_draw_road_route] Completed in {time.time() - t_start:.4f}s")
 
 
 def _draw_jeepney_route(route, m):
-    """
-    Draw a multi-leg jeepney route: walk -> jeepney -> walk.
+    t_start = time.time()
+    print(f"[DEBUG] [_draw_jeepney_route] Starting for route: {route.get('name', 'Unknown')}")
+    route_layer = folium.FeatureGroup(name=route.get('name', 'Unknown Jeepney Route'))
+    segments    = route.get('segments',[])
+    line_color  = route.get('color', '#e67e22')
 
-    Segment types and their visual treatment:
-      'walk'    -- dashed grey polyline (OSRM foot geometry)
-      'jeepney' -- solid coloured polyline (OSM relation geometry)
-                   + ordered stop pins from route['stations']
-    """
-    route_layer = folium.FeatureGroup(name=route['name'])
-    segments    = route.get('segments', [])
-    line_color  = route['color']
-
-    # If no segment list, fall back to drawing raw coords
     if not segments:
+        print("[DEBUG] [_draw_jeepney_route] No segments found. Falling back to drawing raw coords.")
         folium.PolyLine(
-            locations=route['coords'],
+            locations=route.get('coords',[]),
             color=line_color,
             weight=5,
             opacity=0.9,
-            tooltip=route['name'],
+            tooltip=route.get('name', ''),
         ).add_to(route_layer)
         route_layer.add_to(m)
+        print(f"[DEBUG] [_draw_jeepney_route] Completed fallback drawing in {time.time() - t_start:.4f}s")
         return
 
+    print(f"[DEBUG][_draw_jeepney_route] Processing {len(segments)} segments.")
     for seg in segments:
-        coords = seg.get('coords', [])
+        coords = seg.get('coords',[])
         if len(coords) < 2:
             continue
 
@@ -225,11 +243,10 @@ def _draw_jeepney_route(route, m):
                 color=seg.get('color', line_color),
                 weight=6,
                 opacity=0.9,
-                tooltip=f"Jeepney: {seg.get('label', route['name'])} ({route.get('time', '')})",
+                tooltip=f"Jeepney: {seg.get('label', route.get('name', ''))} ({route.get('time', '')})",
             ).add_to(route_layer)
 
-            # Ordered stop pins (same style as train stations)
-            stations = route.get('stations', [])
+            stations = route.get('stations',[])
             for idx, stop in enumerate(stations):
                 is_terminal = (idx == 0 or idx == len(stations) - 1)
                 folium.CircleMarker(
@@ -240,18 +257,18 @@ def _draw_jeepney_route(route, m):
                     fill=True,
                     fill_color='#ffffff',
                     fill_opacity=1.0,
-                    tooltip=f"{'[END] ' if is_terminal else ''}{stop['name']}",
+                    tooltip=f"{'[END] ' if is_terminal else ''}{stop.get('name', '')}",
                     popup=folium.Popup(
-                        f"<b>{stop['name']}</b>"
+                        f"<b>{stop.get('name', '')}</b>"
                         + ("<br><i>Terminal stop</i>" if is_terminal else ""),
                         max_width=180,
                     ),
                 ).add_to(route_layer)
 
-    # Board / alight pin markers
     board  = route.get('board_point')
     alight = route.get('alight_point')
     if board:
+        print(f"[DEBUG] [_draw_jeepney_route] Adding board point at lat={board.get('lat')}, lon={board.get('lon')}")
         folium.Marker(
             location=[board['lat'], board['lon']],
             icon=folium.Icon(color='orange', icon='arrow-up', prefix='fa'),
@@ -262,6 +279,7 @@ def _draw_jeepney_route(route, m):
             tooltip="Board jeepney here",
         ).add_to(route_layer)
     if alight:
+        print(f"[DEBUG] [_draw_jeepney_route] Adding alight point at lat={alight.get('lat')}, lon={alight.get('lon')}")
         folium.Marker(
             location=[alight['lat'], alight['lon']],
             icon=folium.Icon(color='orange', icon='arrow-down', prefix='fa'),
@@ -273,28 +291,30 @@ def _draw_jeepney_route(route, m):
         ).add_to(route_layer)
 
     route_layer.add_to(m)
+    print(f"[DEBUG] [_draw_jeepney_route] Completed in {time.time() - t_start:.4f}s")
 
 
 def _draw_bus_route(route, m):
-    """
-    Draw a multi-leg bus route: walk -> bus -> walk.
-    Visual: solid thicker line with terminal stop markers.
-    """
-    route_layer = folium.FeatureGroup(name=route['name'])
-    segments    = route.get('segments', [])
-    line_color  = route['color']
+    t_start = time.time()
+    print(f"[DEBUG][_draw_bus_route] Starting for route: {route.get('name', 'Unknown')}")
+    route_layer = folium.FeatureGroup(name=route.get('name', 'Unknown Bus Route'))
+    segments    = route.get('segments',[])
+    line_color  = route.get('color', '#16a085')
 
     if not segments:
+        print("[DEBUG][_draw_bus_route] No segments. Fallback to raw coords.")
         folium.PolyLine(
-            locations=route['coords'],
+            locations=route.get('coords',[]),
             color=line_color, weight=6, opacity=0.9,
-            tooltip=route['name'],
+            tooltip=route.get('name', ''),
         ).add_to(route_layer)
         route_layer.add_to(m)
+        print(f"[DEBUG][_draw_bus_route] Completed fallback in {time.time() - t_start:.4f}s")
         return
 
+    print(f"[DEBUG] [_draw_bus_route] Processing {len(segments)} segments.")
     for seg in segments:
-        coords = seg.get('coords', [])
+        coords = seg.get('coords',[])
         if len(coords) < 2:
             continue
 
@@ -310,11 +330,10 @@ def _draw_bus_route(route, m):
                 locations=coords,
                 color=seg.get('color', line_color),
                 weight=7, opacity=0.9,
-                tooltip=f"Bus: {seg.get('label', route['name'])} ({route.get('time', '')})",
+                tooltip=f"Bus: {seg.get('label', route.get('name', ''))} ({route.get('time', '')})",
             ).add_to(route_layer)
 
-            # OSM bus stop pins along the route
-            stations = route.get('stations', [])
+            stations = route.get('stations',[])
             for idx, stop in enumerate(stations):
                 is_terminal = (idx == 0 or idx == len(stations) - 1)
                 folium.CircleMarker(
@@ -328,7 +347,6 @@ def _draw_bus_route(route, m):
                     tooltip=stop.get('name', f'Stop {idx+1}'),
                 ).add_to(route_layer)
 
-            # Board marker — walk destination
             if route.get('board_point'):
                 bp = route['board_point']
                 folium.Marker(
@@ -337,7 +355,6 @@ def _draw_bus_route(route, m):
                     icon=folium.Icon(color='blue', icon='bus', prefix='fa'),
                 ).add_to(route_layer)
 
-            # Alight marker
             if route.get('alight_point'):
                 ap = route['alight_point']
                 folium.Marker(
@@ -347,29 +364,29 @@ def _draw_bus_route(route, m):
                 ).add_to(route_layer)
 
     route_layer.add_to(m)
+    print(f"[DEBUG][_draw_bus_route] Completed in {time.time() - t_start:.4f}s")
 
 
 def _draw_surface_route(route, m):
-    """
-    Draw a multi-leg surface-transit route from the Sakay GTFS planner.
-    Segments can be: walk (grey dashed), jeepney (orange solid), bus (teal solid).
-    Each transit leg shows board/alight circle markers.
-    """
+    t_start = time.time()
+    print(f"[DEBUG] [_draw_surface_route] Starting for route: {route.get('name', 'Route')}")
     route_layer = folium.FeatureGroup(name=route.get('name', 'Route'))
     segments    = route.get('segments', [])
 
     if not segments:
-        # Fallback: draw raw coords
+        print("[DEBUG] [_draw_surface_route] No segments. Fallback raw coords drawing.")
         folium.PolyLine(
-            locations=route.get('coords', []),
+            locations=route.get('coords',[]),
             color=route.get('color', '#e67e22'), weight=5, opacity=0.9,
             tooltip=route.get('name', 'Route'),
         ).add_to(route_layer)
         route_layer.add_to(m)
+        print(f"[DEBUG] [_draw_surface_route] Fallback completed in {time.time() - t_start:.4f}s")
         return
 
+    print(f"[DEBUG] [_draw_surface_route] Iterating over {len(segments)} segments.")
     for seg_idx, seg in enumerate(segments):
-        coords   = seg.get('coords', [])
+        coords   = seg.get('coords',[])
         seg_type = seg.get('type', '')
         label    = seg.get('label', '')
 
@@ -392,7 +409,6 @@ def _draw_surface_route(route, m):
                 tooltip=f"{'Jeepney' if seg_type=='jeepney' else 'Bus'}: {label}",
             ).add_to(route_layer)
 
-            # Board marker at first stop, alight at last stop
             stops = seg.get('stations', [])
             if stops:
                 board  = stops[0]
@@ -412,11 +428,16 @@ def _draw_surface_route(route, m):
                     ).add_to(route_layer)
 
     route_layer.add_to(m)
+    print(f"[DEBUG][_draw_surface_route] Completed in {time.time() - t_start:.4f}s")
 
 
 def _draw_multimodal_route(route, m):
-    route_layer = folium.FeatureGroup(name=route['name'])
-    for seg in route.get('segments', []):
+    t_start = time.time()
+    print(f"[DEBUG] [_draw_multimodal_route] Starting for route: {route.get('name', 'Unknown')}")
+    route_layer = folium.FeatureGroup(name=route.get('name', 'Unknown Multimodal'))
+    segments = route.get('segments', [])
+    print(f"[DEBUG][_draw_multimodal_route] Drawing {len(segments)} segments.")
+    for seg in segments:
         coords = seg.get('coords',[])
         if not coords: continue
         
@@ -428,36 +449,31 @@ def _draw_multimodal_route(route, m):
         else: # Jeepney or Bus legs
             folium.PolyLine(locations=coords, color=seg.get('color', '#e67e22'), weight=6, tooltip=seg.get('label', 'Road')).add_to(route_layer)
             
-    # Draw stations pins across the whole journey
-    for station in route.get('stations', []):
+    stations = route.get('stations', [])
+    print(f"[DEBUG] [_draw_multimodal_route] Adding {len(stations)} station pins across journey.")
+    for station in stations:
         folium.CircleMarker(
             location=[station['lat'], station['lon']],
-            radius=5, color=route['color'], weight=2, fill=True, fill_color='#fff', fill_opacity=1.0,
+            radius=5, color=route.get('color', '#000000'), weight=2, fill=True, fill_color='#fff', fill_opacity=1.0,
             tooltip=station.get('name', 'Station/Stop')
         ).add_to(route_layer)
         
     route_layer.add_to(m)
+    print(f"[DEBUG] [_draw_multimodal_route] Completed in {time.time() - t_start:.4f}s")
 
 
 def _draw_transit_route(route, m):
-    """
-    Draw a transit route card (type='transit').
-
-    Segment types:
-      'walk'    → dashed grey  — OSRM foot (sidewalks, footbridges, crossings)
-      'train'   → dashed colour + filled circle station pins
-      'jeepney' → solid orange  — jeepney connector to/from station
-
-    Each segment carries 'stations' so pins appear at the exact OSM coords.
-    """
-    route_layer = folium.FeatureGroup(name=route['name'])
+    t_start = time.time()
+    print(f"[DEBUG] [_draw_transit_route] Starting for route: {route.get('name', 'Unknown Transit')}")
+    route_layer = folium.FeatureGroup(name=route.get('name', 'Transit Route'))
     line_color  = route.get('color', '#8e44ad')
 
-    for seg in route.get('segments', []):
+    segments = route.get('segments', [])
+    print(f"[DEBUG] [_draw_transit_route] Processing {len(segments)} transit segments.")
+    for seg in segments:
         seg_type = seg.get('type')
-        coords   = seg.get('coords', [])
+        coords   = seg.get('coords',[])
 
-        # ── Walk leg ──────────────────────────────────────────────────────────
         if seg_type == 'walk':
             if len(coords) >= 2:
                 folium.PolyLine(
@@ -468,7 +484,6 @@ def _draw_transit_route(route, m):
                     dash_array='8 5',
                     tooltip=seg.get('label', 'Walk'),
                 ).add_to(route_layer)
-            # Board/alight marker at the walk endpoint nearest a station
             lbl = seg.get('label', '')
             if coords:
                 pin_coord = coords[-1] if 'To ' in lbl or 'Walk to' in lbl else coords[0]
@@ -483,7 +498,6 @@ def _draw_transit_route(route, m):
                     tooltip=lbl,
                 ).add_to(route_layer)
 
-        # ── Jeepney / Bus surface leg ─────────────────────────────────────────
         elif seg_type in ('jeepney', 'bus'):
             seg_color = seg.get('color', '#e67e22' if seg_type == 'jeepney' else '#16a085')
             if len(coords) >= 2:
@@ -494,7 +508,6 @@ def _draw_transit_route(route, m):
                     opacity=0.88,
                     tooltip=seg.get('label', seg_type.capitalize()),
                 ).add_to(route_layer)
-            # Show board/alight markers for surface legs
             stops = seg.get('stations', [])
             if stops:
                 for si, st in enumerate([stops[0], stops[-1]]):
@@ -507,12 +520,10 @@ def _draw_transit_route(route, m):
                         tooltip=('Board: ' if si == 0 else 'Alight: ') + st.get('name', ''),
                     ).add_to(route_layer)
 
-        # ── Train leg ─────────────────────────────────────────────────────────
         elif seg_type == 'train':
             seg_color    = seg.get('color', line_color)
-            seg_stations = seg.get('stations', [])
+            seg_stations = seg.get('stations',[])
 
-            # Track polyline(s)
             for track_seg in coords:
                 if len(track_seg) >= 2:
                     folium.PolyLine(
@@ -524,7 +535,6 @@ def _draw_transit_route(route, m):
                         tooltip=seg.get('label', 'Train'),
                     ).add_to(route_layer)
 
-            # Station pins — every stop gets a circle; terminals are bigger
             for idx, st in enumerate(seg_stations):
                 is_terminal = (idx == 0 or idx == len(seg_stations) - 1)
                 folium.CircleMarker(
@@ -545,44 +555,65 @@ def _draw_transit_route(route, m):
                 ).add_to(route_layer)
 
     route_layer.add_to(m)
+    print(f"[DEBUG][_draw_transit_route] Completed in {time.time() - t_start:.4f}s")
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
+    t_home_start = time.time()
+    print(f"[DEBUG] [home] Request received. Method: {request.method}")
     if 'user' not in session:
+        print("[DEBUG][home] User not in session, redirecting to login.")
         return redirect(url_for('login'))
 
+    print(f"[DEBUG] [home] User authenticated as {session.get('user')}.")
     routes_data = []
+    print("[DEBUG] [home] Generating base map...")
+    t_map = time.time()
     m = get_base_map()
+    print(f"[DEBUG] [home] Map generated in {time.time() - t_map:.4f}s")
 
     # ── Prefill from GET params (history "Use Again") ─────────────────────
     prefill_origin      = request.args.get('origin', '')
     prefill_destination = request.args.get('destination', '')
     prefill_mode        = request.args.get('commuterType', '')
+    print(f"[DEBUG] [home] Prefill args -> origin: '{prefill_origin}', destination: '{prefill_destination}', mode: '{prefill_mode}'")
 
     if request.method == 'POST':
         origin_text   = request.form.get('origin')
         dest_text     = request.form.get('destination')
         commuter_type = request.form.get('commuterType')
+        print(f"[DEBUG] [home] POST data -> origin: '{origin_text}', dest: '{dest_text}', commuterType: '{commuter_type}'")
 
+        print("[DEBUG] [home] Executing geocoding...")
+        t_geo = time.time()
         orig_lon, orig_lat = geocode_location(origin_text)
         dest_lon, dest_lat = geocode_location(dest_text)
+        print(f"[DEBUG][home] Geocoding took {time.time() - t_geo:.4f}s")
+        print(f"[DEBUG] [home] Geocode results -> Origin: ({orig_lon}, {orig_lat}), Destination: ({dest_lon}, {dest_lat})")
 
         if not orig_lon or not dest_lon:
+            print("[DEBUG] [home] Location not found. Flashing error.")
             flash("Location not found. Please type a specific address.")
         else:
+            print("[DEBUG] [home] Calling get_navigation_data()...")
+            t_nav = time.time()
             nav_response = get_navigation_data(
                 orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, []
             )
+            print(f"[DEBUG] [home] get_navigation_data completed in {time.time() - t_nav:.4f}s")
 
             if "error" in nav_response:
+                print(f"[DEBUG] [home] Navigation error returned: {nav_response['error']}")
                 flash(nav_response["error"])
             else:
                 routes_data = nav_response.get("routes", [])
+                print(f"[DEBUG] [home] Received {len(routes_data)} routes from navigation data.")
 
                 if routes_data:
+                    print("[DEBUG] [home] Setting up map markers for start and end coordinates.")
                     start_coord  = [orig_lat, orig_lon]
                     end_coord    = [dest_lat, dest_lon]
                     marker_group = folium.FeatureGroup(name="Start & End Points")
@@ -592,12 +623,14 @@ def home():
                                   icon=folium.Icon(color="red",   icon="stop")).add_to(marker_group)
                     marker_group.add_to(m)
                     m.fit_bounds([start_coord, end_coord])
+                    print("[DEBUG] [home] Map bounds fitted.")
 
-                for route in routes_data:
+                for i, route in enumerate(routes_data):
+                    t_draw = time.time()
                     rtype = route.get('type', '')
-                    segs  = route.get('segments', [])
+                    segs  = route.get('segments',[])
                     seg_types = {s.get('type') for s in segs}
-                    # New multi-leg surface routes: transit type with jeepney/bus legs
+                    print(f"[DEBUG] [home] Drawing route {i}. Type: '{rtype}', Segment types: {seg_types}")
                     has_surface = bool(seg_types & {'jeepney', 'bus'})
                     has_train   = 'train' in seg_types
                     if rtype == 'transit' and has_surface and not has_train:
@@ -612,29 +645,51 @@ def home():
                         _draw_multimodal_route(route, m)
                     else:
                         _draw_road_route(route, m)
+                    print(f"[DEBUG] [home] Route {i} drawing took {time.time() - t_draw:.4f}s")
 
                 if routes_data:
                     # ── Safety enrichment pipeline ────────────────────────────
+                    print("[DEBUG] [home] Starting safety enrichment pipeline...")
+                    
+                    t_enrich = time.time()
                     enrich_routes_with_scores(routes_data)
+                    print(f"[DEBUG] [home] enrich_routes_with_scores took {time.time() - t_enrich:.4f}s")
+                    
+                    t_night = time.time()
                     apply_night_safety(routes_data, commuter_type)
+                    print(f"[DEBUG] [home] apply_night_safety took {time.time() - t_night:.4f}s")
+                    
+                    t_fares = time.time()
                     attach_fares(routes_data, commuter_type)
+                    print(f"[DEBUG] [home] attach_fares took {time.time() - t_fares:.4f}s")
 
                     # Weather risk
+                    print("[DEBUG] [home] Fetching weather risk...")
+                    t_weather = time.time()
                     weather = get_weather_risk(orig_lat, orig_lon)
                     from risk_monitor.weather import apply_weather_to_routes
                     apply_weather_to_routes(routes_data, weather, commuter_type)
+                    print(f"[DEBUG] [home] Weather risk and apply took {time.time() - t_weather:.4f}s")
 
                     # Flood risk (NOAH)
+                    print("[DEBUG] [home] Analyzing route flood risk...")
+                    t_flood = time.time()
                     from risk_monitor.noah import apply_route_flood_analysis, add_noah_flood_layer
                     apply_route_flood_analysis(routes_data, weather)
+                    print(f"[DEBUG] [home] Route flood analysis took {time.time() - t_flood:.4f}s")
 
                     # Community reports penalty
+                    print("[DEBUG] [home] Applying community reports to routes...")
+                    t_reports = time.time()
                     apply_reports_to_routes(
                         routes_data, chDB_perf,
                         orig_lat, orig_lon, dest_lat, dest_lon,
                     )
+                    print(f"[DEBUG] [home] Apply community reports took {time.time() - t_reports:.4f}s")
 
-                    # Crime zone risk — check BOTH origin AND destination, scan route paths
+                    # Crime zone risk
+                    print("[DEBUG][home] Fetching and applying crime risk...")
+                    t_crime = time.time()
                     from risk_monitor.crime_data import (
                         apply_crime_both_ends, get_crime_risk_with_reports,
                         scan_route_crime_zones, apply_route_crime_to_routes,
@@ -643,10 +698,10 @@ def home():
                     dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
 
                     for route in routes_data:
-                        wps = []
+                        wps =[]
                         if route.get("segments"):
                             for seg in route["segments"]:
-                                sc = seg.get("coords", [])
+                                sc = seg.get("coords",[])
                                 if sc and isinstance(sc[0], list) and isinstance(sc[0][0], list):
                                     for sub in sc:
                                         wps.extend(sub)
@@ -658,56 +713,85 @@ def home():
 
                     apply_crime_both_ends(routes_data, orig_crime, dest_crime, commuter_type)
                     apply_route_crime_to_routes(routes_data, commuter_type)
+                    print(f"[DEBUG] [home] Crime risk pipeline took {time.time() - t_crime:.4f}s")
 
                     # Real-time incidents
+                    print("[DEBUG] [home] Fetching and applying real-time incidents...")
+                    t_inc = time.time()
                     try:
                         _incidents = get_active_incidents()
                         apply_incidents_to_routes(
                             routes_data, _incidents,
                             orig_lat, orig_lon, dest_lat, dest_lon,
                         )
-                    except Exception: pass
+                    except Exception as e:
+                        print(f"[DEBUG] [home] Exception in real-time incidents pipeline: {e}")
+                        pass
+                    print(f"[DEBUG] [home] Real-time incidents took {time.time() - t_inc:.4f}s")
 
                     # MMDA closures
+                    print("[DEBUG][home] Applying MMDA data to routes...")
+                    t_mmda = time.time()
                     try:
                         apply_mmda_to_routes(routes_data, None)
-                    except Exception: pass
+                    except Exception as e:
+                        print(f"[DEBUG] [home] Exception in MMDA pipeline: {e}")
+                        pass
+                    print(f"[DEBUG] [home] MMDA pipeline took {time.time() - t_mmda:.4f}s")
 
                     # Seismic risk
+                    print("[DEBUG] [home] Fetching and applying seismic risk data...")
+                    t_seismic = time.time()
                     try:
                         _eqs = get_recent_earthquakes(hours_back=12)
                         apply_seismic_to_routes(routes_data, _eqs)
-                    except Exception: pass
+                    except Exception as e:
+                        print(f"[DEBUG][home] Exception in seismic pipeline: {e}")
+                        pass
+                    print(f"[DEBUG] [home] Seismic pipeline took {time.time() - t_seismic:.4f}s")
 
                     # Vulnerable commuter profile
+                    print("[DEBUG] [home] Applying vulnerable commuter profile...")
+                    t_vuln = time.time()
                     try:
                         _profile = request.form.get('vulnerable_profile', '')
                         if _profile and _profile in PROFILES:
+                            print(f"[DEBUG] [home] Found vulnerable profile: {_profile}")
                             apply_vulnerable_profile_to_routes(routes_data, _profile, weather)
-                    except Exception: pass
+                    except Exception as e:
+                        print(f"[DEBUG] [home] Exception in vulnerable profiles pipeline: {e}")
+                        pass
+                    print(f"[DEBUG] [home] Vulnerable profile processing took {time.time() - t_vuln:.4f}s")
 
                     # Add NOAH flood layer to map
+                    print("[DEBUG] [home] Adding NOAH flood layer to map...")
                     add_noah_flood_layer(m)
                     folium.LayerControl().add_to(m)
 
                     # Save history
                     if 'user' in session:
+                        print(f"[DEBUG] [home] Saving route history for user '{session['user']}'...")
+                        t_hist = time.time()
                         save_route_history(
                             chDB_perf, session['user'],
                             origin_text, dest_text, commuter_type, len(routes_data)
                         )
+                        print(f"[DEBUG] [home] History saving took {time.time() - t_hist:.4f}s")
+                    print("[DEBUG] [home] Finished safety pipeline for POST request.")
 
     # ── Banners & report data for template ───────────────────────────────────
+    print("[DEBUG] [home] Generating banners and report data...")
+    t_banners = time.time()
     typhoon        = get_typhoon_signal()
     typhoon_banner = get_banner_html(typhoon)
     _commuter_type_for_banner = request.form.get('commuterType', 'commute') if request.method == 'POST' else 'commute'
     night_banner   = get_night_banner_html(_commuter_type_for_banner)
 
-    # Use geocoded coords if available from this POST, otherwise default Manila
     try:
         weather_loc = (orig_lat, orig_lon)
     except NameError:
         weather_loc = (14.5995, 120.9842)
+    print(f"[DEBUG] [home] Weather banner location: {weather_loc}")
     weather        = get_weather_risk(*weather_loc)
     weather_banner = get_weather_banner_html(weather, _commuter_type_for_banner)
 
@@ -719,7 +803,8 @@ def home():
     try:
         _mmda_closures = get_road_closures()
         mmda_banner    = get_mmda_banner_html(None, _mmda_closures)
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] [home] Exception fetching MMDA banner: {e}")
         mmda_banner = ""
 
     # ── PHIVOLCS banner (seismic) ─────────────────────────────────────────
@@ -727,18 +812,26 @@ def home():
         _earthquakes    = get_recent_earthquakes(hours_back=12)
         seismic_banner  = get_seismic_banner_html(_earthquakes)
         epicenter_js    = get_epicenter_map_js(_earthquakes)
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] [home] Exception fetching PHIVOLCS banner: {e}")
         seismic_banner = ""
         epicenter_js   = ""
 
     # ── SOS panel ─────────────────────────────────────────────────────────
     try:
-        _sos_contacts = get_trusted_contacts(chDB_perf, session['user']) if 'user' in session else []
+        _sos_contacts = get_trusted_contacts(chDB_perf, session['user']) if 'user' in session else[]
         sos_panel     = get_sos_panel_html(_sos_contacts)
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] [home] Exception generating SOS panel: {e}")
         sos_panel = ""
+    print(f"[DEBUG] [home] Banner & report generation took {time.time() - t_banners:.4f}s")
 
+    print("[DEBUG] [home] Rendering map HTML...")
+    t_render_map = time.time()
     map_html = m.get_root().render()
+    print(f"[DEBUG] [home] Map rendering took {time.time() - t_render_map:.4f}s")
+
+    print(f"[DEBUG] [home] Total /home response constructed in {time.time() - t_home_start:.4f}s. Rendering index.html.")
     return render_template(
         'index.html',
         user=session['user'],
@@ -763,19 +856,26 @@ def home():
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    t_reg = time.time()
+    print(f"[DEBUG] [register] Method: {request.method}")
     if request.method == 'POST':
         username  = request.form.get('username')
         password  = request.form.get('password')
+        print(f"[DEBUG] [register] Attempting registration for username: '{username}'")
         conn, c   = chDB_perf.get_db_connection()
         chDB_perf.execute_query(c, "SELECT * FROM users WHERE username=?", (username,))
         if c.fetchone():
+            print(f"[DEBUG] [register] Username '{username}' already exists. Failing registration.")
             flash("Username already exists.")
             c.close(); conn.close()
             return redirect(url_for('register'))
+        
+        print(f"[DEBUG] [register] Username available. Hashing password...")
         hashed_pw = generate_password_hash(password)
         chDB_perf.execute_query(c, "INSERT INTO users (username, password) VALUES (?, ?)",
                                 (username, hashed_pw))
         conn.commit(); c.close(); conn.close()
+        print(f"[DEBUG] [register] Registration successful for '{username}'. Time taken: {time.time() - t_reg:.4f}s")
         flash("Registration successful!")
         return redirect(url_for('login'))
     return render_template('register.html')
@@ -783,16 +883,22 @@ def register():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    t_login = time.time()
+    print(f"[DEBUG] [login] Method: {request.method}")
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
+        print(f"[DEBUG] [login] Attempting login for username: '{username}'")
         conn, c  = chDB_perf.get_db_connection()
         chDB_perf.execute_query(c, "SELECT password FROM users WHERE username=?", (username,))
         user = c.fetchone()
         c.close(); conn.close()
         if user and check_password_hash(user[0], password):
+            print(f"[DEBUG] [login] Password match for '{username}'. Setting session.")
             session['user'] = username
+            print(f"[DEBUG] [login] Login operation took {time.time() - t_login:.4f}s")
             return redirect(url_for('home'))
+        print(f"[DEBUG] [login] Invalid username or password for '{username}'.")
         flash("Invalid username or password.")
         return redirect(url_for('login'))
     return render_template('login.html')
@@ -800,86 +906,128 @@ def login():
 
 @app.route('/logout')
 def logout():
+    print(f"[DEBUG] [logout] User logging out: {session.get('user')}")
     session.pop('user', None)
     return redirect(url_for('login'))
 
 
 @app.route('/api/suggest', methods=['GET'])
 def suggest_location():
+    t_start = time.time()
     query = request.args.get('q', '')
+    print(f"[DEBUG] [suggest_location] Query received: '{query}'")
     if len(query) < 3:
+        print("[DEBUG] [suggest_location] Query too short. Returning empty array.")
         return jsonify([])
     url = (
         f"https://nominatim.openstreetmap.org/search"
         f"?q={query}&format=json&addressdetails=1&limit=5&countrycodes=ph"
     )
+    print(f"[DEBUG] [suggest_location] Calling Nominatim URL: {url}")
     try:
-        return jsonify(requests.get(url, headers={'User-Agent': 'SafeRoute-Flask-App/1.0'}).json())
-    except Exception:
+        t_req = time.time()
+        res = requests.get(url, headers={'User-Agent': 'SafeRoute-Flask-App/1.0'}).json()
+        print(f"[DEBUG] [suggest_location] Nominatim response received in {time.time() - t_req:.4f}s. Result count: {len(res)}")
+        return jsonify(res)
+    except Exception as e:
+        print(f"[DEBUG] [suggest_location] Exception during search: {e}")
         return jsonify([])
 
 
 @app.route('/api/reverse', methods=['GET'])
 def reverse_geocode_api():
+    t_start = time.time()
     lat = request.args.get('lat')
     lon = request.args.get('lon')
+    print(f"[DEBUG] [reverse_geocode_api] Reversing lat: {lat}, lon: {lon}")
     url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
+    print(f"[DEBUG] [reverse_geocode_api] Calling Nominatim URL: {url}")
     try:
+        t_req = time.time()
         data = requests.get(url, headers={'User-Agent': 'SafeRoute-Flask-App/1.0'}).json()
+        print(f"[DEBUG] [reverse_geocode_api] Request finished in {time.time() - t_req:.4f}s")
         return jsonify({"address": data.get("display_name", f"{lat}, {lon}")})
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] [reverse_geocode_api] Exception during reverse geocode: {e}")
         return jsonify({"address": f"{lat}, {lon}"})
 
 @app.route('/api/nearby', methods=['GET'])
 def get_nearby_api():
+    t_start = time.time()
+    print(f"[DEBUG] [get_nearby_api] Incoming args: {request.args}")
     try:
         lat = float(request.args.get('lat'))
         lon = float(request.args.get('lon'))
         radius = float(request.args.get('radius', 800))
+        print(f"[DEBUG] [get_nearby_api] Parsed params: lat={lat}, lon={lon}, radius={radius}")
+        
         from navigation import get_nearby_transit
+        print("[DEBUG] [get_nearby_api] Calling get_nearby_transit...")
+        t_nav = time.time()
         results = get_nearby_transit(lat, lon, radius)
+        print(f"[DEBUG] [get_nearby_api] get_nearby_transit returned {len(results)} items in {time.time() - t_nav:.4f}s")
         return jsonify(results)
     except Exception as e:
+        print(f"[DEBUG] [get_nearby_api] Exception: {e}")
         return jsonify({"error": str(e)}), 400
 
 @app.route('/api/route', methods=['POST'])
 @app.route('/api/routes', methods=['POST'])
 def get_routes():
+    t_route_start = time.time()
+    print("[DEBUG] [get_routes] /api/routes endpoint hit.")
     data = request.json
+    print(f"[DEBUG][get_routes] Raw payload: {data}")
+    
     # Handle both direct text input or coordinates
     origin_text = data.get('origin')
     dest_text = data.get('destination')
     commuter_type = data.get('mode') or data.get('commuterType') or 'car'
+    print(f"[DEBUG] [get_routes] Parsed inputs -> origin_text='{origin_text}', dest_text='{dest_text}', mode='{commuter_type}'")
     
     # Check for coordinates first (from map clicks/pins)
     orig_coords = data.get('orig_coords') or data.get('originCoords')
     dest_coords = data.get('dest_coords') or data.get('destCoords')
+    print(f"[DEBUG] [get_routes] Coordinate override check -> orig_coords: {orig_coords}, dest_coords: {dest_coords}")
 
+    t_geo = time.time()
     if orig_coords:
         orig_lon = float(orig_coords.get('lon', orig_coords.get('lng', 0)))
         orig_lat = float(orig_coords.get('lat', 0))
     else:
+        print(f"[DEBUG] [get_routes] Geocoding origin_text: '{origin_text}'")
         orig_lon, orig_lat = geocode_location(origin_text)
 
     if dest_coords:
         dest_lon = float(dest_coords.get('lon', dest_coords.get('lng', 0)))
         dest_lat = float(dest_coords.get('lat', 0))
     else:
+        print(f"[DEBUG] [get_routes] Geocoding dest_text: '{dest_text}'")
         dest_lon, dest_lat = geocode_location(dest_text)
+    print(f"[DEBUG] [get_routes] Geocode resolution took {time.time() - t_geo:.4f}s")
+    print(f"[DEBUG] [get_routes] Final coordinates -> Orig: ({orig_lat}, {orig_lon}), Dest: ({dest_lat}, {dest_lon})")
 
     if not orig_lon or not dest_lon:
+        print("[DEBUG][get_routes] Missing locations. Returning error 400.")
         return jsonify({"error": "Location not found."}), 400
 
     # Calculate the route
+    print("[DEBUG] [get_routes] Calling get_navigation_data()...")
+    t_nav = time.time()
     nav_response = get_navigation_data(
-        orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, []
+        orig_lon, orig_lat, dest_lon, dest_lat, commuter_type,[]
     )
+    print(f"[DEBUG] [get_routes] get_navigation_data completed in {time.time() - t_nav:.4f}s")
 
     if "error" in nav_response:
+        print(f"[DEBUG] [get_routes] Navigation error: {nav_response['error']}")
         return jsonify({"error": nav_response["error"]}), 400
 
     routes = nav_response.get("routes", [])
+    print(f"[DEBUG] [get_routes] Received {len(routes)} routes.")
     if routes:
+        print("[DEBUG] [get_routes] Commencing route enrichments...")
+        t_enrich_total = time.time()
         from risk_monitor.features import (
             rank_routes, enrich_routes_with_scores,
             attach_fares, apply_night_safety,
@@ -888,10 +1036,6 @@ def get_routes():
         from risk_monitor.weather import apply_weather_to_routes
         from risk_monitor.noah   import apply_route_flood_analysis
 
-        # rank_routes labels and pads road/walk routes to 3.
-        # Skip for transit/jeepney/bus/train — they return a single
-        # carefully-built segmented route that must not be padded with
-        # raw OSRM driving detours.
         _ct = commuter_type.lower().strip()
         _is_transit = _ct in (
             'transit', 'jeepney', 'bus', 'train',
@@ -899,13 +1043,13 @@ def get_routes():
             'lrt1', 'lrt-1', 'lrt2', 'lrt-2',
             'mrt3', 'mrt-3', 'mrt7', 'pnr', 'commute',
         )
+        print(f"[DEBUG] [get_routes] Commuter mode parsed as: '{_ct}'. Is transit: {_is_transit}")
+
         if not _is_transit:
+            print("[DEBUG] [get_routes] Ranking non-transit routes...")
             routes = rank_routes(routes, commuter_type)
         else:
-            # Transit routes: assign id/mode_label AND compute safety scores.
-            # Without this, all transit routes get the enrich fallback of 75
-            # which makes every route show the same score after penalties.
-            # Per-mode label colors so Train/Jeepney/Bus look distinct
+            print("[DEBUG] [get_routes] Processing transit-specific formatting and scores...")
             _mode_colors = {
                 'train': '#27ae60', 'lrt1': '#27ae60', 'lrt-1': '#27ae60',
                 'lrt2': '#2980b9', 'lrt-2': '#2980b9',
@@ -919,29 +1063,38 @@ def get_routes():
                 r.setdefault('id', i)
                 r.setdefault('mode_label', r.get('route_name', 'Route'))
                 r.setdefault('mode_label_color', _ml_color)
-                # Compute score now so it reflects actual time/distance/position
                 if 'safety_score' not in r or r.get('safety_score') is None:
+                    print(f"[DEBUG][get_routes] Computing initial safety score for transit route {i}")
                     r['safety_score'] = _compute_safety_score(r, commuter_type)
+
+        print("[DEBUG] [get_routes] Enriching routes with scores, fares, night safety...")
         enrich_routes_with_scores(routes, commuter_type)
         apply_night_safety(routes, commuter_type)
         attach_fares(routes, commuter_type)
 
+        print("[DEBUG] [get_routes] Retrieving weather risk for routes...")
+        t_weather = time.time()
         weather = get_weather_risk(orig_lat, orig_lon)
         apply_weather_to_routes(routes, weather, commuter_type)
+        print(f"[DEBUG] [get_routes] Weather risk gathered and applied in {time.time() - t_weather:.4f}s")
 
-        # Flood: scan entire route path (not just origin).
-        # Flood-prone zones always appear on map; penalties only where it's raining there.
+        print("[DEBUG] [get_routes] Applying flood analysis (NOAH)...")
+        t_flood = time.time()
         from risk_monitor.noah import apply_route_flood_analysis
         apply_route_flood_analysis(routes, weather)
-        # Keep single-point result for flood_banner / flood_risk fields only
         flood = get_flood_risk_at(orig_lat, orig_lon)
+        print(f"[DEBUG] [get_routes] Flood analysis took {time.time() - t_flood:.4f}s. Orig Flood Risk: {flood.get('risk_level')}")
 
+        print("[DEBUG] [get_routes] Applying community reports...")
+        t_rep = time.time()
         apply_reports_to_routes(
             routes, chDB_perf,
             orig_lat, orig_lon, dest_lat, dest_lon,
         )
+        print(f"[DEBUG] [get_routes] Community reports application took {time.time() - t_rep:.4f}s")
 
-        # Crime risk: origin + destination endpoints
+        print("[DEBUG] [get_routes] Analyzing crime risk for routes...")
+        t_crime = time.time()
         from risk_monitor.crime_data import (
             get_crime_risk_with_reports, apply_crime_both_ends,
             scan_route_crime_zones, apply_route_crime_to_routes,
@@ -949,14 +1102,11 @@ def get_routes():
         orig_crime = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
         dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
 
-        # Scan each route's actual path for intermediate crime zones
         for route in routes:
-            # Collect flat waypoint list from route geometry
-            wps = []
+            wps =[]
             if route.get("segments"):
                 for seg in route["segments"]:
                     c = seg.get("coords", [])
-                    # train segments have nested lists [[lat,lon],...]
                     if c and isinstance(c[0], list) and isinstance(c[0][0], list):
                         for sub in c:
                             wps.extend(sub)
@@ -968,8 +1118,11 @@ def get_routes():
 
         apply_crime_both_ends(routes, orig_crime, dest_crime, commuter_type)
         apply_route_crime_to_routes(routes, commuter_type)
+        print(f"[DEBUG] [get_routes] Crime risk analysis completed in {time.time() - t_crime:.4f}s")
 
         # ── Real-time incidents (GDACS, NDRRMC, ReliefWeb) ────────────────
+        print("[DEBUG] [get_routes] Applying real-time incidents...")
+        t_inc = time.time()
         try:
             active_incidents = get_active_incidents()
             apply_incidents_to_routes(
@@ -977,11 +1130,15 @@ def get_routes():
                 orig_lat, orig_lon, dest_lat, dest_lon,
             )
             nav_response["incidents"] = get_incidents_map_data(active_incidents)
+            print(f"[DEBUG][get_routes] Gathered {len(active_incidents)} real-time incidents.")
         except Exception as _ie:
-            print(f"[incidents] pipeline error: {_ie}")
+            print(f"[DEBUG] [get_routes] [incidents] pipeline error: {_ie}")
             nav_response["incidents"] = []
+        print(f"[DEBUG][get_routes] Incidents logic took {time.time() - t_inc:.4f}s")
 
         # ── MMDA: number coding + road closures ───────────────────────────
+        print("[DEBUG][get_routes] Processing MMDA rules...")
+        t_mmda = time.time()
         try:
             plate_raw = data.get("plate_last_digit")
             plate_digit = int(plate_raw) if plate_raw is not None else None
@@ -992,34 +1149,40 @@ def get_routes():
             nav_response["mmda_coding"] = mmda_coding
             nav_response["mmda_closures_count"] = len(mmda_closures)
         except Exception as _me:
-            print(f"[mmda] pipeline error: {_me}")
+            print(f"[DEBUG] [get_routes] [mmda] pipeline error: {_me}")
             nav_response["mmda_banner"] = ""
+        print(f"[DEBUG] [get_routes] MMDA logic took {time.time() - t_mmda:.4f}s")
 
         # ── PHIVOLCS: seismic risk ─────────────────────────────────────────
+        print("[DEBUG] [get_routes] Processing PHIVOLCS seismic data...")
+        t_seismic = time.time()
         try:
             earthquakes = get_recent_earthquakes(hours_back=12)
             apply_seismic_to_routes(routes, earthquakes)
             nav_response["seismic_banner"] = get_seismic_banner_html(earthquakes)
             nav_response["epicenter_js"]   = get_epicenter_map_js(earthquakes)
-            nav_response["earthquakes"]    = [
+            nav_response["earthquakes"]    =[
                 {"magnitude": e["magnitude"], "place": e["place"],
                  "severity": e["severity"], "time_pht": e["time_pht"],
                  "tsunami": e["tsunami"]}
                 for e in earthquakes
             ]
         except Exception as _pe:
-            print(f"[phivolcs] pipeline error: {_pe}")
+            print(f"[DEBUG][get_routes] [phivolcs] pipeline error: {_pe}")
             nav_response["seismic_banner"] = ""
             nav_response["epicenter_js"]   = ""
+        print(f"[DEBUG] [get_routes] Seismic logic took {time.time() - t_seismic:.4f}s")
 
-        # Safe spots are loaded on-demand via /api/safe-spots/route
-        # (toggled by the user in the UI) — not run here for performance.
+        print("[DEBUG] [get_routes] Initializing safe_spots_js as empty (loaded via /api/safe-spots/route)...")
         nav_response['safe_spots_js'] = ''
 
         # ── Vulnerable commuter profile ───────────────────────────────────
+        print("[DEBUG][get_routes] Processing vulnerable profile...")
+        t_vuln = time.time()
         try:
             profile = data.get("vulnerable_profile", "")
             if profile and profile in PROFILES:
+                print(f"[DEBUG] [get_routes] Profile found: '{profile}'. Applying to routes.")
                 apply_vulnerable_profile_to_routes(routes, profile, weather)
                 from risk_monitor.vulnerable_profiles import get_infrastructure_warnings
                 for route in routes:
@@ -1030,27 +1193,33 @@ def get_routes():
             else:
                 nav_response["profile_badge"] = ""
         except Exception as _vpe:
-            print(f"[vulnerable_profiles] pipeline error: {_vpe}")
+            print(f"[DEBUG] [get_routes] [vulnerable_profiles] pipeline error: {_vpe}")
             nav_response["profile_badge"] = ""
+        print(f"[DEBUG] [get_routes] Vulnerable profile logic took {time.time() - t_vuln:.4f}s")
 
         # ── Color each route by safety score ──────────────────────────────
+        print("[DEBUG] [get_routes] Resolving route colors based on safety scores...")
         def _safety_to_color(score):
             if score >= 80: return '#27ae60'   # green
             if score >= 65: return '#f39c12'   # amber
             if score >= 50: return '#e67e22'   # orange
             return '#e74c3c'                   # red
 
-        for route in routes:
-            route['color'] = _safety_to_color(route.get('safety_score', 75))
+        for idx, route in enumerate(routes):
+            route_score = route.get('safety_score', 75)
+            route['color'] = _safety_to_color(route_score)
+            print(f"[DEBUG] [get_routes] Route {idx} score is {route_score}, color is {route['color']}")
 
         # Save to route history
         if 'user' in session:
+            print(f"[DEBUG] [get_routes] Saving route history for user '{session['user']}'...")
             orig_label = origin_text or f"{orig_lat:.5f}, {orig_lon:.5f}"
             dest_label = dest_text   or f"{dest_lat:.5f}, {dest_lon:.5f}"
             save_route_history(
                 chDB_perf, session['user'],
                 orig_label, dest_label, commuter_type, len(routes)
             )
+            print("[DEBUG] [get_routes] Route history saved.")
 
         nav_response["routes"] = routes
 
@@ -1063,13 +1232,16 @@ def get_routes():
         nav_response["dest_text"] = dest_text   or ""
 
         # ── Attach live banners to API response ───────────────────────────
+        print("[DEBUG][get_routes] Constructing final live banners for JSON response...")
         from risk_monitor.weather import get_weather_banner_html as _wbh
         from risk_monitor.noah   import get_flood_warning_html  as _fwh
         nav_response["weather_banner"] = _wbh(weather, commuter_type)
         nav_response["flood_banner"]   = _fwh(flood, weather)  # Pass weather to check if raining
         nav_response["weather_risk"]   = weather.get("risk_level", "clear")
         nav_response["flood_risk"]     = flood.get("risk_level",   "none")
+        print(f"[DEBUG] [get_routes] Total enrichment pipeline took {time.time() - t_enrich_total:.4f}s")
 
+    print(f"[DEBUG][get_routes] Endpoint returning response in {time.time() - t_route_start:.4f}s total.")
     return jsonify(nav_response)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1078,64 +1250,95 @@ def get_routes():
 
 @app.route('/api/incidents')
 def api_incidents():
-    """
-    Real-time incident feed for the map overlay.
-    Returns active incidents from GDACS, NDRRMC, and ReliefWeb.
-    Cached for 10 minutes server-side — safe to poll on page load.
-    """
+    t_start = time.time()
+    print("[DEBUG][api_incidents] Handling request for real-time incidents overlay.")
     try:
         incidents = get_active_incidents()
-        return jsonify(get_incidents_map_data(incidents))
+        print(f"[DEBUG] [api_incidents] Returned {len(incidents)} incidents. Processing map data.")
+        result = get_incidents_map_data(incidents)
+        print(f"[DEBUG] [api_incidents] Request finished successfully in {time.time() - t_start:.4f}s")
+        return jsonify(result)
     except Exception as e:
+        print(f"[DEBUG][api_incidents] Exception: {e}")
         return jsonify([])
 
 
 @app.route('/report', methods=['POST'])
 def report():
+    t_start = time.time()
+    print("[DEBUG] [report] Receiving community report POST...")
     if 'user' not in session:
+        print("[DEBUG] [report] User unauthorized. Rejecting.")
         return ('Unauthorized', 401)
     try:
         rtype = request.form.get('report_type', '')
         lat   = float(request.form.get('lat', 0))
         lon   = float(request.form.get('lon', 0))
         desc  = request.form.get('description', '')
+        print(f"[DEBUG] [report] Form data -> user: {session['user']}, rtype: {rtype}, lat: {lat}, lon: {lon}, desc: '{desc}'")
+        
         result = submit_report(chDB_perf, session['user'], rtype, lat, lon, desc)
+        print(f"[DEBUG] [report] submit_report result: {result}")
+        
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or \
            request.content_type == 'application/x-www-form-urlencoded':
+            print("[DEBUG][report] Returning JSON response for XHR.")
             return jsonify(result)
+        
+        print("[DEBUG][report] Flashing message and redirecting to home.")
         flash(result['message'])
+        print(f"[DEBUG] [report] Done in {time.time() - t_start:.4f}s")
         return redirect(url_for('home'))
     except Exception as e:
+        print(f"[DEBUG][report] Exception: {e}")
         return jsonify({'ok': False, 'message': str(e)}), 400
 
 
 @app.route('/api/reports', methods=['GET'])
 def api_reports():
+    t_start = time.time()
+    print("[DEBUG] [api_reports] Fetching active community reports...")
     reports = get_all_active_reports(chDB_perf, limit=100)
+    print(f"[DEBUG] [api_reports] Returning {len(reports)} reports in {time.time() - t_start:.4f}s")
     return jsonify(reports)
 
 
 @app.route('/api/reports/confirm', methods=['POST'])
 def api_confirm_report():
+    t_start = time.time()
+    print("[DEBUG] [api_confirm_report] Hit /api/reports/confirm endpoint.")
     if 'user' not in session:
+        print("[DEBUG] [api_confirm_report] Unauthorized. Rejecting.")
         return jsonify({'ok': False, 'message': 'Login required'}), 401
+    
     report_id = request.json.get('report_id')
+    print(f"[DEBUG] [api_confirm_report] User '{session['user']}' confirming report_id {report_id}")
+    
     result = confirm_report(chDB_perf, int(report_id), session['user'])
+    print(f"[DEBUG] [api_confirm_report] confirm_report result: {result}. Took {time.time() - t_start:.4f}s")
     return jsonify(result)
 
 
 @app.route('/api/report-types', methods=['GET'])
 def api_report_types():
+    print("[DEBUG] [api_report_types] Fetching report type options...")
     from risk_monitor.community_reports import get_report_type_options_for_api
     return jsonify(get_report_type_options_for_api())
 
 
 @app.route('/community', methods=['GET'])
 def community():
+    t_start = time.time()
+    print("[DEBUG] [community] Accessing /community view.")
     if 'user' not in session:
+        print("[DEBUG] [community] Redirecting unauthorized user to login.")
         return redirect(url_for('login'))
+        
+    print("[DEBUG] [community] Fetching active reports and weather for Manila baseline...")
     reports = get_all_active_reports(chDB_perf, limit=50)
     weather = get_weather_risk(14.5995, 120.9842)
+    print(f"[DEBUG] [community] Rendering template with {len(reports)} reports. Elapsed: {time.time() - t_start:.4f}s")
+    
     return render_template(
         'community.html',
         user=session['user'],
@@ -1152,55 +1355,80 @@ def community():
 
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():
+    t_start = time.time()
+    print(f"[DEBUG] [settings] Method: {request.method}")
     if 'user' not in session:
         return redirect(url_for('login'))
+        
     flash_msg = ''
     if request.method == 'POST':
+        print("[DEBUG] [settings] Processing form POST.")
         settings_data = extract_settings_from_form(request.form)
+        print(f"[DEBUG] [settings] Extracted settings: {settings_data}")
         save_user_settings(chDB_perf, session['user'], settings_data)
+        
         if request.form.get('display_name') is not None:
+            print("[DEBUG] [settings] Saving user profile display name & email...")
             save_user_profile(
                 chDB_perf, session['user'],
                 request.form.get('display_name', ''),
                 request.form.get('email', ''),
             )
         flash_msg = 'Settings saved.'
+
+    print("[DEBUG] [settings] Fetching user settings and profile state...")
     user_settings = get_user_settings(chDB_perf, session['user'])
     profile       = get_user_profile(chDB_perf, session['user'])
     try:
+        print("[DEBUG] [settings] Fetching trusted contacts HTML...")
         _contacts          = get_trusted_contacts(chDB_perf, session['user'])
         sos_contacts_html  = get_trusted_contacts_settings_html(_contacts)
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] [settings] Failed trusted contacts HTML: {e}")
         sos_contacts_html  = ""
+        
+    print(f"[DEBUG] [settings] Constructing response in {time.time() - t_start:.4f}s")
     return get_settings_page_html(user_settings, profile, flash_msg, sos_contacts_html)
 
 
 @app.route('/history')
 def history():
+    t_start = time.time()
+    print("[DEBUG] [history] Accessing user route history...")
     if 'user' not in session:
         return redirect(url_for('login'))
+        
     hist = get_route_history(chDB_perf, session['user'])
+    print(f"[DEBUG] [history] Fetched {len(hist)} history items for '{session['user']}' in {time.time() - t_start:.4f}s")
     return get_history_page_html(hist, session['user'])
 
 
 @app.route('/history/clear', methods=['POST'])
 def history_clear():
+    t_start = time.time()
+    print("[DEBUG] [history_clear] Action invoked.")
     if 'user' not in session:
         return redirect(url_for('login'))
+        
     clear_route_history(chDB_perf, session['user'])
+    print(f"[DEBUG][history_clear] History cleared for '{session['user']}' in {time.time() - t_start:.4f}s")
     flash('History cleared.')
     return redirect(url_for('history'))
 
 
 @app.route('/account/password', methods=['POST'])
 def change_password_route():
+    t_start = time.time()
+    print("[DEBUG] [change_password_route] Password change invoked.")
     if 'user' not in session:
         return redirect(url_for('login'))
+        
     result = change_password(
         chDB_perf, session['user'],
         request.form.get('old_password', ''),
         request.form.get('new_password', ''),
     )
+    print(f"[DEBUG] [change_password_route] Result: {result}. Time: {time.time() - t_start:.4f}s")
     flash(result['message'])
     return redirect(url_for('settings'))
 
@@ -1212,29 +1440,50 @@ def change_password_route():
 @app.route('/api/safety', methods=['GET'])
 def api_safety():
     """Returns weather, flood, and community report risk for a location."""
+    t_start = time.time()
+    print(f"[DEBUG] [api_safety] Safety API invoked. Args: {request.args}")
     try:
         lat = float(request.args.get('lat', 14.5995))
         lon = float(request.args.get('lon', 120.9842))
     except (TypeError, ValueError):
+        print("[DEBUG] [api_safety] Invalid coordinates. Returning 400 error.")
         return jsonify({'error': 'Invalid coordinates'}), 400
 
+    print(f"[DEBUG] [api_safety] Requesting risk metrics for lat={lat}, lon={lon}")
+    
+    t_w = time.time()
     weather = get_weather_risk(lat, lon)
-    flood   = get_flood_risk_at(lat, lon)
-    penalty = get_area_safety_penalty(chDB_perf, lat, lon)
-    reports = get_all_active_reports(chDB_perf, limit=50)
+    print(f"[DEBUG] [api_safety] Weather retrieved in {time.time() - t_w:.4f}s")
 
+    t_f = time.time()
+    flood   = get_flood_risk_at(lat, lon)
+    print(f"[DEBUG] [api_safety] Flood retrieved in {time.time() - t_f:.4f}s")
+
+    t_p = time.time()
+    penalty = get_area_safety_penalty(chDB_perf, lat, lon)
+    print(f"[DEBUG] [api_safety] Area penalty computed in {time.time() - t_p:.4f}s")
+
+    t_r = time.time()
+    reports = get_all_active_reports(chDB_perf, limit=50)
+    print(f"[DEBUG] [api_safety] Active reports fetched in {time.time() - t_r:.4f}s")
+
+    t_c = time.time()
     crime = get_crime_risk_for_area(lat, lon, "")
+    print(f"[DEBUG] [api_safety] Crime risk resolved in {time.time() - t_c:.4f}s")
 
     # MMDA + Seismic
     try:
         mmda_closures = get_road_closures()
-    except Exception:
-        mmda_closures = []
+    except Exception as e:
+        print(f"[DEBUG][api_safety] MMDA Exception: {e}")
+        mmda_closures =[]
     try:
         quakes = get_recent_earthquakes(hours_back=12)
-    except Exception:
-        quakes = []
+    except Exception as e:
+        print(f"[DEBUG] [api_safety] Quakes Exception: {e}")
+        quakes =[]
 
+    print(f"[DEBUG] [api_safety] Finalizing JSON response payload. Total time: {time.time() - t_start:.4f}s")
     return jsonify({
         'weather': {
             'risk_level':  weather.get('risk_level'),
@@ -1295,7 +1544,10 @@ def api_safety():
 @app.route('/api/sos', methods=['POST'])
 def api_sos():
     """Trigger SOS: log event, return share link + contact count."""
+    t_start = time.time()
+    print("[DEBUG] [api_sos] Processing SOS request...")
     if 'user' not in session:
+        print("[DEBUG][api_sos] Unauthorized user.")
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     try:
         body    = request.json or {}
@@ -1303,43 +1555,61 @@ def api_sos():
         lon     = float(body.get('lon', 0))
         message = body.get('message', 'SOS from SafeRoute user')
         route_summary = body.get('route_summary', '')
-        result  = log_sos_event(chDB_perf, session['user'], lat, lon,
-                                route_summary, message)
+        
+        print(f"[DEBUG] [api_sos] SOS Data -> User: {session['user']}, Lat: {lat}, Lon: {lon}, Message: '{message}', Route Summary: '{route_summary}'")
+        result  = log_sos_event(chDB_perf, session['user'], lat, lon, route_summary, message)
+        
+        print(f"[DEBUG][api_sos] SOS log event result: {result}. Took {time.time() - t_start:.4f}s")
         return jsonify(result)
     except Exception as e:
+        print(f"[DEBUG][api_sos] Exception: {e}")
         return jsonify({'ok': False, 'message': str(e)}), 400
 
 
 @app.route('/api/sos/contacts', methods=['GET'])
 def api_sos_contacts_get():
+    t_start = time.time()
+    print("[DEBUG] [api_sos_contacts_get] Requesting SOS contacts.")
     if 'user' not in session:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     contacts = get_trusted_contacts(chDB_perf, session['user'])
+    print(f"[DEBUG][api_sos_contacts_get] Fetched {len(contacts)} contacts for user in {time.time() - t_start:.4f}s")
     return jsonify({'ok': True, 'contacts': contacts})
 
 
 @app.route('/api/sos/contacts', methods=['POST'])
 def api_sos_contacts_add():
+    t_start = time.time()
+    print("[DEBUG][api_sos_contacts_add] Adding SOS contact.")
     if 'user' not in session:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     try:
         body = request.json or {}
+        name = body.get('name', '')
+        c_type = body.get('contact_type', 'phone')
+        c_val = body.get('contact_value', '')
+        
+        print(f"[DEBUG] [api_sos_contacts_add] Contact payload -> name: '{name}', type: '{c_type}', value: '{c_val}'")
         result = add_trusted_contact(
             chDB_perf, session['user'],
-            body.get('name', ''),
-            body.get('contact_type', 'phone'),
-            body.get('contact_value', ''),
+            name, c_type, c_val
         )
+        print(f"[DEBUG] [api_sos_contacts_add] Added contact. Result: {result}. Took {time.time() - t_start:.4f}s")
         return jsonify(result)
     except Exception as e:
+        print(f"[DEBUG] [api_sos_contacts_add] Exception: {e}")
         return jsonify({'ok': False, 'message': str(e)}), 400
 
 
 @app.route('/api/sos/contacts/<int:contact_id>', methods=['DELETE'])
 def api_sos_contacts_delete(contact_id):
+    t_start = time.time()
+    print(f"[DEBUG] [api_sos_contacts_delete] Deleting contact ID {contact_id}.")
     if 'user' not in session:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
+        
     result = remove_trusted_contact(chDB_perf, session['user'], contact_id)
+    print(f"[DEBUG] [api_sos_contacts_delete] Deletion result: {result}. Took {time.time() - t_start:.4f}s")
     return jsonify(result)
 
 
@@ -1350,11 +1620,17 @@ def api_sos_contacts_delete(contact_id):
 @app.route('/api/mmda', methods=['GET'])
 def api_mmda():
     """Current number coding status + active road closures."""
+    t_start = time.time()
+    print("[DEBUG] [api_mmda] Fetching MMDA status...")
     try:
         plate_raw   = request.args.get('plate')
         plate_digit = int(plate_raw) % 10 if plate_raw and plate_raw.isdigit() else None
+        print(f"[DEBUG] [api_mmda] Resolving for plate digit: {plate_digit}")
+        
         coding   = get_number_coding(plate_digit) if plate_digit is not None else None
         closures = get_road_closures()
+        print(f"[DEBUG] [api_mmda] MMDA data obtained. Closures count: {len(closures)}. Time: {time.time() - t_start:.4f}s")
+        
         return jsonify({
             'coding':         coding,
             'closures':       closures,
@@ -1362,15 +1638,20 @@ def api_mmda():
             'closures_count': len(closures),
         })
     except Exception as e:
+        print(f"[DEBUG] [api_mmda] Exception: {e}")
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/phivolcs', methods=['GET'])
 def api_phivolcs():
     """Recent Philippine earthquakes from USGS/PHIVOLCS."""
+    t_start = time.time()
+    print("[DEBUG][api_phivolcs] Fetching seismic data...")
     try:
         hours = int(request.args.get('hours', 12))
         quakes = get_recent_earthquakes(hours_back=hours)
+        print(f"[DEBUG] [api_phivolcs] Fetched {len(quakes)} earthquakes in last {hours} hours. Took {time.time() - t_start:.4f}s")
+        
         return jsonify({
             'earthquakes':    quakes,
             'count':          len(quakes),
@@ -1378,19 +1659,26 @@ def api_phivolcs():
             'epicenter_js':   get_epicenter_map_js(quakes),
         })
     except Exception as e:
+        print(f"[DEBUG] [api_phivolcs] Exception: {e}")
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/safe-spots', methods=['GET'])
 def api_safe_spots():
     """Safe spots (police, hospitals, fire stations, etc.) near a coordinate."""
+    t_start = time.time()
+    print("[DEBUG][api_safe_spots] Incoming query...")
     try:
         lat    = float(request.args.get('lat', 14.5995))
         lon    = float(request.args.get('lon', 120.9842))
         radius = int(request.args.get('radius', 1500))
+        print(f"[DEBUG] [api_safe_spots] Parameters -> lat: {lat}, lon: {lon}, radius: {radius}")
+        
         spots  = get_safe_spots_near(lat, lon, radius_m=radius)
+        print(f"[DEBUG][api_safe_spots] Retrieved {len(spots)} spots in {time.time() - t_start:.4f}s")
         return jsonify({'spots': spots, 'count': len(spots)})
     except Exception as e:
+        print(f"[DEBUG] [api_safe_spots] Exception: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/safe-spots/route', methods=['POST'])
@@ -1400,11 +1688,16 @@ def api_safe_spots_for_route():
     Called when the user toggles safe spots ON for a selected route.
     Accepts a route object (coords + segments) and returns Leaflet JS.
     """
+    t_start = time.time()
+    print("[DEBUG][api_safe_spots_for_route] Generating safe spots script for route JSON...")
     try:
         route = request.json or {}
+        print(f"[DEBUG] [api_safe_spots_for_route] Route structure length: {len(str(route))} chars")
         js = get_route_safe_spots_js(route)
+        print(f"[DEBUG] [api_safe_spots_for_route] Generated JS payload size: {len(js)} chars. Took {time.time() - t_start:.4f}s")
         return jsonify({'safe_spots_js': js, 'ok': True})
     except Exception as e:
+        print(f"[DEBUG] [api_safe_spots_for_route] Exception: {e}")
         return jsonify({'error': str(e), 'ok': False, 'safe_spots_js': ''}), 500
 
 
@@ -1416,16 +1709,24 @@ def api_safe_spots_batch():
     Body: { "coords": [[lat, lon], ...], "radius": 600 }
     Returns: { "spots": [...], "ok": true }
     """
+    t_start = time.time()
+    print("[DEBUG][api_safe_spots_batch] Fetching safe spots in batch...")
     try:
         body     = request.json or {}
-        coords   = body.get('coords', [])
+        coords   = body.get('coords',[])
         radius   = int(body.get('radius', 600))
+        
+        print(f"[DEBUG][api_safe_spots_batch] Incoming {len(coords)} coordinates, radius {radius}.")
         # Safety cap: max 12 sample points per request
         coords   = coords[:12]
+        print(f"[DEBUG][api_safe_spots_batch] Processing capped list of {len(coords)} coordinates.")
+        
         spots    = get_spots_for_coords(coords, radius_m=radius)
+        print(f"[DEBUG][api_safe_spots_batch] Fetched {len(spots)} cumulative spots in {time.time() - t_start:.4f}s")
         return jsonify({'spots': spots, 'count': len(spots), 'ok': True})
     except Exception as e:
-        return jsonify({'error': str(e), 'ok': False, 'spots': []}), 500
+        print(f"[DEBUG][api_safe_spots_batch] Exception: {e}")
+        return jsonify({'error': str(e), 'ok': False, 'spots':[]}), 500
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1441,6 +1742,8 @@ def rss_feed():
         lat, lon   — coordinates for weather risk (default: Manila)
         type       — "all" (default) | "reports" | "weather"
     """
+    t_start = time.time()
+    print("[DEBUG] [rss_feed] Generating RSS feed...")
     from flask import Response, request as _req
     try:
         lat       = float(_req.args.get('lat', 14.5995))
@@ -1452,7 +1755,12 @@ def rss_feed():
     if feed_type not in ('all', 'reports', 'weather'):
         feed_type = 'all'
 
+    print(f"[DEBUG][rss_feed] Feed type '{feed_type}', coordinate reference ({lat}, {lon})")
+    
+    t_r = time.time()
     reports = get_all_active_reports(chDB_perf, limit=100)
+    print(f"[DEBUG] [rss_feed] Fetched {len(reports)} reports in {time.time() - t_r:.4f}s")
+    
     typhoon = get_typhoon_signal()
     weather = get_weather_risk(lat, lon)
 
@@ -1465,7 +1773,9 @@ def rss_feed():
         feed_type=feed_type,
     )
 
+    print(f"[DEBUG] [rss_feed] Generated XML output size: {len(xml_str)} chars in {time.time() - t_start:.4f}s")
     return Response(xml_str, mimetype='application/rss+xml; charset=utf-8')
 
 if __name__ == '__main__':
+    print("[DEBUG] [MAIN] Starting Flask app loop via main block...")
     app.run(debug=True)

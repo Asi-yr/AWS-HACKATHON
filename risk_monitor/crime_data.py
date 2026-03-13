@@ -49,17 +49,83 @@ google-genai, all of which are already in requirements.txt via llm.py.
 """
 
 import os
+import sys
 import json
 import re
 import time
+import functools
 from datetime import datetime, timezone, timedelta
 
-# ── Cache config ──────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# DEBUGGING CONFIGURATION
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Set to True to enable verbose logging to stderr by default.
+DEBUG_MODE = True
+
+def _debug_log(msg, *args):
+    """
+    Logs debug messages to stderr if DEBUG_MODE is on.
+    Usage: _debug_log("Function X called with %s", arg1)
+    """
+    if DEBUG_MODE:
+        try:
+            formatted_msg = msg % args if args else msg
+            print(f"[risk_monitor.crime_data] {formatted_msg}", file=sys.stderr)
+        except Exception:
+            print(f"[risk_monitor.crime_data] {msg} {args}", file=sys.stderr)
+
+def timeit(func):
+    """
+    Decorator to measure and log function execution time.
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if not DEBUG_MODE:
+            return func(*args, **kwargs)
+        
+        func_name = func.__name__
+        # Attempt to log simple args (lat, lon) if present
+        arg_summary = ""
+        if args:
+            # Filter for simple types to avoid dumping huge objects
+            simple_args = [a for a in args if isinstance(a, (int, float, str))]
+            if simple_args:
+                arg_summary = str(simple_args[:3]) # First 3 args
+        
+        start_t = time.perf_counter()
+        _debug_log(f">>> ENTER {func_name} | Args: {arg_summary}")
+        
+        try:
+            result = func(*args, **kwargs)
+            end_t = time.perf_counter()
+            duration = (end_t - start_t) * 1000
+            
+            # Log result summary (size or type)
+            res_summary = type(result).__name__
+            if isinstance(result, list):
+                res_summary = f"list({len(result)})"
+            elif isinstance(result, dict):
+                res_summary = f"dict({len(result)} keys)"
+            
+            _debug_log(f"<<< EXIT  {func_name} | Time: {duration:.2f}ms | Result: {res_summary}")
+            return result
+        except Exception as e:
+            end_t = time.perf_counter()
+            duration = (end_t - start_t) * 1000
+            _debug_log(f"!!! ERROR {func_name} | Time: {duration:.2f}ms | Error: {e}")
+            raise e
+    return wrapper
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CACHE CONFIG
+# ═════════════════════════════════════════════════════════════════════════════
+
 _CACHE_DIR      = "transit_data"
 _CACHE_PREFIX   = "crime_"
 _CACHE_TTL_SEC  = 6 * 3600
 
-# ── Risk config ───────────────────────────────────────────────────────────────
+# ═─ Risk config ───────────────────────────────────────────────────────────────
 _CRIME_COLORS = {
     "none":     "#27ae60",
     "low":      "#f39c12",
@@ -136,12 +202,16 @@ def _cache_path(area_key: str) -> str:
 def _load_cache(area_key: str):
     path = _cache_path(area_key)
     if not os.path.exists(path):
+        # _debug_log(f"Cache miss: {area_key} (no file)") # Optional: too noisy?
         return None
     try:
         with open(path, 'r') as f:
             data = json.load(f)
         if time.time() - data.get("_cached_at", 0) < _CACHE_TTL_SEC:
+            _debug_log(f"Cache HIT for key '{area_key}'")
             return data
+        else:
+            _debug_log(f"Cache STALE for key '{area_key}'")
     except (json.JSONDecodeError, KeyError):
         pass
     return None
@@ -152,8 +222,9 @@ def _save_cache(area_key: str, data: dict):
     try:
         with open(_cache_path(area_key), 'w') as f:
             json.dump(data, f, indent=2)
-    except Exception:
-        pass
+        _debug_log(f"Saved to cache: '{area_key}'")
+    except Exception as e:
+        _debug_log(f"Failed to save cache for '{area_key}': {e}")
 
 
 def _group_commuter(commuter_type: str) -> str:
@@ -255,12 +326,15 @@ def _load_crime_zones() -> list:
     if _ZONES_CACHE and (now - _ZONES_LOAD_TIME) < _ZONES_TTL:
         return _ZONES_CACHE
     try:
+        _debug_log(f"Reloading crime zones from disk: {_ZONES_JSON_PATH}")
         with open(_ZONES_JSON_PATH, 'r', encoding='utf-8') as _f:
             data = json.load(_f)
         _ZONES_CACHE = data.get("zones", [])
         _ZONES_LOAD_TIME = now
+        _debug_log(f"Loaded {len(_ZONES_CACHE)} crime zones.")
         return _ZONES_CACHE
-    except Exception:
+    except Exception as e:
+        _debug_log(f"Failed to load crime zones: {e}")
         return _ZONES_CACHE or []
 
 
@@ -331,18 +405,11 @@ def _coord_zone_lookup(lat: float, lon: float) -> dict | None:
     Returns the most specific crime zone whose bounding box contains (lat, lon).
     Zones with coords defined always beat zones without.
     Among multiple hits, the one with the smallest area (most specific) wins.
-
-    City-awareness guard:
-        If a zone's name contains a city keyword (e.g. "caloocan", "valenzuela"),
-        it is only returned when (lat, lon) falls inside that city's canonical
-        boundary box. This prevents zones from one city being attributed to an
-        adjacent city when their bounding boxes happen to overlap.
-
-    A zone's coords field must be [lat_min, lat_max, lon_min, lon_max].
-    Zones without coords are skipped here (handled by text lookup).
     """
     zones    = _load_crime_zones()
     coord_city = _get_city_for_coords(lat, lon)   # which city is this point in?
+    
+    _debug_log(f"Coord lookup for ({lat:.4f}, {lon:.4f}) -> City: {coord_city or 'Unknown'}")
 
     best      = None
     best_area = float("inf")
@@ -356,17 +423,15 @@ def _coord_zone_lookup(lat: float, lon: float) -> dict | None:
             continue
 
         # ── City-awareness gate ──────────────────────────────────────────────
-        # If this zone's name explicitly names a city, only accept it when the
-        # coordinate falls inside that city's canonical boundary.
         zone_city = _zone_city_keyword(zone.get("name", ""))
         if zone_city and coord_city and zone_city != coord_city:
             # The zone belongs to a different city than the coordinate — skip it.
-            # Example: "bagong silang caloocan" skipped for a Valenzuela coordinate.
+            # _debug_log(f"  Skipping zone '{zone.get('name')}' (City gate mismatch: Zone in {zone_city}, Point in {coord_city})")
             continue
-        # ────────────────────────────────────────────────────────────────────
-
+        
         box_area = (lat_max - lat_min) * (lon_max - lon_min)
         if box_area < best_area:
+            _debug_log(f"  Found candidate zone: '{zone.get('name')}' (Risk: {zone.get('risk')}, Area: {box_area:.6f})")
             best      = zone
             best_area = box_area
 
@@ -378,17 +443,11 @@ def _coord_zone_lookup(lat: float, lon: float) -> dict | None:
 def _static_crime_lookup(area: str) -> dict | None:
     """
     Returns a crime result by matching area against crime_zones.json zone names.
-
-    Matching rules:
-      1. Whole-word boundary match only (e.g. "paco" won't match "francisco").
-      2. Checks all aliases in the "aliases" list field if present.
-      3. Specific barangay/street matches always beat city-level matches.
-      4. Among same specificity, longer (more specific) name wins.
-
-    Returns None if no match.
     """
     area_lower = area.lower().strip()
     zones      = _load_crime_zones()
+    
+    _debug_log(f"Static text lookup for: '{area}'")
 
     specific_best = None   # (key, risk, summary, match_len)
     city_best     = None
@@ -427,7 +486,10 @@ def _static_crime_lookup(area: str) -> dict | None:
 
     winner = specific_best or city_best
     if winner:
+        _debug_log(f"  Text match found: Zone '{winner[0]}' (Risk: {winner[1]})")
         return _crime_result(winner[1], winner[2], area)
+    
+    _debug_log(f"  No static text match found.")
     return None
 
 
@@ -462,12 +524,7 @@ def _decode_polyline(encoded: str) -> list[tuple[float, float]]:
 def _sample_waypoints(waypoints: list, max_samples: int = 60) -> list[tuple[float, float]]:
     """
     Normalise route geometry to a list of (lat, lon) tuples, then thin it to
-    at most max_samples evenly spaced points so we don't hammer the zone lookup.
-
-    Accepts:
-      - List of [lat, lon] or (lat, lon) pairs          ← navigation.py format
-      - Encoded polyline string                          ← ORS/OSRM format
-      - List of dicts with 'lat'/'lon' or 'latitude'/'longitude' keys
+    at most max_samples evenly spaced points.
     """
     if not waypoints:
         return []
@@ -497,7 +554,6 @@ def _is_contained_within(inner_coords: list, outer_coords: list) -> bool:
     """
     Returns True if inner_coords bounding box is fully contained within
     outer_coords bounding box.
-    coords format: [lat_min, lat_max, lon_min, lon_max]
     """
     i_lat_min, i_lat_max, i_lon_min, i_lon_max = inner_coords
     o_lat_min, o_lat_max, o_lon_min, o_lon_max = outer_coords
@@ -511,14 +567,6 @@ def _deduplicate_zones(zones: list) -> list:
     """
     Remove zones whose bounding box is fully contained within another zone
     in the list that has equal or higher risk.
-
-    Solves parent/child duplication:
-      - Tondo (large bbox, high) contains Gagalangin (small bbox, high)
-        => keep Tondo only, drop Gagalangin
-      - Navotas (large bbox, high) contains navotas fish port
-        => keep Navotas only, drop sub-zones
-      - Exception: child with HIGHER risk than parent is kept
-        (a high-risk sub-zone inside a moderate parent is genuinely additional)
     """
     if len(zones) <= 1:
         return zones
@@ -551,37 +599,21 @@ def _deduplicate_zones(zones: list) -> list:
     return keep
 
 
+@timeit
 def scan_route_crime_zones(waypoints) -> list:
     """
     Scans waypoints along a route and returns a deduplicated list of crime zone
     dicts for every distinct zone the route passes through.
-
-    Each returned dict has:
-        name, risk, summary, color, coords  (and optional aliases)
-
-    Only zones with bounding box coords defined in crime_zones.json are checked.
-    Zones of risk 'none' are omitted.
-
-    Anti-spam:
-      1. A zone is only included once even if the route crosses its bounding box
-         multiple times.
-      2. Parent/child deduplication: if zone A fully contains zone B and A has
-         equal or higher risk, zone B is dropped. This prevents Tondo + every
-         Tondo sub-street from each generating separate penalties for the same
-         geographic hazard. Same applies to Navotas and its barangays, etc.
-
-    Args:
-        waypoints: route geometry in any format accepted by _sample_waypoints()
-
-    Returns:
-        List of zone dicts, sorted worst-risk-first, parent/child deduplicated.
     """
     if not waypoints:
+        _debug_log("Scan route: No waypoints provided.")
         return []
 
     samples = _sample_waypoints(waypoints, max_samples=80)
     if not samples:
         return []
+    
+    _debug_log(f"Scan route: Processing {len(samples)} sample points.")
 
     zones       = _load_crime_zones()
     coord_zones = [z for z in zones if z.get("coords") and len(z["coords"]) == 4]
@@ -592,18 +624,17 @@ def scan_route_crime_zones(waypoints) -> list:
     for lat, lon in samples:
         best       = None
         best_area  = float("inf")
-        coord_city = _get_city_for_coords(lat, lon)   # city the waypoint is in
+        coord_city = _get_city_for_coords(lat, lon)
 
         for zone in coord_zones:
             lat_min, lat_max, lon_min, lon_max = zone["coords"]
             if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
-                # City-awareness gate: skip zones whose name names a different city
+                # City-awareness gate
                 zone_city = _zone_city_keyword(zone.get("name", ""))
                 if zone_city and coord_city and zone_city != coord_city:
                     continue
 
                 box_area = (lat_max - lat_min) * (lon_max - lon_min)
-                # Prefer smallest (most specific) box per waypoint
                 if box_area < best_area:
                     best      = zone
                     best_area = box_area
@@ -633,11 +664,12 @@ def scan_route_crime_zones(waypoints) -> list:
     # Sort worst first
     found.sort(key=lambda z: -_RISK_ORDER.get(z["risk"], 0))
 
-    # ── Parent/child deduplication ────────────────────────────────────────────
-    # Remove any zone whose bbox is fully inside another zone at equal or higher
-    # risk. This is what prevents Tondo + all its sub-streets, or Navotas +
-    # all its barangays, from each counting as separate penalty events.
+    # Parent/child deduplication
+    original_count = len(found)
     found = _deduplicate_zones(found)
+    
+    if original_count != len(found):
+        _debug_log(f"Scan route: Deduplication removed {original_count - len(found)} sub-zones.")
 
     return found
 
@@ -655,40 +687,34 @@ def get_worst_route_risk(route_zones: list[dict]) -> str:
 # MAIN PUBLIC FUNCTIONS
 # ═════════════════════════════════════════════════════════════════════════════
 
+@timeit
 def get_crime_risk_for_area(lat: float, lon: float, area_hint: str = "") -> dict:
     """
     Returns a structured crime risk assessment for the given coordinates.
-
     Priority order:
       1. Coordinate zone lookup (bounding boxes in crime_zones.json)
       2. Text match against area_hint in crime_zones.json
       3. Disk cache (for previously LLM-resolved areas)
       4. LLM web scrape + Gemini classification
-
-    Args:
-        lat:        latitude
-        lon:        longitude
-        area_hint:  optional user-typed text label (origin/destination)
-
-    Returns:
-        {ok, risk_level, summary, area, label, color, penalty, fetched_at, error}
     """
     area_hint_clean = (area_hint or "").strip()
 
-    # 1. Coordinate lookup — most reliable for known zones
+    # 1. Coordinate lookup
     coord_result = _coord_zone_lookup(lat, lon)
     if coord_result:
         zone_name = coord_result.get("name", "")
         area_label = area_hint_clean or zone_name
+        _debug_log(f"Decision: Using COORD match for '{zone_name}'")
         return _crime_result(
             coord_result.get("risk", "none"),
             coord_result.get("summary", ""),
             area_label,
         )
 
-    # 2. Text match against area hint
+    # 2. Text match
     area = area_hint_clean if area_hint_clean and re.search(r'[a-zA-Z]', area_hint_clean) else _area_from_coords(lat, lon)
-
+    
+    _debug_log(f"Decision: No coord match. Trying text match for area '{area}'")
     static = _static_crime_lookup(area)
     if static:
         return static
@@ -697,18 +723,24 @@ def get_crime_risk_for_area(lat: float, lon: float, area_hint: str = "") -> dict
     cache_key = area.lower()
     cached = _load_cache(cache_key)
     if cached:
+        _debug_log(f"Decision: Using CACHED result for '{cache_key}'")
         return cached
 
     # 4. LLM fallback
+    _debug_log(f"Decision: Falling back to LLM for '{area}'")
     try:
         from llm import search_transport_info, scrape_url, context_model
-    except (ImportError, ValueError):
+    except (ImportError, ValueError) as e:
+        _debug_log(f"CRITICAL: llm module import failed: {e}")
         return _crime_result("none", "No crime data available for this area.", area)
 
     query = f"crime snatching holdup robbery {area} Philippines 2025"
+    _debug_log(f"LLM Query: {query}")
+    
     try:
         results = search_transport_info(query)
     except Exception as e:
+        _debug_log(f"Search failed: {e}")
         return _crime_error(f"Search failed: {e}", area)
 
     web_data = ""
@@ -744,14 +776,17 @@ def get_crime_risk_for_area(lat: float, lon: float, area_hint: str = "") -> dict
             risk = "none"
         summary = parsed.get("summary", "")
         result  = _crime_result(risk, summary, area)
+        _debug_log(f"LLM Result: Risk={risk}, Summary='{summary}'")
         _save_cache(cache_key, result)
         return result
 
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError) as e:
+        _debug_log(f"LLM Response parsing failed: {e}")
         result = _crime_result("none", "", area)
         _save_cache(cache_key, result)
         return result
     except Exception as e:
+        _debug_log(f"LLM call failed: {e}")
         return _crime_error(str(e), area)
 
 
@@ -797,15 +832,17 @@ def get_crime_warning_html(crime: dict, commuter_type: str = "") -> str:
     )
 
 
+@timeit
 def apply_crime_to_routes(routes: list, crime: dict, commuter_type: str) -> list:
     """
     Applies a single crime-zone flat safety penalty to all routes in-place.
-    Use apply_crime_both_ends() when you have separate origin/destination lookups.
     """
     from risk_monitor.features import get_score_color, get_score_label, apply_penalty_to_route
 
     penalty = float(crime.get("penalty", 0))
     warning = get_crime_warning(crime, commuter_type)
+    
+    _debug_log(f"Applying single crime penalty {penalty} to {len(routes)} routes.")
 
     for r in routes:
         if penalty > 0:
@@ -817,6 +854,7 @@ def apply_crime_to_routes(routes: list, crime: dict, commuter_type: str) -> list
     return routes
 
 
+@timeit
 def apply_crime_both_ends(
     routes: list,
     orig_crime: dict,
@@ -825,22 +863,17 @@ def apply_crime_both_ends(
 ) -> list:
     """
     Applies crime penalty using the WORSE of origin or destination risk,
-    and builds a combined warning that names both areas when they differ.
-
-    Uses proportional reduction (apply_penalty_to_route) so stacking with
-    night/weather/flood never crashes a score to 0.
-
-    Also stores the endpoint risk level on each route so that
-    apply_route_crime_to_routes() can correctly avoid double-counting when
-    the scanned path contains zones that are sub-regions of the endpoint area.
+    and builds a combined warning.
     """
-    from risk_monitor.features import get_score_color, get_score_label, apply_penalty_to_route, _route_exposure_multiplier
+    from risk_monitor.features import get_score_color, get_score_label, apply_penalty_to_route
 
     orig_level = _RISK_ORDER.get(orig_crime.get("risk_level", "none"), 0)
     dest_level = _RISK_ORDER.get(dest_crime.get("risk_level", "none"), 0)
 
     primary      = dest_crime if dest_level >= orig_level else orig_crime
     base_penalty = primary.get("penalty", 0)
+    
+    _debug_log(f"Applying two-end penalty. Orig: {orig_crime.get('risk_level')}, Dest: {dest_crime.get('risk_level')}. Selected: {primary.get('risk_level')} ({base_penalty} pts)")
 
     orig_warn = get_crime_warning(orig_crime, commuter_type) if orig_level > 0 else ""
     dest_warn = get_crime_warning(dest_crime, commuter_type) if dest_level > 0 else ""
@@ -863,54 +896,30 @@ def apply_crime_both_ends(
     else:
         warning = ""
 
-    # Record the worst endpoint risk level so apply_route_crime_to_routes
-    # can skip adding extra penalty for zones that are sub-areas of origin/dest.
     worst_endpoint_risk = primary.get("risk_level", "none")
 
     for r in routes:
         if base_penalty > 0:
-            # Flat penalty — same for all routes since the endpoint crime zone
-            # is the same for all routes. Crime zone path scanning (below)
-            # provides the per-route differentiation.
             apply_penalty_to_route(r, float(base_penalty), commuter_type)
             r["score_color"] = get_score_color(r["safety_score"])
             r["score_label"] = get_score_label(r["safety_score"])
         r["crime_warning"]          = warning if base_penalty > 0 else ""
         r["orig_crime"]             = orig_crime
         r["dest_crime"]             = dest_crime
-        r["_endpoint_crime_risk"]   = worst_endpoint_risk   # used by route scan
+        r["_endpoint_crime_risk"]   = worst_endpoint_risk
 
     return routes
 
 
+@timeit
 def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
     """
-    Reads pre-computed route["route_crime_zones"] from scan_route_crime_zones()
-    and applies INCREMENTAL safety score penalties for each high-risk zone the
-    route path actually passes through.
-
-    Double-counting prevention
-    ──────────────────────────
-    apply_crime_both_ends() already penalises based on the WORST of the
-    origin/destination risk.  This function only adds an EXTRA penalty when
-    the route path passes through a zone that is:
-      (a) WORSE than the already-applied endpoint risk, OR
-      (b) a *different* zone at the SAME level (genuinely new hazard exposure).
-
-    The "Tondo contains Gagalangin" problem is solved by checking parent-zone
-    containment: if a scanned zone's bounding box is fully contained within a
-    zone that was already assessed at the same or higher risk level, it is
-    skipped entirely — no extra penalty.
-
-    Also stores the scanned zones on the route for UI display.
-
-    Must be called AFTER apply_crime_both_ends().
+    Reads pre-computed route["route_crime_zones"] and applies INCREMENTAL penalties.
     """
     from risk_monitor.features import get_score_color, get_score_label, apply_penalty_to_route
 
     group = _group_commuter(commuter_type)
 
-    # Build lookup of all zone coords from the JSON so we can check containment
     all_zones    = _load_crime_zones()
     coord_zones  = {z["name"]: z["coords"] for z in all_zones if z.get("coords") and len(z["coords"]) == 4}
 
@@ -920,43 +929,23 @@ def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
             r.setdefault("route_zones_warning", "")
             continue
 
-        # Risk already applied from endpoint check
         endpoint_risk = r.get("_endpoint_crime_risk", "none")
         endpoint_ord  = _RISK_ORDER.get(endpoint_risk, 0)
 
-        # ── Deduplicate scanned zones before scoring ─────────────────────────
-        # scan_route_crime_zones() already removes parent/child duplicates at
-        # scan time, but apply_crime_both_ends() may have set an endpoint risk
-        # for a large zone (e.g. Tondo) that also contains zones in route_zones.
-        # We run a second dedup pass here to cover that case:
-        #   - Remove any route zone that is spatially inside the endpoint zone
-        #     at equal or lower risk.
-        #   - Remove any route zone that is spatially inside ANOTHER route zone
-        #     at equal or higher risk (belt-and-suspenders for the scan dedup).
+        # ... [Logic for deduplication] ...
         orig_zone_name      = (r.get("orig_crime") or {}).get("area", "").lower()
         dest_zone_name      = (r.get("dest_crime") or {}).get("area", "").lower()
         endpoint_zone_names = {orig_zone_name, dest_zone_name} - {""}
 
-        # Build a combined set of "already-covered" zones: endpoint zones +
-        # all zones from the scan list that would cover other scan-list zones.
-        # We treat the scanned zones as a pool and deduplicate against each other
-        # as well as against endpoint zones.
         def _is_covered_by_endpoint(z_name, z_coords, z_ord):
-            """True if this zone is inside an endpoint zone at same/higher risk."""
-            if not z_coords:
-                return False
+            if not z_coords: return False
             for ep_name in endpoint_zone_names:
                 ep_coords = coord_zones.get(ep_name)
-                ep_risk   = coord_zones.get(ep_name + "__risk__")  # not used, see below
-                # We don't have endpoint risk in coord_zones dict directly,
-                # use endpoint_ord which was computed from _endpoint_crime_risk
                 if ep_coords and endpoint_ord >= z_ord:
                     if _is_contained_within(z_coords, ep_coords):
                         return True
             return False
 
-        # Full dedup of route_zones: remove zones inside any higher/equal-risk
-        # sibling zone OR inside the endpoint zone.
         deduped_route_zones = []
         for candidate in route_zones:
             c_name   = candidate["name"].lower()
@@ -964,44 +953,27 @@ def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
             c_risk   = candidate.get("risk", "none")
             c_ord    = _RISK_ORDER.get(c_risk, 0)
 
-            if c_ord == 0:
-                continue
+            if c_ord == 0: continue
+            if c_name in endpoint_zone_names: continue
+            if _is_covered_by_endpoint(c_name, c_coords, c_ord): continue
 
-            # Skip if it's literally the endpoint zone
-            if c_name in endpoint_zone_names:
-                continue
-
-            # Skip if absorbed by endpoint zone
-            if _is_covered_by_endpoint(c_name, c_coords, c_ord):
-                continue
-
-            # Skip if absorbed by another zone in the scan list
             absorbed = False
             if c_coords:
                 for other in route_zones:
-                    if other is candidate:
-                        continue
+                    if other is candidate: continue
                     o_coords = other.get("coords")
                     o_ord    = _RISK_ORDER.get(other.get("risk", "none"), 0)
                     if o_coords and o_ord >= c_ord and _is_contained_within(c_coords, o_coords):
                         absorbed = True
                         break
-            if absorbed:
-                continue
+            if absorbed: continue
 
             deduped_route_zones.append(candidate)
 
-        # Collect incremental penalty for genuinely new hazard zones
         extra_penalty_total = 0.0
         notable             = []
         applied_zone_names  = set()
 
-        # Per-zone flat penalties (calibrated for flat-subtraction system):
-        #   high zone on route:   2.0 pts
-        #   moderate zone:        1.0 pts
-        #   low zone:             0.4 pts
-        # Each unique zone that's not a sub-zone of something already counted
-        # adds exactly this much. Zone count matters; zone geography doesn't.
         _PER_ZONE_PENALTY = {"high": 2.0, "moderate": 1.0, "low": 0.4}
 
         for zone in deduped_route_zones:
@@ -1010,11 +982,9 @@ def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
             z_ord  = _RISK_ORDER.get(z_risk, 0)
 
             if z_ord > endpoint_ord:
-                # Zone is worse than endpoint: add difference + per-zone penalty
                 diff        = _CRIME_PENALTY.get(z_risk, 0) - _CRIME_PENALTY.get(endpoint_risk, 0)
                 incremental = diff + _PER_ZONE_PENALTY.get(z_risk, 1.0)
             else:
-                # Same or lower level: flat per-zone penalty only
                 incremental = _PER_ZONE_PENALTY.get(z_risk, 0.5)
 
             if incremental > 0 and z_name not in applied_zone_names:
@@ -1024,12 +994,13 @@ def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
                     notable.append(zone)
 
         if extra_penalty_total > 0:
+            _debug_log(f"Route '{r.get('name', 'unknown')}': Applying {extra_penalty_total:.1f} extra penalty for {len(notable)} zones.")
             apply_penalty_to_route(r, extra_penalty_total, commuter_type)
             r["score_color"] = get_score_color(r["safety_score"])
             r["score_label"] = get_score_label(r["safety_score"])
 
         if notable:
-            worst_risk = notable[0]["risk"]   # already sorted worst-first
+            worst_risk = notable[0]["risk"]
             zone_names = ", ".join(z["name"].title() for z in notable[:4])
             base_warn  = _CRIME_WARNINGS.get(worst_risk, {}).get(group, "")
             r["route_zones_warning"] = (
@@ -1046,6 +1017,7 @@ def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
 # COMMUNITY REPORT INTEGRATION
 # ═════════════════════════════════════════════════════════════════════════════
 
+@timeit
 def get_crime_risk_with_reports(
     lat: float,
     lon: float,
@@ -1053,25 +1025,16 @@ def get_crime_risk_with_reports(
     db,
 ) -> dict:
     """
-    Full crime risk assessment combining:
-      1. Coordinate/text-based static zone data
-      2. LLM web scrape (for unknown areas only)
-      3. Live community reports near the coordinates
-
-    Community report bump rules:
-      - 1 unverified crime/harassment report nearby  → raise risk by one level
-      - 1 verified report (2+ confirmations)         → raise risk by one level
-      - 2+ verified reports                          → raise risk by two levels
-      - Max cap: 'high'
+    Full crime risk assessment combining static/LLM data and community reports.
     """
     base = get_crime_risk_for_area(lat, lon, area_hint)
 
     try:
         from risk_monitor.community_reports import get_reports_near
         nearby = get_reports_near(db, lat, lon, radius_deg=_REPORT_BUMP_RADIUS)
+        _debug_log(f"Found {len(nearby)} community reports near ({lat}, {lon})")
     except Exception as e:
-        import sys
-        print(f"[crime_data] get_reports_near failed: {e}", file=sys.stderr)
+        _debug_log(f"Community reports check failed: {e}")
         nearby = []
 
     crime_reports = [r for r in nearby if r.get("report_type") in _REPORT_CRIME_TYPES]
@@ -1113,32 +1076,10 @@ def get_crime_risk_with_reports(
         f"{count} recent community report{'s' if count > 1 else ''} "
         f"of {type_str} within 550m."
     )
+    
+    _debug_log(f"Community bump applied: {base.get('risk_level')} -> {new_risk} ({note})")
 
     bumped = _crime_result(new_risk, base.get("summary", ""), base.get("area", ""))
     bumped["community_bump"] = bump
     bumped["community_note"] = note
     return bumped
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# HOW TO WIRE INTO main.py
-# ═════════════════════════════════════════════════════════════════════════════
-#
-# Minimal (origin/dest only, same as before):
-#   crime      = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
-#   dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
-#   apply_crime_both_ends(routes, crime, dest_crime, commuter_type)
-#
-# Full (also scans route path for intermediate high-risk zones):
-#   crime      = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
-#   dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
-#   for route in routes:
-#       wps = route.get("waypoints") or route.get("geometry_coords") or []
-#       route["route_crime_zones"] = scan_route_crime_zones(wps)
-#   apply_crime_both_ends(routes, crime, dest_crime, commuter_type)
-#   apply_route_crime_to_routes(routes, commuter_type)
-#
-# To display route_zones_warning in the route card (index.html / JS):
-#   if (route.route_zones_warning) {
-#       card.innerHTML += `<div class="route-warning report-warning">${route.route_zones_warning}</div>`;
-#   }
