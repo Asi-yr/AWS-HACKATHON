@@ -1072,6 +1072,154 @@ def api_user_current():
         return jsonify({'ok': False, 'message': str(e)}), 500
 
 
+@app.route('/api/settings', methods=['GET'])
+def api_get_settings():
+    """JSON API endpoint to retrieve user settings for Flutter."""
+    print("[DEBUG] [api_get_settings] GET /api/settings hit")
+    
+    # Extract token from Authorization header or use session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_get_settings] Unauthorized (no user)")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        print(f"[DEBUG] [api_get_settings] Fetching settings for '{username}'")
+        user_settings = get_user_settings(chDB_perf, username)
+        
+        # Return settings with expected field names for Flutter
+        return jsonify({
+            'ok': True,
+            'settings': {
+                'default_commuter_type': user_settings.get('default_commuter_type', 'commute'),
+                'transport_preference': user_settings.get('transport_preference', ['jeep', 'walk']),
+                'show_weather_banner': user_settings.get('show_weather_banner', True),
+                'show_crime_banner': user_settings.get('show_crime_banner', True),
+                'show_flood_banner': user_settings.get('show_flood_banner', True),
+                'show_night_warnings': user_settings.get('show_night_warnings', True),
+                'preferred_name': user_settings.get('preferred_name', ''),
+                'home_address': user_settings.get('home_address', ''),
+                'work_address': user_settings.get('work_address', ''),
+            }
+        }), 200
+    except Exception as e:
+        print(f"[DEBUG] [api_get_settings] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/settings', methods=['POST'])
+def api_save_settings():
+    """JSON API endpoint to save user settings from Flutter."""
+    print("[DEBUG] [api_save_settings] POST /api/settings hit")
+    
+    # Extract token from Authorization header or use session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_save_settings] Unauthorized (no user)")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        data = request.get_json() or {}
+        print(f"[DEBUG] [api_save_settings] Received settings data: {data}")
+        
+        # Build settings dict from request
+        settings = {
+            'default_commuter_type': data.get('default_commuter_type', 'commute'),
+            'transport_preference': data.get('transport_preference', ['jeep', 'walk']),
+            'show_weather_banner': data.get('show_weather_banner', True),
+            'show_crime_banner': data.get('show_crime_banner', True),
+            'show_flood_banner': data.get('show_flood_banner', True),
+            'show_night_warnings': data.get('show_night_warnings', True),
+            'preferred_name': data.get('preferred_name', ''),
+            'home_address': data.get('home_address', ''),
+            'work_address': data.get('work_address', ''),
+        }
+        
+        # Save settings to database
+        success = save_user_settings(chDB_perf, username, settings)
+        
+        if not success:
+            print(f"[DEBUG] [api_save_settings] Failed to save settings for '{username}'")
+            return jsonify({'ok': False, 'message': 'Failed to save settings'}), 500
+        
+        # Also update user profile if display_name or email provided
+        if data.get('display_name') or data.get('email'):
+            print(f"[DEBUG] [api_save_settings] Updating user profile")
+            save_user_profile(
+                chDB_perf, username,
+                data.get('display_name', ''),
+                data.get('email', '')
+            )
+        
+        print(f"[DEBUG] [api_save_settings] Settings saved successfully for '{username}'")
+        return jsonify({'ok': True, 'message': 'Settings saved'}), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_save_settings] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/user/survey', methods=['POST'])
+def api_save_survey():
+    """JSON API endpoint to save user onboarding survey responses from Flutter."""
+    print("[DEBUG] [api_save_survey] POST /api/user/survey hit")
+    
+    # Extract token from Authorization header or use session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_save_survey] Unauthorized (no user)")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        data = request.get_json() or {}
+        print(f"[DEBUG] [api_save_survey] Received survey data: {data}")
+        
+        # Build settings dict with survey data
+        survey_settings = {
+            'commuter_types': data.get('commuterTypes', []),
+            'transport_modes': data.get('transport', []),
+            'safety_concerns': data.get('safety', []),
+            'survey_completed': True,
+            'survey_completed_at': datetime.now(tz=timezone.utc).isoformat(),
+        }
+        
+        # Get current settings and merge with survey data
+        current_settings = get_user_settings(chDB_perf, username)
+        current_settings.update(survey_settings)
+        
+        # Save merged settings to database
+        success = save_user_settings(chDB_perf, username, current_settings)
+        
+        if not success:
+            print(f"[DEBUG] [api_save_survey] Failed to save survey for '{username}'")
+            return jsonify({'ok': False, 'message': 'Failed to save survey'}), 500
+        
+        print(f"[DEBUG] [api_save_survey] Survey saved successfully for '{username}'")
+        return jsonify({'ok': True, 'message': 'Survey saved'}), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_save_survey] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # NICE TO HAVE: History, Password Change, and other user endpoints
 # ────────────────────────────────────────────────────────────────────────────
