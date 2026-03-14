@@ -18,6 +18,6 @@ folium
 python-dotenv
 ddgs
 beautifulsoup4
+google-genai
 
 # briefcase
-# google-genai
