@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_router.dart';
 import '../../core/session_manager.dart';
+import '../../core/api_client.dart';
 import '../../screens/explore/explore_controller.dart';
 import '../../widgets/shared_widgets.dart';
 
@@ -157,19 +158,52 @@ class _SurveyViewState extends State<SurveyView> {
     if (_step < 2) {
       setState(() => _step++);
     } else {
-      // BACKEND: POST /api/user/survey
-      // { commuterType: _commuterType, transport: [..._transport], safety: [..._safety] }
-      // On success, seed the explore filters with the user's answers so they
-      // show up pre-selected when the explore screen loads for the first time.
-      context.read<ExploreController>().setSurveyDefaults(
-        commuterTypes: _commuterTypes.toList(),
-        transport:     _transport.toList(),
-        safety:        _safety.toList(),
-      );
-      // Mark last route as explore so short inactivity resumes into the shell.
-      SessionManager.instance.setLastRoute(AppRouter.explore);
-      Navigator.pushReplacementNamed(context, AppRouter.explore);
+      // BACKEND: POST /api/user/survey with collected data
+      _saveSurveyAndNavigate();
     }
+  }
+
+  /// Save survey responses to backend and navigate to explore screen.
+  Future<void> _saveSurveyAndNavigate() async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        // If not logged in, just proceed with local defaults (survey is pre-auth)
+        print('[SurveyView] Not logged in, using local defaults only');
+        _proceedToExplore();
+        return;
+      }
+
+      // Save survey to backend
+      print('[SurveyView] Saving survey to backend...');
+      await ApiClient.instance.saveSurvey(
+        commuterTypes: _commuterTypes.toList(),
+        transportModes: _transport.toList(),
+        safetyConcerns: _safety.toList(),
+        token: token,
+      );
+
+      print('[SurveyView] Survey saved successfully to backend');
+      _proceedToExplore();
+    } catch (e) {
+      print('[SurveyView] Error saving survey: $e');
+      // Proceed anyway with local defaults if backend save fails
+      _proceedToExplore();
+    }
+  }
+
+  /// Navigate to explore screen with survey defaults.
+  void _proceedToExplore() {
+    // Seed the explore filters with the user's answers so they
+    // show up pre-selected when the explore screen loads for the first time.
+    context.read<ExploreController>().setSurveyDefaults(
+      commuterTypes: _commuterTypes.toList(),
+      transport: _transport.toList(),
+      safety: _safety.toList(),
+    );
+    // Mark last route as explore so short inactivity resumes into the shell.
+    SessionManager.instance.setLastRoute(AppRouter.explore);
+    Navigator.pushReplacementNamed(context, AppRouter.explore);
   }
 }
 

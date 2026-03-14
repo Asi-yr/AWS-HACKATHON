@@ -911,6 +911,278 @@ def logout():
     return redirect(url_for('login'))
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  JSON API AUTH ENDPOINTS (for Flutter app)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_login():
+    """JSON API endpoint for Flutter login. Returns user token & info."""
+    t_start = time.time()
+    print("[DEBUG] [api_login] POST /api/auth/login hit")
+    try:
+        data = request.json
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not username or not password:
+            print("[DEBUG] [api_login] Missing username or password")
+            return jsonify({'ok': False, 'message': 'Username and password required'}), 400
+        
+        print(f"[DEBUG] [api_login] Attempting login for: '{username}'")
+        conn, c = chDB_perf.get_db_connection()
+        chDB_perf.execute_query(c, "SELECT password FROM users WHERE username=?", (username,))
+        user_row = c.fetchone()
+        c.close()
+        conn.close()
+        
+        if not user_row or not check_password_hash(user_row[0], password):
+            print(f"[DEBUG] [api_login] Auth failed for '{username}'")
+            return jsonify({'ok': False, 'message': 'Invalid credentials'}), 401
+        
+        # Success: store session and return user token
+        session['user'] = username
+        print(f"[DEBUG] [api_login] Login successful for '{username}'. Time: {time.time() - t_start:.4f}s")
+        
+        return jsonify({
+            'ok': True,
+            'message': 'Login successful',
+            'user': username,
+            'token': username,  # Simple token = username (backend validates via session)
+        }), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_login] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/auth/register', methods=['POST'])
+def api_register():
+    """JSON API endpoint for Flutter registration. Returns user token & info."""
+    t_start = time.time()
+    print("[DEBUG] [api_register] POST /api/auth/register hit")
+    try:
+        data = request.json
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        email = data.get('email', '').strip()
+        
+        if not username or not password:
+            print("[DEBUG] [api_register] Missing username or password")
+            return jsonify({'ok': False, 'message': 'Username and password required'}), 400
+        
+        if len(password) < 6:
+            print("[DEBUG] [api_register] Password too short for '{username}'")
+            return jsonify({'ok': False, 'message': 'Password must be at least 6 characters'}), 400
+        
+        print(f"[DEBUG] [api_register] Attempting registration for: '{username}'")
+        conn, c = chDB_perf.get_db_connection()
+        chDB_perf.execute_query(c, "SELECT * FROM users WHERE username=?", (username,))
+        
+        if c.fetchone():
+            print(f"[DEBUG] [api_register] Username '{username}' already exists")
+            c.close()
+            conn.close()
+            return jsonify({'ok': False, 'message': 'Username already in use'}), 409
+        
+        # Create new user
+        hashed_pw = generate_password_hash(password)
+        chDB_perf.execute_query(c, "INSERT INTO users (username, password) VALUES (?, ?)",
+                                (username, hashed_pw))
+        conn.commit()
+        
+        # Initialize user profile
+        save_user_profile(chDB_perf, username, username, email)
+        
+        c.close()
+        conn.close()
+        
+        # Auto-login after registration
+        session['user'] = username
+        print(f"[DEBUG] [api_register] Registration successful for '{username}'. Time: {time.time() - t_start:.4f}s")
+        
+        return jsonify({
+            'ok': True,
+            'message': 'Registration successful',
+            'user': username,
+            'token': username,
+        }), 201
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_register] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_logout():
+    """JSON API endpoint for Flutter logout."""
+    print(f"[DEBUG] [api_logout] User logging out: {session.get('user')}")
+    session.pop('user', None)
+    return jsonify({'ok': True, 'message': 'Logged out'}), 200
+
+
+@app.route('/api/user/current', methods=['GET'])
+def api_user_current():
+    """JSON API endpoint to get current user profile and settings."""
+    print("[DEBUG] [api_user_current] GET /api/user/current hit")
+    
+    # Check if user is authenticated by looking for token in headers or session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]  # Extract token after 'Bearer '
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_user_current] Unauthorized (no user)")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        print(f"[DEBUG] [api_user_current] Fetching profile for '{username}'")
+        user_settings = get_user_settings(chDB_perf, username)
+        user_profile = get_user_profile(chDB_perf, username)
+        
+        # Build comprehensive user response for Flutter
+        user_data = {
+            'ok': True,
+            'id': username,
+            'name': user_profile.get('display_name', username),
+            'username': username,
+            'email': user_profile.get('email', ''),
+            'role': 'Commuter',
+            'avatarUrl': None,
+            'stats': {
+                'trips': user_profile.get('trips_count', 0),
+                'reports': user_profile.get('reports_count', 0),
+                'upvotedReports': user_profile.get('upvotes_count', 0),
+            },
+            'commuterType': user_settings.get('default_commuter_type', 'commute'),
+            'preferences': {
+                'aiSafety': user_settings.get('show_weather_banner', True),
+                'nightMode': False,  # Will be controlled by theme_controller
+                'transport': user_settings.get('transport_preference', ['jeep', 'walk']),
+            },
+        }
+        print(f"[DEBUG] [api_user_current] Returning user data for '{username}'")
+        return jsonify(user_data), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_user_current] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# NICE TO HAVE: History, Password Change, and other user endpoints
+# ────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/auth/change-password', methods=['POST'])
+def api_change_password():
+    """JSON API endpoint for Flutter password change."""
+    print("[DEBUG] [api_change_password] POST /api/auth/change-password hit")
+    
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_change_password] Unauthorized")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        data = request.get_json() or {}
+        current_password = data.get('current_password', '').strip()
+        new_password = data.get('new_password', '').strip()
+        
+        if not current_password or not new_password:
+            return jsonify({'ok': False, 'message': 'Missing password fields'}), 400
+        
+        # Use existing backend function
+        result = change_password(chDB_perf, username, current_password, new_password)
+        
+        if result.get('ok'):
+            print(f"[DEBUG] [api_change_password] Password changed for {username}")
+            return jsonify({'ok': True, 'message': result.get('message', 'Password updated')}), 200
+        else:
+            print(f"[DEBUG] [api_change_password] Password change failed: {result.get('message')}")
+            return jsonify({'ok': False, 'message': result.get('message', 'Password change failed')}), 400
+            
+    except Exception as e:
+        print(f"[DEBUG] [api_change_password] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/history', methods=['GET'])
+def api_history():
+    """JSON API endpoint for Flutter to fetch route history."""
+    print("[DEBUG] [api_history] GET /api/history hit")
+    
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_history] Unauthorized")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        # Use existing backend function
+        hist = get_route_history(chDB_perf, username, limit=20)
+        
+        # Transform to API response format
+        history_data = [
+            {
+                'origin': item.get('origin', ''),
+                'destination': item.get('destination', ''),
+                'commuterType': item.get('commuter_type', 'commute'),
+                'routeCount': item.get('route_count', 0),
+                'searchedAt': item.get('searched_at', ''),
+            }
+            for item in hist
+        ]
+        
+        print(f"[DEBUG] [api_history] Returned {len(history_data)} history items for {username}")
+        return jsonify({'ok': True, 'history': history_data}), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_history] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/history/clear', methods=['POST'])
+def api_history_clear():
+    """JSON API endpoint for Flutter to clear route history."""
+    print("[DEBUG] [api_history_clear] POST /api/history/clear hit")
+    
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_history_clear] Unauthorized")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        # Use existing backend function
+        clear_route_history(chDB_perf, username)
+        
+        print(f"[DEBUG] [api_history_clear] History cleared for {username}")
+        return jsonify({'ok': True, 'message': 'History cleared'}), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_history_clear] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
 @app.route('/api/suggest', methods=['GET'])
 def suggest_location():
     t_start = time.time()
@@ -1324,6 +1596,220 @@ def api_report_types():
     print("[DEBUG] [api_report_types] Fetching report type options...")
     from risk_monitor.community_reports import get_report_type_options_for_api
     return jsonify(get_report_type_options_for_api())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JSON API: Report Submission (Flutter/Mobile)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/report', methods=['POST'])
+def api_report():
+    """JSON API endpoint for Flutter to submit community reports."""
+    t_start = time.time()
+    print("[DEBUG] [api_report] POST /api/report (JSON) hit")
+    
+    # Get user from token or session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_report] Unauthorized")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        data = request.get_json() or {}
+        report_type = data.get('report_type', '').strip()
+        lat = float(data.get('lat', 0))
+        lon = float(data.get('lon', 0))
+        description = data.get('description', '').strip()
+        
+        if not report_type or not description:
+            print("[DEBUG] [api_report] Missing required fields")
+            return jsonify({'ok': False, 'message': 'Report type and description required'}), 400
+        
+        print(f"[DEBUG] [api_report] User '{username}' submitting report: type={report_type}, lat={lat}, lon={lon}")
+        
+        # Use existing backend function
+        result = submit_report(chDB_perf, username, report_type, lat, lon, description)
+        print(f"[DEBUG] [api_report] submit_report result: {result}")
+        
+        # Return success response
+        return jsonify({
+            'ok': result.get('ok', True),
+            'message': result.get('message', 'Report submitted successfully'),
+            'report_id': result.get('report_id')
+        }), 200
+        
+    except ValueError as e:
+        print(f"[DEBUG] [api_report] Value error: {e}")
+        return jsonify({'ok': False, 'message': 'Invalid coordinates'}), 400
+    except Exception as e:
+        print(f"[DEBUG] [api_report] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JSON API: User Settings (Flutter/Mobile)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/settings', methods=['GET'])
+def api_settings_get():
+    """JSON API endpoint for Flutter to fetch user settings."""
+    print("[DEBUG] [api_settings_get] GET /api/settings hit")
+    
+    # Get user from token or session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_settings_get] Unauthorized")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        # Fetch user settings and profile
+        user_settings = get_user_settings(chDB_perf, username)
+        user_profile = get_user_profile(chDB_perf, username)
+        
+        print(f"[DEBUG] [api_settings_get] Fetched settings for '{username}'")
+        
+        return jsonify({
+            'ok': True,
+            'settings': {
+                'default_commuter_type': user_settings.get('default_commuter_type', 'commute'),
+                'show_weather_banner': user_settings.get('show_weather_banner', True),
+                'show_crime_banner': user_settings.get('show_crime_banner', True),
+                'show_flood_banner': user_settings.get('show_flood_banner', True),
+                'transport_preference': user_settings.get('transport_preference', ['jeep', 'walk']),
+            },
+            'profile': {
+                'display_name': user_profile.get('display_name', username),
+                'email': user_profile.get('email', ''),
+                'trips_count': user_profile.get('trips_count', 0),
+                'reports_count': user_profile.get('reports_count', 0),
+            }
+        }), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_settings_get] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/settings', methods=['POST'])
+def api_settings_post():
+    """JSON API endpoint for Flutter to save user settings."""
+    print("[DEBUG] [api_settings_post] POST /api/settings hit")
+    
+    # Get user from token or session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_settings_post] Unauthorized")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        data = request.get_json() or {}
+        
+        # Extract settings from request
+        settings_to_save = {
+            'default_commuter_type': data.get('default_commuter_type', 'commute'),
+            'show_weather_banner': data.get('show_weather_banner', True),
+            'show_crime_banner': data.get('show_crime_banner', True),
+            'show_flood_banner': data.get('show_flood_banner', True),
+            'transport_preference': data.get('transport_preference', ['jeep', 'walk']),
+        }
+        
+        print(f"[DEBUG] [api_settings_post] Saving settings for '{username}': {settings_to_save}")
+        
+        # Use existing backend function
+        save_user_settings(chDB_perf, username, settings_to_save)
+        
+        # Also save profile if provided
+        if 'display_name' in data or 'email' in data:
+            display_name = data.get('display_name', '')
+            email = data.get('email', '')
+            print(f"[DEBUG] [api_settings_post] Also saving profile data")
+            save_user_profile(chDB_perf, username, display_name, email)
+        
+        print(f"[DEBUG] [api_settings_post] Settings saved successfully for '{username}'")
+        
+        return jsonify({
+            'ok': True,
+            'message': 'Settings saved successfully'
+        }), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_settings_post] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JSON API: User Survey (Flutter/Mobile Onboarding)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/user/survey', methods=['POST'])
+def api_user_survey():
+    """JSON API endpoint for Flutter to save onboarding survey responses."""
+    t_start = time.time()
+    print("[DEBUG] [api_user_survey] POST /api/user/survey hit")
+    
+    # Get user from token or session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = token if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_user_survey] Unauthorized")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        data = request.get_json() or {}
+        
+        # Extract survey responses
+        commuter_types = data.get('commuterTypes', [])  # list of commuter type selections
+        transport_modes = data.get('transport', [])  # list of transport modes
+        safety_concerns = data.get('safety', [])  # list of safety concerns
+        
+        print(f"[DEBUG] [api_user_survey] Processing survey for '{username}':")
+        print(f"  - Commuter Types: {commuter_types}")
+        print(f"  - Transport Modes: {transport_modes}")
+        print(f"  - Safety Concerns: {safety_concerns}")
+        
+        # Build settings dict from survey responses
+        survey_settings = {
+            'default_commuter_type': commuter_types[0] if commuter_types else 'commute',
+            'transport_preference': transport_modes if transport_modes else ['jeep', 'walk'],
+            'safety_preferences': safety_concerns if safety_concerns else [],
+        }
+        
+        # Save using existing backend function
+        save_user_settings(chDB_perf, username, survey_settings)
+        
+        print(f"[DEBUG] [api_user_survey] Survey saved successfully in {time.time() - t_start:.4f}s")
+        
+        return jsonify({
+            'ok': True,
+            'message': 'Survey saved successfully',
+        }), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_user_survey] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
 
 
 @app.route('/community', methods=['GET'])

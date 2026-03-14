@@ -22,6 +22,73 @@ class ApiClient {
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
+  /// Call the backend `/api/routes` endpoint with full response including alerts.
+  /// Returns: {
+  ///   'routes': List<RouteModel>,
+  ///   'incidents': List<Map> or [],
+  ///   'mmda_banner': String or '',
+  ///   'mmda_closures_count': int or 0,
+  ///   'earthquakes': List<Map> or [],
+  ///   'seismic_banner': String or '',
+  /// }
+  Future<Map<String, dynamic>> searchRoutesWithAlerts({
+    required String origin,
+    required String destination,
+    String mode = 'commute',
+  }) async {
+    final resp = await http.post(
+      _uri('/api/routes'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'origin': origin,
+        'destination': destination,
+        'mode': mode,
+      }),
+    );
+
+    if (resp.statusCode != 200) {
+      throw Exception('Backend returned ${resp.statusCode}');
+    }
+
+    final dynamic decoded = jsonDecode(resp.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Unexpected /api/routes payload shape');
+    }
+
+    // Extract routes
+    final routesJson = decoded['routes'];
+    final List<RouteModel> routeList = [];
+    if (routesJson is List) {
+      for (var i = 0; i < routesJson.length; i++) {
+        final r = routesJson[i];
+        if (r is Map<String, dynamic>) {
+          routeList.add(_routeFromApi(i, r));
+        }
+      }
+    }
+
+    // Extract alert data
+    final incidents = decoded['incidents'] ?? [];
+    final mmda_banner = decoded['mmda_banner'] ?? '';
+    final mmda_closures = decoded['mmda_closures_count'] ?? 0;
+    final earthquakes = decoded['earthquakes'] ?? [];
+    final seismic_banner = decoded['seismic_banner'] ?? '';
+    final weather_risk = decoded['weather_risk'] ?? 'clear';
+    final flood_risk = decoded['flood_risk'] ?? 'none';
+
+    return {
+      'routes': routeList,
+      'incidents': incidents is List ? incidents : [],
+      'mmda_banner': mmda_banner.toString(),
+      'mmda_closures_count': mmda_closures is int ? mmda_closures : 0,
+      'earthquakes': earthquakes is List ? earthquakes : [],
+      'seismic_banner': seismic_banner.toString(),
+      'weather_risk': weather_risk.toString(),
+      'flood_risk': flood_risk.toString(),
+    };
+  }
+
+  /// Original method for backward compatibility.
   /// Call the backend `/api/routes` endpoint and adapt the result into
   /// the app's `RouteModel` shape used by ExploreView.
   Future<List<RouteModel>> searchRoutes({
@@ -211,6 +278,593 @@ class ApiClient {
       return double.tryParse(v);
     }
     return null;
+  }
+
+  // ── Authentication API methods ─────────────────────────────────────────────
+
+  /// Register a new user account.
+  Future<Map<String, dynamic>> register({
+    required String username,
+    required String password,
+    String email = '',
+  }) async {
+    try {
+      final resp = await http.post(
+        _uri('/api/auth/register'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'username': username,
+          'password': password,
+          'email': email,
+        }),
+      );
+
+      final decoded = jsonDecode(resp.body);
+      if (resp.statusCode != 201) {
+        throw Exception(decoded['message'] ?? 'Registration failed');
+      }
+      return decoded;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Login to an existing account.
+  Future<Map<String, dynamic>> login({
+    required String username,
+    required String password,
+  }) async {
+    try {
+      final resp = await http.post(
+        _uri('/api/auth/login'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'username': username,
+          'password': password,
+        }),
+      );
+
+      final decoded = jsonDecode(resp.body);
+      if (resp.statusCode != 200) {
+        throw Exception(decoded['message'] ?? 'Login failed');
+      }
+      return decoded;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Logout from current session.
+  Future<void> logout({String? token}) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      await http.post(
+        _uri('/api/auth/logout'),
+        headers: headers,
+      );
+    } catch (_) {
+      // Logout errors are non-fatal, just best-effort
+    }
+  }
+
+  /// Fetch current user profile and settings.
+  Future<Map<String, dynamic>> getCurrentUser({String? token}) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.get(
+        _uri('/api/user/current'),
+        headers: headers,
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to fetch user data');
+      }
+
+      final decoded = jsonDecode(resp.body);
+      return decoded;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Fetch community reports.
+  Future<List<Map<String, dynamic>>> getReports({String? token}) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.get(
+        _uri('/api/reports'),
+        headers: headers,
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to fetch reports');
+      }
+
+      final decoded = jsonDecode(resp.body);
+      if (decoded is List) {
+        return decoded.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Submit a community report.
+  Future<Map<String, dynamic>> submitReport({
+    required double lat,
+    required double lng,
+    required String reportType,
+    required String description,
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.post(
+        _uri('/api/report'),  // Note: check if backend uses /report or /api/report
+        headers: headers,
+        body: jsonEncode({
+          'lat': lat,
+          'lon': lng,
+          'report_type': reportType,
+          'description': description,
+        }),
+      );
+
+      return jsonDecode(resp.body);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Upvote/confirm a community report.
+  Future<Map<String, dynamic>> confirmReport({
+    required int reportId,
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.post(
+        _uri('/api/reports/confirm'),
+        headers: headers,
+        body: jsonEncode({'report_id': reportId}),
+      );
+
+      return jsonDecode(resp.body);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Fetch safety data for a location (weather, flood, crime, reports).
+  Future<Map<String, dynamic>> getSafety({
+    required double lat,
+    required double lon,
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.get(
+        _uri('/api/safety?lat=$lat&lon=$lon'),
+        headers: headers,
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to fetch safety data');
+      }
+
+      return jsonDecode(resp.body);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Fetch report types available in the system.
+  Future<List<Map<String, dynamic>>> getReportTypes({String? token}) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.get(
+        _uri('/api/report-types'),
+        headers: headers,
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to fetch report types');
+      }
+
+      final decoded = jsonDecode(resp.body);
+      if (decoded is List) {
+        return decoded.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// ────────────────────────────────────────────────────────────────────────
+  /// NICE TO HAVE: Travel History & Account Management
+  /// ────────────────────────────────────────────────────────────────────────
+
+  /// Fetch user's route history.
+  Future<List<Map<String, dynamic>>> getRouteHistory({String? token}) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.get(
+        _uri('/api/history'),
+        headers: headers,
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to fetch route history');
+      }
+
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map<String, dynamic>) {
+        final historyList = decoded['history'];
+        if (historyList is List) {
+          return historyList.cast<Map<String, dynamic>>();
+        }
+      }
+      return [];
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Clear user's route history.
+  Future<Map<String, dynamic>> clearRouteHistory({String? token}) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.post(
+        _uri('/api/history/clear'),
+        headers: headers,
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to clear history');
+      }
+
+      return jsonDecode(resp.body);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Change user's password.
+  Future<Map<String, dynamic>> changePassword({
+    required String currentPassword,
+    required String newPassword,
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.post(
+        _uri('/api/auth/change-password'),
+        headers: headers,
+        body: jsonEncode({
+          'current_password': currentPassword,
+          'new_password': newPassword,
+        }),
+      );
+
+      final decoded = jsonDecode(resp.body);
+      if (resp.statusCode != 200) {
+        throw Exception(decoded['message'] ?? 'Password change failed');
+      }
+
+      return decoded;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// ────────────────────────────────────────────────────────────────────────
+  /// WHAT NEEDS CONNECTION 🔗: SOS Emergency Contact Management
+  /// ────────────────────────────────────────────────────────────────────────
+
+  /// Fetch trusted SOS contacts for the current user.
+  Future<List<Map<String, dynamic>>> getSosContacts({String? token}) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.get(
+        _uri('/api/sos/contacts'),
+        headers: headers,
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to fetch SOS contacts');
+      }
+
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map<String, dynamic>) {
+        final contactsList = decoded['contacts'];
+        if (contactsList is List) {
+          return contactsList.cast<Map<String, dynamic>>();
+        }
+      }
+      return [];
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Add a new trusted SOS contact.
+  Future<Map<String, dynamic>> addSosContact({
+    required String name,
+    required String contactType, // 'phone', 'email', etc.
+    required String contactValue,
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.post(
+        _uri('/api/sos/contacts'),
+        headers: headers,
+        body: jsonEncode({
+          'name': name,
+          'contact_type': contactType,
+          'contact_value': contactValue,
+        }),
+      );
+
+      if (resp.statusCode != 201 && resp.statusCode != 200) {
+        throw Exception('Failed to add contact');
+      }
+
+      return jsonDecode(resp.body);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Remove a trusted SOS contact.
+  Future<Map<String, dynamic>> removeSosContact({
+    required int contactId,
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.delete(
+        _uri('/api/sos/contacts/$contactId'),
+        headers: headers,
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to remove contact');
+      }
+
+      return jsonDecode(resp.body);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Trigger SOS emergency event.
+  Future<Map<String, dynamic>> triggerSos({
+    required double lat,
+    required double lon,
+    String message = 'SOS from SafeRoute user',
+    String routeSummary = '',
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.post(
+        _uri('/api/sos'),
+        headers: headers,
+        body: jsonEncode({
+          'lat': lat,
+          'lon': lon,
+          'message': message,
+          'route_summary': routeSummary,
+        }),
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to trigger SOS');
+      }
+
+      return jsonDecode(resp.body);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// ────────────────────────────────────────────────────────────────────────
+  /// WHAT NEEDS CONNECTION 🔗: User Settings & Survey Persistence
+  /// ────────────────────────────────────────────────────────────────────────
+
+  /// Save user onboarding survey responses.
+  Future<Map<String, dynamic>> saveSurvey({
+    required List<String> commuterTypes,
+    required List<String> transportModes,
+    required List<String> safetyConcerns,
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.post(
+        _uri('/api/user/survey'),
+        headers: headers,
+        body: jsonEncode({
+          'commuterTypes': commuterTypes,
+          'transport': transportModes,
+          'safety': safetyConcerns,
+        }),
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to save survey');
+      }
+
+      return jsonDecode(resp.body);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Fetch user settings from backend.
+  Future<Map<String, dynamic>> getSettings({String? token}) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.get(
+        _uri('/api/settings'),
+        headers: headers,
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to fetch settings');
+      }
+
+      return jsonDecode(resp.body);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Save user settings to backend.
+  Future<Map<String, dynamic>> saveSettings({
+    required String defaultCommuterType,
+    required List<String> transportPreference,
+    bool showWeatherBanner = true,
+    bool showCrimeBanner = true,
+    bool showFloodBanner = true,
+    String? displayName,
+    String? email,
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final body = {
+        'default_commuter_type': defaultCommuterType,
+        'transport_preference': transportPreference,
+        'show_weather_banner': showWeatherBanner,
+        'show_crime_banner': showCrimeBanner,
+        'show_flood_banner': showFloodBanner,
+        if (displayName != null) 'display_name': displayName,
+        if (email != null) 'email': email,
+      };
+
+      final resp = await http.post(
+        _uri('/api/settings'),
+        headers: headers,
+        body: jsonEncode(body),
+      );
+
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to save settings');
+      }
+
+      return jsonDecode(resp.body);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Submit a community report (JSON API version).
+  /// Note: This fixes the endpoint path to /api/report (JSON version).
+  Future<Map<String, dynamic>> submitReportJson({
+    required double lat,
+    required double lon,
+    required String reportType,
+    required String description,
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.post(
+        _uri('/api/report'),  // JSON API version
+        headers: headers,
+        body: jsonEncode({
+          'lat': lat,
+          'lon': lon,
+          'report_type': reportType,
+          'description': description,
+        }),
+      );
+
+      final decoded = jsonDecode(resp.body);
+      if (resp.statusCode != 200) {
+        throw Exception(decoded['message'] ?? 'Failed to submit report');
+      }
+
+      return decoded;
+    } catch (e) {
+      rethrow;
+    }
   }
 }
 

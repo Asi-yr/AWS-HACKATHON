@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/user_model.dart';
 import '../../models/travel_history_model.dart';
 import '../../core/theme_controller.dart';
+import '../../core/session_manager.dart';
+import '../../core/api_client.dart';
 import 'package:provider/provider.dart';
 
 class ProfileController extends ChangeNotifier {
@@ -27,10 +29,14 @@ class ProfileController extends ChangeNotifier {
   TravelRoute? selectedRoute;
 
   ProfileController() {
-    _loadPreferences();
+    _loadLocalPreferences();
+    _loadUserFromBackend();  // Try to load from backend if logged in
+    _loadTravelHistoryFromBackend();  // Load travel history
+    loadSosContacts();  // Load SOS contacts
+    _loadSettingsFromBackend();  // Load settings from backend
   }
 
-  Future<void> _loadPreferences() async {
+  Future<void> _loadLocalPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     final bool aiSafetyEnabled = prefs.getBool("ai_safety_enabled") ?? false;
     final bool tfa             = prefs.getBool("two_factor_enabled") ?? false;
@@ -41,11 +47,134 @@ class ProfileController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Load user settings from backend API.
+  Future<void> _loadSettingsFromBackend() async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        // Not logged in, use local defaults
+        return;
+      }
+
+      final settingsData = await ApiClient.instance.getSettings(token: token);
+      if (settingsData['ok'] == true) {
+        final settings = settingsData['settings'] ?? {};
+        
+        // Update preferences with backend settings
+        user = user.copyWith(
+          commuterType: settings['default_commuter_type'] ?? user.commuterType,
+          preferences: user.preferences.copyWith(
+            aiSafety: settings['show_weather_banner'] ?? true,
+            transport: List<String>.from(settings['transport_preference'] ?? ['jeep', 'walk']),
+          ),
+        );
+        
+        notifyListeners();
+      }
+    } catch (e) {
+      // Silently fail and use current defaults
+      print('[ProfileController] Error loading settings: $e');
+    }
+  }
+
+  /// Load user profile from backend API.
+  Future<void> _loadUserFromBackend() async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        // Not logged in,use mock data
+        return;
+      }
+
+      final userData = await ApiClient.instance.getCurrentUser(token: token);
+      if (userData['ok'] == true) {
+        user = UserModel(
+          id: userData['id'] ?? user.id,
+          name: userData['name'] ?? user.name,
+          username: userData['username'] ?? user.username,
+          role: userData['role'] ?? user.role,
+          avatarUrl: userData['avatarUrl'],
+          stats: UserStats(
+            trips: (userData['stats']?['trips'] ?? 0) as int,
+            reports: (userData['stats']?['reports'] ?? 0) as int,
+            upvotedReports: (userData['stats']?['upvotedReports'] ?? 0) as int,
+          ),
+          commuterType: userData['commuterType'],
+          preferences: UserPreferences(
+            aiSafety: userData['preferences']?['aiSafety'] ?? true,
+            nightMode: userData['preferences']?['nightMode'] ?? false,
+            transport: List<String>.from(userData['preferences']?['transport'] ?? ['jeep', 'walk']),
+          ),
+        );
+        notifyListeners();
+      }
+    } catch (e) {
+      // Silently fail and use mock data
+      print('[ProfileController] Error loading user: $e');
+    }
+  }
+
+  /// Load travel history from backend API.
+  Future<void> _loadTravelHistoryFromBackend() async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        // Not logged in, use mock data
+        return;
+      }
+
+      final historyData = await ApiClient.instance.getRouteHistory(token: token);
+      
+      // Transform API response to TravelRoute objects
+      // Use sensible defaults for fields not provided by the API
+      final routes = historyData.asMap().entries.map((entry) {
+        final index = entry.key;
+        final item = entry.value;
+        
+        return TravelRoute(
+          id: 'history_$index',
+          origin: item['origin']?.toString() ?? 'Unknown',
+          destination: item['destination']?.toString() ?? 'Unknown',
+          modes: item['commuterType']?.toString() ?? 'commute',
+          minutes: (item['routeCount'] as num?)?.round() ?? 0,  // Use route count as placeholder
+          fare: 0,  // Not provided by API
+          safetyScore: 75,  // Default neutral score
+          safetyNote: 'Previous route search',
+          date: item['searchedAt']?.toString() ?? 'Unknown',
+          saved: false,  // History items are not saved
+          steps: const [],  // Steps not provided by API
+        );
+      }).toList();
+      
+      history = TravelHistory(saved: const [], history: routes);
+      notifyListeners();
+    } catch (e) {
+      // Silently fail and use mock data
+      print('[ProfileController] Error loading travel history: $e');
+    }
+  }
+
   Future<void> toggleAiSafety() async {
     final newValue = !user.preferences.aiSafety;
     user = user.copyWith(preferences: user.preferences.copyWith(aiSafety: newValue));
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool("ai_safety_enabled", newValue);
+    
+    // Also save to backend if logged in
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token != null && token.isNotEmpty) {
+        await ApiClient.instance.saveSettings(
+          defaultCommuterType: user.commuterType ?? 'commute',
+          transportPreference: user.preferences.transport,
+          showWeatherBanner: newValue,
+          token: token,
+        );
+      }
+    } catch (e) {
+      print('[ProfileController] Error saving settings to backend: $e');
+    }
+    
     showToast(newValue ? "AI Safety Assistant Enabled" : "AI Safety Assistant Disabled", "teal");
     notifyListeners();
   }
@@ -66,12 +195,29 @@ class ProfileController extends ChangeNotifier {
 
   void logOut(BuildContext context) {
     showToast("Logging out...", "teal");
+    
+    // Clear backend session and local token
+    _performLogout();
+    
     final navigator = Navigator.of(context, rootNavigator: true);
     Future.delayed(const Duration(milliseconds: 600), () {
       // pushNamedAndRemoveUntil clears the entire back stack so the user
       // cannot press Back to return to the main shell after logging out.
       navigator.pushNamedAndRemoveUntil('/login', (route) => false);
     });
+  }
+
+  Future<void> _performLogout() async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      // Try to logout from backend, but don't fail if it doesn't work
+      await ApiClient.instance.logout(token: token);
+    } catch (_) {
+      // Backend logout is best-effort
+    }
+    
+    // Clear local session
+    await SessionManager.instance.clearAuthToken();
   }
 
   // ── Edit Profile (password handled separately in Security sheet) ──
@@ -110,19 +256,30 @@ class ProfileController extends ChangeNotifier {
     if (currentPassword == newPassword) {
       showToast("New password must be different from current", "red"); return;
     }
-    // BACKEND HOOK: replace below with real API call
-    // try {
-    //   await authApi.changePassword(userId: user.id,
-    //     currentPassword: currentPassword, newPassword: newPassword);
-    // } on WrongPasswordException {
-    //   showToast("Current password is incorrect", "red"); return;
-    // } catch (_) {
-    //   showToast("Something went wrong. Try again.", "red"); return;
-    // }
-    await Future.delayed(const Duration(milliseconds: 400)); // MOCK
-    showToast("Password updated successfully", "green");
-    onSuccess();
-    notifyListeners();
+    
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        showToast("Not logged in. Please try again.", "red"); return;
+      }
+      
+      await ApiClient.instance.changePassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+        token: token,
+      );
+      
+      showToast("Password updated successfully", "green");
+      onSuccess();
+      notifyListeners();
+    } catch (e) {
+      final errorMsg = e.toString();
+      if (errorMsg.contains('401') || errorMsg.contains('wrong')) {
+        showToast("Current password is incorrect", "red");
+      } else {
+        showToast("Error: ${e.toString()}", "red");
+      }
+    }
   }
 
   // ── Change Email ──────────────────────────────────────────────
@@ -189,6 +346,100 @@ class ProfileController extends ChangeNotifier {
   void hideComingSoon()  { comingSoon = false; notifyListeners(); }
   void openTravelHistory()  { travelHistoryOpen = true;  notifyListeners(); }
   void closeTravelHistory() { travelHistoryOpen = false; notifyListeners(); }
+  
+  /// Clear travel history and reload from backend.
+  Future<void> clearTravelHistory() async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        showToast("Not logged in", "red");
+        return;
+      }
+      
+      await ApiClient.instance.clearRouteHistory(token: token);
+      history = TravelHistory.mock();  // Reset to empty
+      showToast("Travel history cleared", "teal");
+      notifyListeners();
+    } catch (e) {
+      showToast("Error clearing history: ${e.toString()}", "red");
+    }
+  }
+
+  /// ────────────────────────────────────────────────────────────────────────
+  /// WHAT NEEDS CONNECTION 🔗: SOS Emergency Contact Management
+  /// ────────────────────────────────────────────────────────────────────────
+
+  List<Map<String, dynamic>> _sosContacts = [];
+  List<Map<String, dynamic>> get sosContacts => _sosContacts;
+
+  Future<void> loadSosContacts() async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        return;  // Not logged in
+      }
+
+      _sosContacts = await ApiClient.instance.getSosContacts(token: token);
+      notifyListeners();
+    } catch (e) {
+      print('[ProfileController] Error loading SOS contacts: $e');
+    }
+  }
+
+  Future<void> addSosContact({
+    required String name,
+    required String contactType,
+    required String contactValue,
+  }) async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        showToast("Not logged in", "red");
+        return;
+      }
+
+      final result = await ApiClient.instance.addSosContact(
+        name: name,
+        contactType: contactType,
+        contactValue: contactValue,
+        token: token,
+      );
+
+      if (result['ok'] == true) {
+        await loadSosContacts();  // Reload contacts list
+        showToast("Contact added successfully", "green");
+      } else {
+        showToast(result['message']?.toString() ?? "Failed to add contact", "red");
+      }
+    } catch (e) {
+      showToast("Error: ${e.toString()}", "red");
+    }
+  }
+
+  Future<void> removeSosContact({required int contactId}) async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        showToast("Not logged in", "red");
+        return;
+      }
+
+      final result = await ApiClient.instance.removeSosContact(
+        contactId: contactId,
+        token: token,
+      );
+
+      if (result['ok'] == true) {
+        await loadSosContacts();  // Reload contacts list
+        showToast("Contact removed", "teal");
+      } else {
+        showToast(result['message']?.toString() ?? "Failed to remove contact", "red");
+      }
+    } catch (e) {
+      showToast("Error: ${e.toString()}", "red");
+    }
+  }
+  
   void openSecurity()  { securityOpen = true;  notifyListeners(); }
   void closeSecurity() { securityOpen = false; notifyListeners(); }
   void openPassword()  { passwordOpen = true;  notifyListeners(); }

@@ -173,6 +173,110 @@ class ExploreController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Fetch safety overlay data from backend for a given location.
+  /// Populates hotspots, POIs, and advisory.
+  /// Called after routes are fetched to show safety context on map.
+  Future<void> fetchSafetyOverlays({
+    required double lat,
+    required double lon,
+  }) async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      final safetyData = await ApiClient.instance.getSafety(
+        lat: lat,
+        lon: lon,
+        token: token,
+      );
+
+      if (safetyData['ok'] == true) {
+        // Parse reports as hotspots (crime, flood, weather risks)
+        final reports = safetyData['reports'] as List? ?? [];
+        final newHotspots = <HotspotModel>[];
+        
+        for (final report in reports) {
+          if (report is Map<String, dynamic>) {
+            final rLat = (report['lat'] as num?)?.toDouble() ?? 0.0;
+            final rLon = (report['lon'] as num?)?.toDouble() ?? 0.0;
+            final label = report['label'] as String? ?? 'Safety Alert';
+            final color = _colorFromReportType(report['type'] as String? ?? '');
+            newHotspots.add(HotspotModel(
+              lat: rLat,
+              lng: rLon,
+              radiusMeters: 200,
+              label: label,
+              color: color,
+            ));
+          }
+        }
+        
+        // Parse crime, flood, weather into POIs if severity high
+        final crimePenalty = safetyData['crime']?['penalty'] as int? ?? 0;
+        final floodPenalty = safetyData['flood']?['penalty'] as int? ?? 0;
+        final weatherRisk = safetyData['weather']?['risk_level'] as String? ?? 'clear';
+        
+        final newPois = <PoiModel>[];
+        if (crimePenalty > 10) {
+          newPois.add(PoiModel(
+            lat: lat,
+            lng: lon,
+            label: 'High Crime Risk',
+            icon: Icons.warning_rounded,
+            color: const Color(0xFFF87171),
+          ));
+        }
+        if (floodPenalty > 10) {
+          newPois.add(PoiModel(
+            lat: lat,
+            lng: lon,
+            label: 'Flood Risk',
+            icon: Icons.water_rounded,
+            color: const Color(0xFF3B82F6),
+          ));
+        }
+        if (weatherRisk != 'clear') {
+          newPois.add(PoiModel(
+            lat: lat,
+            lng: lon,
+            label: 'Severe Weather',
+            icon: Icons.cloud_rounded,
+            color: const Color(0xFFFCD34D),
+          ));
+        }
+        
+        // Set advisory if there are high penalties
+        AdvisoryModel? newAdvisory;
+        if (crimePenalty > 15 || floodPenalty > 15) {
+          newAdvisory = AdvisoryModel(
+            message: crimePenalty > 15
+              ? 'High crime risk in this area. Exercise caution.'
+              : 'Flood risk detected. Consider alternate routes.',
+            type: crimePenalty > 15 ? 'danger' : 'warning',
+          );
+        }
+        
+        setHotspots(newHotspots);
+        setPois(newPois);
+        setAdvisory(newAdvisory);
+      }
+    } catch (e) {
+      // Silently fail - use empty overlays as fallback
+      print('[ExploreController] Error fetching safety overlays: $e');
+    }
+  }
+
+  Color _colorFromReportType(String type) {
+    switch (type.toLowerCase()) {
+      case 'crime':
+        return const Color(0x33DC2626);
+      case 'flood':
+        return const Color(0x333B82F6);
+      case 'accident':
+        return const Color(0x33F59E0B);
+      default:
+        return const Color(0x33DC2626);
+    }
+  }
+
   // ── Search inputs ──────────────────────────────────────────────
   String _currentLocationText = ''; // Updated: was _originText
   String _destinationText = '';     // Updated: was _destText
@@ -223,28 +327,65 @@ class ExploreController extends ChangeNotifier {
     showToast('Finding routes...', 'teal');
     notifyListeners();
 
-    // Attempt to fetch live routes from the Flask backend.
+    // Attempt to fetch live routes from the Flask backend WITH alerts.
     try {
-      final routes = await ApiClient.instance.searchRoutes(
+      final response = await ApiClient.instance.searchRoutesWithAlerts(
         origin: _currentLocationText,
         destination: _destinationText,
         mode: 'commute',
       );
 
+      final routes = (response['routes'] as List?)?.cast<RouteModel>() ?? [];
+
       if (routes.isNotEmpty) {
         setAllRoutes(routes);
+
+        // WHAT NEEDS CONNECTION 🔗: Capture and store alert data
+        setAlertData(
+          incidents: (response['incidents'] as List?)?.cast<Map<String, dynamic>>() ?? [],
+          mmdaBanner: response['mmda_banner']?.toString() ?? '',
+          mmda_closures_count: response['mmda_closures_count'] as int? ?? 0,
+          earthquakes: (response['earthquakes'] as List?)?.cast<Map<String, dynamic>>() ?? [],
+          seismicBanner: response['seismic_banner']?.toString() ?? '',
+          weatherRisk: response['weather_risk']?.toString() ?? 'clear',
+          floodRisk: response['flood_risk']?.toString() ?? 'none',
+        );
+
+        // Fetch safety overlays for the current location or default Manila location
+        final safeLat = _lat ?? 14.5995;
+        final safeLon = _lng ?? 120.9842;
+        await fetchSafetyOverlays(lat: safeLat, lon: safeLon);
+        
         return;
       }
 
       // No routes returned – fall back to the built-in mock routes
       // so the UI remains usable.
       setAllRoutes(mockRoutes);
+      setAlertData(
+        incidents: [],
+        mmdaBanner: '',
+        mmda_closures_count: 0,
+        earthquakes: [],
+        seismicBanner: '',
+        weatherRisk: 'clear',
+        floodRisk: 'none',
+      );
       showToast('No routes from server — showing sample routes', 'teal');
     } catch (_) {
       // On any error (offline, server down, bad JSON), keep the existing
       // mock behaviour and surface a gentle message.
       _allRoutes = mockRoutes;
       _applyFilters();
+      setAlertData(
+        incidents: [],
+        mmdaBanner: '',
+        mmda_closures_count: 0,
+        earthquakes: [],
+        seismicBanner: '',
+        weatherRisk: 'clear',
+        floodRisk: 'none',
+      );
       showToast('Could not reach server — using sample routes', 'red');
       notifyListeners();
     }
@@ -354,6 +495,28 @@ class ExploreController extends ChangeNotifier {
   List<RouteModel> _filteredRoutes = mockRoutes;
   List<RouteModel> get routes => _filteredRoutes;
 
+  // ── WHAT NEEDS CONNECTION 🔗: Incident & Alert Data ──────────────────────
+  List<Map<String, dynamic>> _incidents = [];
+  List<Map<String, dynamic>> get incidents => _incidents;
+
+  String _mmdaBanner = '';
+  String get mmdaBanner => _mmdaBanner;
+
+  int _mmda_closures_count = 0;
+  int get mmda_closures_count => _mmda_closures_count;
+
+  List<Map<String, dynamic>> _earthquakes = [];
+  List<Map<String, dynamic>> get earthquakes => _earthquakes;
+
+  String _seismicBanner = '';
+  String get seismicBanner => _seismicBanner;
+
+  String _weatherRisk = 'clear';  // clear, rain, storm, etc.
+  String get weatherRisk => _weatherRisk;
+
+  String _floodRisk = 'none';  // none, low, moderate, high
+  String get floodRisk => _floodRisk;
+
   /// BACKEND HOOK ─────────────────────────────────────────────────────────────
   /// Call this from your API layer to swap in real routes.
   /// Example:
@@ -363,6 +526,26 @@ class ExploreController extends ChangeNotifier {
   void setAllRoutes(List<RouteModel> newRoutes) {
     _allRoutes = newRoutes;
     _applyFilters();
+    notifyListeners();
+  }
+
+  /// Set alert data from API response (incidents, MMDA, earthquakes, etc.)
+  void setAlertData({
+    required List<Map<String, dynamic>> incidents,
+    required String mmdaBanner,
+    required int mmda_closures_count,
+    required List<Map<String, dynamic>> earthquakes,
+    required String seismicBanner,
+    required String weatherRisk,
+    required String floodRisk,
+  }) {
+    _incidents = incidents;
+    _mmdaBanner = mmdaBanner;
+    _mmda_closures_count = mmda_closures_count;
+    _earthquakes = earthquakes;
+    _seismicBanner = seismicBanner;
+    _weatherRisk = weatherRisk;
+    _floodRisk = floodRisk;
     notifyListeners();
   }
 
