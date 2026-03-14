@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
 import '../../core/theme_controller.dart';
 import '../../models/explore_models.dart';
-import '../../data/mock_data.dart';
 import '../../core/session_manager.dart';
 import '../../core/api_client.dart';
 
@@ -528,6 +527,25 @@ class ExploreController extends ChangeNotifier {
     }
   }
 
+  // ── Safe spots toggle ─────────────────────────────────────────
+  bool _safeSpotsVisible = false;
+  bool get safeSpotsVisible => _safeSpotsVisible;
+
+  void toggleSafeSpots() {
+    _safeSpotsVisible = !_safeSpotsVisible;
+    showToast(
+      _safeSpotsVisible ? 'Safe spots shown' : 'Safe spots hidden',
+      'teal',
+    );
+    notifyListeners();
+  }
+
+  void setSafeSpotsVisible(bool v) {
+    if (_safeSpotsVisible == v) return;
+    _safeSpotsVisible = v;
+    notifyListeners();
+  }
+
   // ── Transport mode ─────────────────────────────────────────────
   // 'transit' | 'walk' | 'car' | 'motorcycle'
   String _activeMode = 'transit';
@@ -738,7 +756,8 @@ class ExploreController extends ChangeNotifier {
         return;
       }
 
-      setAllRoutes(mockRoutes);
+      // No routes found — clear routes, show empty state (do NOT fall back to mock)
+      setAllRoutes([]);
       setAlertData(
         incidents: [],
         mmdaBanner: '',
@@ -748,11 +767,14 @@ class ExploreController extends ChangeNotifier {
         weatherRisk: 'clear',
         floodRisk: 'none',
       );
-      showToast('No routes from server — showing sample routes', 'teal');
+      showToast('No routes found for this journey', 'teal');
     } catch (e, stack) {
       debugPrint('[searchRoutes] ERROR: $e');
       debugPrint('[searchRoutes] STACK: $stack');
-      _allRoutes = mockRoutes;
+      // On error: keep whatever routes exist but don't inject mock data.
+      // The map will still show the A/B pins via resolvedOrig/Dest coords if
+      // geocoding already happened before the route fetch failed.
+      _allRoutes = [];
       _applyFilters();
       setAlertData(
         incidents: [],
@@ -763,7 +785,7 @@ class ExploreController extends ChangeNotifier {
         weatherRisk: 'clear',
         floodRisk: 'none',
       );
-      showToast('Could not reach server — using sample routes', 'red');
+      showToast('Could not reach server — check connection', 'red');
       notifyListeners();
     }
   }
@@ -910,11 +932,18 @@ class ExploreController extends ChangeNotifier {
     }
   }
 
+  // ── Rain active flag (drives flood zone visibility on map) ───
+  // True when weather_risk is light_rain / rain / heavy_rain / storm.
+  bool get isRaining {
+    const rainyLevels = {'light_rain', 'rain', 'heavy_rain', 'storm'};
+    return rainyLevels.contains(_weatherRisk);
+  }
+
   // ── Routes ─────────────────────────────────────────────────────
-  List<RouteModel> _allRoutes = mockRoutes;
+  List<RouteModel> _allRoutes = [];
   List<RouteModel> get allRoutes => _allRoutes;
 
-  List<RouteModel> _filteredRoutes = mockRoutes;
+  List<RouteModel> _filteredRoutes = [];
   List<RouteModel> get routes => _filteredRoutes;
 
   // ── Alert data ─────────────────────────────────────────────────

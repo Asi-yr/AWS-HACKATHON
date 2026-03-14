@@ -11,6 +11,29 @@ import 'mini_screen.dart';
 import '../../core/app_colors.dart';
 import '../../core/theme_controller.dart';
 
+// ── Transport Mode Filter Options ─────────────────────────────────────────
+final transportModeOptions = [
+  FilterOption(
+    key: 'transit',
+    label: 'Transit',
+    icon: Icons.directions_bus_rounded,
+  ),
+  FilterOption(key: 'train', label: 'Train', icon: Icons.train_rounded),
+  FilterOption(
+    key: 'jeepney',
+    label: 'Jeepney',
+    icon: Icons.airport_shuttle_rounded,
+  ),
+  FilterOption(key: 'bus', label: 'Bus', icon: Icons.directions_bus_rounded),
+  FilterOption(key: 'walk', label: 'Walk', icon: Icons.directions_walk_rounded),
+  FilterOption(key: 'car', label: 'Car', icon: Icons.directions_car_rounded),
+  FilterOption(
+    key: 'motorcycle',
+    label: 'Motorcycle',
+    icon: Icons.two_wheeler_rounded,
+  ),
+];
+
 // ── Route Preference Filter Options ────────────────────────────────────────
 final preferenceOptions = [
   FilterOption(key: 'safest', label: 'Safest', icon: Icons.shield_rounded),
@@ -151,8 +174,7 @@ class _ExploreScaffoldState extends State<_ExploreScaffold> {
         backgroundColor: AppColors.bg(isDark),
         body: Stack(
           children: [
-            if (appState != AppState.state1)
-              _MapLayer(mapCtrl: _mapCtrl),
+            if (appState != AppState.state1) _MapLayer(mapCtrl: _mapCtrl),
 
             if (appState == AppState.state1)
               MiniScreen(onSearchTap: () => _openSearch(context)),
@@ -425,6 +447,8 @@ class _SuggestionDrawer extends StatelessWidget {
           ),
         ),
         _FilterChipsRow(ctrl: ctrl),
+        // ── Safe spots toggle bar ──────────────────────────────────────
+        _SafeSpotsToggleBar(ctrl: ctrl),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Align(
@@ -448,20 +472,84 @@ class _SuggestionDrawer extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          Icons.search_off_rounded,
+                          ctrl.originText.isNotEmpty && ctrl.destText.isNotEmpty
+                              ? Icons.route_rounded
+                              : Icons.search_rounded,
                           size: 40,
                           color: AppColors.text3(isDark),
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          'No routes match your filters',
+                          ctrl.originText.isNotEmpty && ctrl.destText.isNotEmpty
+                              ? 'No routes found'
+                              : 'Enter a destination\nto find safe routes',
                           style: GoogleFonts.plusJakartaSans(
-                            fontSize: 13,
-                            color: AppColors.text2(isDark),
-                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: AppColors.text(isDark),
+                            fontWeight: FontWeight.w700,
                           ),
                           textAlign: TextAlign.center,
                         ),
+                        if (ctrl.originText.isNotEmpty &&
+                            ctrl.destText.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.trip_origin_rounded,
+                                size: 11,
+                                color: Color(0xFF0984E3),
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  ctrl.originText,
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 11,
+                                    color: AppColors.text2(isDark),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.place_rounded,
+                                size: 11,
+                                color: Color(0xFF6C5CE7),
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  ctrl.destText,
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 11,
+                                    color: AppColors.text2(isDark),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Try a different transport mode\nor check your network connection.',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 11,
+                              color: AppColors.text3(isDark),
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -905,7 +993,7 @@ class _FilterChipsRow extends StatelessWidget {
       }
     }
     for (final k in ctrl.transportFilters) {
-      final opt = transportOptions.where((o) => o.key == k).firstOrNull;
+      final opt = transportModeOptions.where((o) => o.key == k).firstOrNull;
       if (opt != null) {
         activeChips.add(_ActiveChip(opt: opt, group: 'transport', ctrl: ctrl));
       }
@@ -1172,7 +1260,7 @@ class _FilterModal extends StatelessWidget {
             _optionGrid(context, ctrl, commuterOptions, 'commuter'),
             const SizedBox(height: 20),
             _sectionLabel('TRANSPORT MODE'),
-            _optionGrid(context, ctrl, transportOptions, 'transport'),
+            _optionGrid(context, ctrl, transportModeOptions, 'transport'),
             const SizedBox(height: 20),
             _sectionLabel('ROUTE PREFERENCE'),
             _optionGrid(context, ctrl, preferenceOptions, 'preference'),
@@ -1356,6 +1444,60 @@ class _FilterModal extends StatelessWidget {
           ),
         );
       }).toList(),
+    );
+  }
+}
+
+// ── Safe spots toggle bar ─────────────────────────────────────────────────────
+class _SafeSpotsToggleBar extends StatelessWidget {
+  final ExploreController ctrl;
+  const _SafeSpotsToggleBar({required this.ctrl});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.watch<ThemeController>().isDark;
+    final isOn = ctrl.safeSpotsVisible;
+    return GestureDetector(
+      onTap: ctrl.toggleSafeSpots,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: isOn ? const Color(0xFF2980B9) : AppColors.card2(isDark),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isOn ? const Color(0xFF2980B9) : AppColors.border(isDark),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.local_hospital_rounded,
+              size: 14,
+              color: isOn ? Colors.white : AppColors.text2(isDark),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                isOn ? '🏥 Safe Spots: ON' : '🏥 Include Safe Spots',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isOn ? Colors.white : AppColors.text2(isDark),
+                ),
+              ),
+            ),
+            Text(
+              '🚔 🏥 💊',
+              style: TextStyle(
+                fontSize: 10,
+                color: isOn ? Colors.white70 : AppColors.text3(isDark),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1615,13 +1757,27 @@ class _RouteCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    route.modes,
-                    style: GoogleFonts.plusJakartaSans(
-                      color: AppColors.text(isDark),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  Row(
+                    children: [
+                      Icon(
+                        _modeIcon(route.modes),
+                        size: 14,
+                        color: AppColors.teal,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          route.modes,
+                          style: GoogleFonts.plusJakartaSans(
+                            color: AppColors.text(isDark),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 6),
                   Row(
@@ -1657,6 +1813,31 @@ class _RouteCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  // ── Live risk warnings (inline, compact) ──────────────
+                  if (route.seismicWarning != null &&
+                      route.seismicWarning!.isNotEmpty)
+                    _inlineWarning(
+                      '🌍',
+                      route.seismicWarning!,
+                      const Color(0xFFE74C3C),
+                      isDark,
+                    ),
+                  if (route.floodWarning != null &&
+                      route.floodWarning!.isNotEmpty)
+                    _inlineWarning(
+                      '🌊',
+                      route.floodWarning!,
+                      const Color(0xFF1565C0),
+                      isDark,
+                    ),
+                  if (route.crimeWarning != null &&
+                      route.crimeWarning!.isNotEmpty)
+                    _inlineWarning(
+                      '🚨',
+                      route.crimeWarning!,
+                      const Color(0xFFF59E0B),
+                      isDark,
+                    ),
                 ],
               ),
             ),
@@ -1679,6 +1860,50 @@ class _RouteCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _inlineWarning(String emoji, String text, Color color, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 5),
+      child: Row(
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 11)),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _modeIcon(String modes) {
+    final lower = modes.toLowerCase();
+    if (lower.contains('train') ||
+        lower.contains('lrt') ||
+        lower.contains('mrt')) {
+      return Icons.train_rounded;
+    } else if (lower.contains('jeepney')) {
+      return Icons.airport_shuttle_rounded;
+    } else if (lower.contains('bus')) {
+      return Icons.directions_bus_rounded;
+    } else if (lower.contains('walk')) {
+      return Icons.directions_walk_rounded;
+    } else if (lower.contains('car')) {
+      return Icons.directions_car_rounded;
+    } else if (lower.contains('motorcycle')) {
+      return Icons.two_wheeler_rounded;
+    }
+    return Icons.directions_transit_filled_rounded;
   }
 }
 
@@ -1867,8 +2092,8 @@ class _MapLayer extends StatelessWidget {
 
     for (final route in ctrl.routes) {
       final isActive = active != null && route.id == active.id;
-      final opacity    = isActive ? 1.0 : 0.18;
-      final fallbackC  = route.safetyMeta.color;
+      final opacity = isActive ? 1.0 : 0.18;
+      final fallbackC = route.safetyMeta.color;
 
       final pts = route.polyline.map((p) => LatLng(p[0], p[1])).toList();
       if (pts.length >= 2) {
@@ -1914,9 +2139,12 @@ class _MapLayer extends StatelessWidget {
         );
       }
 
-      // Flood zones from route (only rain-active)
+      // Flood zones from route — only shown when actively raining (mirrors index.html logic)
       for (final zone in (active.floodZonesMap ?? [])) {
-        final rainActive = zone['rain_active'] != false;
+        // rain_active field: if present, honour it; if absent, check controller's weatherRisk
+        final rainActive = zone['rain_active'] is bool
+            ? zone['rain_active'] as bool
+            : ctrl.isRaining;
         if (!rainActive) continue;
         final lat = (zone['lat'] as num?)?.toDouble();
         final lon = (zone['lon'] as num?)?.toDouble();
@@ -1990,32 +2218,48 @@ class _MapLayer extends StatelessWidget {
     // These are set as soon as searchRoutes() completes — no need to wait
     // for the user to select a route (activeRoute).
     // Fall back to polyline endpoints only if resolved coords aren't available.
-    final origLat = ctrl.resolvedOrigLat
-        ?? (active != null && active.polyline.isNotEmpty ? active.polyline.first[0] : null);
-    final origLon = ctrl.resolvedOrigLon
-        ?? (active != null && active.polyline.isNotEmpty ? active.polyline.first[1] : null);
-    final destLat = ctrl.resolvedDestLat
-        ?? (active != null && active.polyline.isNotEmpty ? active.polyline.last[0] : null);
-    final destLon = ctrl.resolvedDestLon
-        ?? (active != null && active.polyline.isNotEmpty ? active.polyline.last[1] : null);
+    final origLat =
+        ctrl.resolvedOrigLat ??
+        (active != null && active.polyline.isNotEmpty
+            ? active.polyline.first[0]
+            : null);
+    final origLon =
+        ctrl.resolvedOrigLon ??
+        (active != null && active.polyline.isNotEmpty
+            ? active.polyline.first[1]
+            : null);
+    final destLat =
+        ctrl.resolvedDestLat ??
+        (active != null && active.polyline.isNotEmpty
+            ? active.polyline.last[0]
+            : null);
+    final destLon =
+        ctrl.resolvedDestLon ??
+        (active != null && active.polyline.isNotEmpty
+            ? active.polyline.last[1]
+            : null);
 
     if (origLat != null && origLon != null) {
-      markers.add(Marker(
-        point:     LatLng(origLat, origLon),
-        width:     34,
-        height:    34,
-        alignment: Alignment.bottomCenter,
-        child:     _svgPin(const Color(0xFF0984E3), 'A'),
-      ));
+      markers.add(
+        Marker(
+          point: LatLng(origLat, origLon),
+          width: 34,
+          height: 34,
+          alignment: Alignment.bottomCenter,
+          child: _svgPin(const Color(0xFF0984E3), 'A'),
+        ),
+      );
     }
     if (destLat != null && destLon != null) {
-      markers.add(Marker(
-        point:     LatLng(destLat, destLon),
-        width:     34,
-        height:    34,
-        alignment: Alignment.bottomCenter,
-        child:     _svgPin(const Color(0xFF6C5CE7), 'B'),
-      ));
+      markers.add(
+        Marker(
+          point: LatLng(destLat, destLon),
+          width: 34,
+          height: 34,
+          alignment: Alignment.bottomCenter,
+          child: _svgPin(const Color(0xFF6C5CE7), 'B'),
+        ),
+      );
     }
 
     // GPS blue-dot (real device location)
@@ -2052,7 +2296,10 @@ class _MapLayer extends StatelessWidget {
       }
 
       for (final zone in (active.floodZonesMap ?? [])) {
-        if (zone['rain_active'] == false) continue;
+        final rainActive = zone['rain_active'] is bool
+            ? zone['rain_active'] as bool
+            : ctrl.isRaining;
+        if (rainActive == false) continue;
         final lat = (zone['lat'] as num?)?.toDouble();
         final lon = (zone['lon'] as num?)?.toDouble();
         if (lat == null || lon == null) continue;
@@ -2100,17 +2347,19 @@ class _MapLayer extends StatelessWidget {
       );
     }
 
-    // ── Safe-spot POI markers ─────────────────────────────────────────────────
-    final poiMarkers = ctrl.pois
-        .map(
-          (poi) => Marker(
-            point: LatLng(poi.lat, poi.lng),
-            width: 32,
-            height: 32,
-            child: _poiPin(poi.color, poi.icon, poi.label),
-          ),
-        )
-        .toList();
+    // ── Safe-spot POI markers (only shown when toggle is ON) ─────────────────
+    final poiMarkers = ctrl.safeSpotsVisible
+        ? ctrl.pois
+              .map(
+                (poi) => Marker(
+                  point: LatLng(poi.lat, poi.lng),
+                  width: 32,
+                  height: 32,
+                  child: _poiPin(poi.color, poi.icon, poi.label),
+                ),
+              )
+              .toList()
+        : <Marker>[];
 
     return FlutterMap(
       mapController: mapCtrl,

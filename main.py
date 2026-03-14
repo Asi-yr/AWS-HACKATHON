@@ -1945,8 +1945,17 @@ def api_safety():
         'seismic': {
             'count':      len(quakes),
             'earthquakes': [
-                {'magnitude': e['magnitude'], 'place': e['place'],
-                 'severity': e['severity'], 'tsunami': e['tsunami']}
+                {
+                    'magnitude': e['magnitude'],
+                    'place':     e['place'],
+                    'severity':  e['severity'],
+                    'tsunami':   e['tsunami'],
+                    # Flutter HotspotModel needs these for map circles
+                    'lat':       e['lat'],
+                    'lon':       e['lon'],
+                    'radius_km': e['radius_km'],
+                    'color':     e['color'],
+                }
                 for e in quakes[:3]
             ],
         },
@@ -2144,7 +2153,8 @@ def api_safe_spots_flutter():
         return jsonify({'ok': False, 'error': str(e), 'spots': []}), 500
 
 
-
+@app.route('/api/safe-spots', methods=['GET'])
+def api_safe_spots():
     """Safe spots (police, hospitals, fire stations, etc.) near a coordinate."""
     t_start = time.time()
     print("[DEBUG][api_safe_spots] Incoming query...")
@@ -2153,7 +2163,6 @@ def api_safe_spots_flutter():
         lon    = float(request.args.get('lon', 120.9842))
         radius = int(request.args.get('radius', 1500))
         print(f"[DEBUG] [api_safe_spots] Parameters -> lat: {lat}, lon: {lon}, radius: {radius}")
-        
         spots  = get_safe_spots_near(lat, lon, radius_m=radius)
         print(f"[DEBUG][api_safe_spots] Retrieved {len(spots)} spots in {time.time() - t_start:.4f}s")
         return jsonify({'spots': spots, 'count': len(spots)})
