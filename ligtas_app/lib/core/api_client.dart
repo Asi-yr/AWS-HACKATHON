@@ -18,7 +18,7 @@ class ApiClient {
   /// - On Android emulator, `10.0.2.2` points to the host machine.
   /// - On iOS simulator or real devices, change this to your machine's LAN IP,
   ///   e.g. `http://192.168.1.10:5000`.
-  static const String baseUrl = 'http://10.0.2.2:5000';
+  static const String baseUrl = 'http://localhost:5000';
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
@@ -35,6 +35,7 @@ class ApiClient {
     required String origin,
     required String destination,
     String mode = 'commute',
+    Map<String, dynamic>? extraParams,
   }) async {
     final resp = await http.post(
       _uri('/api/routes'),
@@ -43,6 +44,7 @@ class ApiClient {
         'origin': origin,
         'destination': destination,
         'mode': mode,
+        ...?extraParams,
       }),
     );
 
@@ -148,7 +150,8 @@ class ApiClient {
     final String tag = _tagFromModeLabel(modeLabelRaw);
 
     final String safetyNote =
-        (r['safety_note'] ?? 'Safety score $safetyScore based on live risk data.')
+        (r['safety_note'] ??
+                'Safety score $safetyScore based on live risk data.')
             .toString();
 
     // Basic step list: keep it simple and let the design drive the text.
@@ -178,9 +181,9 @@ class ApiClient {
       commuterTags: const [],
       ligtasTags: const [],
       // ── Live risk warnings from /api/routes pipeline ──────────────────────
-      seismicWarning:  r['seismic_warning']  as String?,
-      floodWarning:    r['flood_warning']    as String?,
-      crimeWarning:    r['crime_warning']    as String?,
+      seismicWarning: r['seismic_warning'] as String?,
+      floodWarning: r['flood_warning'] as String?,
+      crimeWarning: r['crime_warning'] as String?,
       profileWarnings: r['profile_warnings'] as List<dynamic>?,
     );
   }
@@ -211,7 +214,9 @@ class ApiClient {
           final sc = seg['coords'];
           if (sc is List && sc.isNotEmpty) {
             // Either [[lat,lon], ...] or [[[lat,lon],...], ...]
-            if (sc.first is List && (sc.first as List).isNotEmpty && (sc.first as List).first is List) {
+            if (sc.first is List &&
+                (sc.first as List).isNotEmpty &&
+                (sc.first as List).first is List) {
               for (final sub in sc) {
                 if (sub is List) {
                   for (final p in sub) {
@@ -323,10 +328,7 @@ class ApiClient {
       final resp = await http.post(
         _uri('/api/auth/login'),
         headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'username': username,
-          'password': password,
-        }),
+        body: jsonEncode({'username': username, 'password': password}),
       );
 
       final decoded = jsonDecode(resp.body);
@@ -347,10 +349,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      await http.post(
-        _uri('/api/auth/logout'),
-        headers: headers,
-      );
+      await http.post(_uri('/api/auth/logout'), headers: headers);
     } catch (_) {
       // Logout errors are non-fatal, just best-effort
     }
@@ -364,10 +363,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/user/current'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/user/current'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch user data');
@@ -388,10 +384,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/reports'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/reports'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch reports');
@@ -410,7 +403,7 @@ class ApiClient {
   /// Submit a community report.
   Future<Map<String, dynamic>> submitReport({
     required double lat,
-    required double lng,
+    required double lon,
     required String reportType,
     required String description,
     String? token,
@@ -422,11 +415,11 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/report'),  // Note: check if backend uses /report or /api/report
+        _uri('/api/report'),
         headers: headers,
         body: jsonEncode({
           'lat': lat,
-          'lon': lng,
+          'lon': lon,
           'report_type': reportType,
           'description': description,
         }),
@@ -473,10 +466,10 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/safety?lat=$lat&lon=$lon'),
-        headers: headers,
-      );
+      final uri = Uri.parse(
+        '$baseUrl/api/safety',
+      ).replace(queryParameters: {'lat': '$lat', 'lon': '$lon'});
+      final resp = await http.get(uri, headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch safety data');
@@ -516,10 +509,14 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/safe-spots/flutter?lat=$lat&lon=$lon&radius=$radiusMeters'),
-        headers: headers,
+      final uri = Uri.parse('$baseUrl/api/safe-spots/flutter').replace(
+        queryParameters: {
+          'lat': '$lat',
+          'lon': '$lon',
+          'radius': '$radiusMeters',
+        },
       );
+      final resp = await http.get(uri, headers: headers);
 
       if (resp.statusCode != 200) {
         return {'ok': false, 'spots': []};
@@ -541,10 +538,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/report-types'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/report-types'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch report types');
@@ -572,10 +566,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/history'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/history'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch route history');
@@ -661,10 +652,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/sos/contacts'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/sos/contacts'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch SOS contacts');
@@ -822,10 +810,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/settings'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/settings'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch settings');
@@ -860,10 +845,8 @@ class ApiClient {
         'show_weather_banner': showWeatherBanner,
         'show_crime_banner': showCrimeBanner,
         'show_flood_banner': showFloodBanner,
-        if (displayName != null) ...
-          {'display_name': displayName},
-        if (email != null) ...
-          {'email': email},
+        if (displayName != null) ...{'display_name': displayName},
+        if (email != null) ...{'email': email},
       };
 
       final resp = await http.post(
@@ -882,40 +865,63 @@ class ApiClient {
     }
   }
 
-  /// Submit a community report (JSON API version).
-  /// Note: This fixes the endpoint path to /api/report (JSON version).
-  Future<Map<String, dynamic>> submitReportJson({
+  // ── Reverse geocoding & autocomplete ──────────────────────────────────────
+
+  /// GET /api/reverse?lat=&lon=
+  /// Returns { "address": "string" }
+  Future<Map<String, dynamic>> reverseGeocode({
     required double lat,
     required double lon,
-    required String reportType,
-    required String description,
     String? token,
   }) async {
-    try {
-      final headers = {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      };
+    final uri = Uri.parse(
+      '$baseUrl/api/reverse',
+    ).replace(queryParameters: {'lat': '$lat', 'lon': '$lon'});
+    final resp = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 8));
+    _checkStatus(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
 
-      final resp = await http.post(
-        _uri('/api/report'),  // JSON API version
-        headers: headers,
-        body: jsonEncode({
-          'lat': lat,
-          'lon': lon,
-          'report_type': reportType,
-          'description': description,
-        }),
-      );
+  /// GET /api/suggest?q=
+  /// Returns list of Nominatim place objects:
+  ///   [{ display_name, address: { road, suburb, city }, lat, lon }, ...]
+  Future<List<Map<String, dynamic>>> suggestLocations({
+    required String query,
+    String? token,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/api/suggest',
+    ).replace(queryParameters: {'q': query});
+    final resp = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 6));
+    _checkStatus(resp);
+    final list = jsonDecode(resp.body) as List;
+    return list.cast<Map<String, dynamic>>();
+  }
 
-      final decoded = jsonDecode(resp.body);
-      if (resp.statusCode != 200) {
-        throw Exception(decoded['message'] ?? 'Failed to submit report');
-      }
+  /// GET /api/mmda
+  /// Returns { coding, closures, closures_count, mmda_banner }
+  Future<Map<String, dynamic>> getMmda({String? token}) async {
+    final resp = await http
+        .get(Uri.parse('$baseUrl/api/mmda'), headers: _headers(token))
+        .timeout(const Duration(seconds: 8));
+    _checkStatus(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
 
-      return decoded;
-    } catch (e) {
-      rethrow;
+  // ── Private helpers ────────────────────────────────────────────────────────
+
+  Map<String, String> _headers(String? token) => {
+    'Content-Type': 'application/json',
+    if (token != null) 'Authorization': 'Bearer $token',
+  };
+
+  void _checkStatus(http.Response resp) {
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw Exception('Backend returned ${resp.statusCode}');
     }
   }
 }
