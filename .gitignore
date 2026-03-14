@@ -1,0 +1,97 @@
+# Python Virtual Environments
+venv/
+.venv/
+env/
+.env
+*.venv
+
+# Python Cache & Compiled Files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Database Files
+*.db
+*.sqlite
+*.sqlite3
+database.db
+
+# Backup Files
+*.bck
+*.backup
+*~
+.DS_Store
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+api_keys.json
+credentials.json
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+
+# OS Files
+.DS_Store
+Thumbs.db
+.directory
+
+# Flask
+instance/
+.webassets-cache
+
+# Logs
+*.log
+logs/
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+
+# macOS
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Node (if used for frontend)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Flutter/Dart builds
+ligtas_app/build/
+ligtas_app/.dart_tool/
+ligtas_app/.packages
+ligtas_app/pubspec.lock
+.flutter
