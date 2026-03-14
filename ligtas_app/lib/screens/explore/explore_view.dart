@@ -152,7 +152,7 @@ class _ExploreScaffoldState extends State<_ExploreScaffold> {
         body: Stack(
           children: [
             if (appState != AppState.state1)
-              RepaintBoundary(child: _MapLayer(mapCtrl: _mapCtrl)),
+              _MapLayer(mapCtrl: _mapCtrl),
 
             if (appState == AppState.state1)
               MiniScreen(onSearchTap: () => _openSearch(context)),
@@ -900,23 +900,27 @@ class _FilterChipsRow extends StatelessWidget {
     final activeChips = <_ActiveChip>[];
     for (final k in ctrl.commuterFilters) {
       final opt = commuterOptions.where((o) => o.key == k).firstOrNull;
-      if (opt != null)
+      if (opt != null) {
         activeChips.add(_ActiveChip(opt: opt, group: 'commuter', ctrl: ctrl));
+      }
     }
     for (final k in ctrl.transportFilters) {
       final opt = transportOptions.where((o) => o.key == k).firstOrNull;
-      if (opt != null)
+      if (opt != null) {
         activeChips.add(_ActiveChip(opt: opt, group: 'transport', ctrl: ctrl));
+      }
     }
     for (final k in ctrl.ligtasFilters) {
       final opt = ligtasFeatures.where((o) => o.key == k).firstOrNull;
-      if (opt != null)
+      if (opt != null) {
         activeChips.add(_ActiveChip(opt: opt, group: 'ligtas', ctrl: ctrl));
+      }
     }
     for (final k in ctrl.preferenceFilters) {
       final opt = preferenceOptions.where((o) => o.key == k).firstOrNull;
-      if (opt != null)
+      if (opt != null) {
         activeChips.add(_ActiveChip(opt: opt, group: 'preference', ctrl: ctrl));
+      }
     }
     // Active vulnerable profile chip
     if (ctrl.activeVulnerableProfile != null) {
@@ -1785,43 +1789,236 @@ class _LocationPopup extends StatelessWidget {
 }
 
 // ── Map layer ─────────────────────────────────────────────────────────────────
+// Mirrors the full rendering logic from index.html:
+//   • All routes drawn simultaneously (dimmed when not active)
+//   • Transit segments coloured per type (train=green, jeepney=orange, bus=teal, walk=grey dashed)
+//   • Origin (A) and destination (B) SVG teardrop pins
+//   • Real GPS blue-dot pulsing marker
+//   • Crime-zone hazard circles (red/orange) with emoji labels
+//   • Flood-zone hazard circles (blue shades) with emoji labels
+//   • Community-report incident circles
+//   • Safe-spot POI markers (hospital, police, pharmacy, etc.)
 class _MapLayer extends StatelessWidget {
   final MapController mapCtrl;
   const _MapLayer({required this.mapCtrl});
 
+  // ── Safety score → line colour (mirrors safetyLineColor in JS) ─────────────
+  // ── Flood risk → colour (mirrors blueColors in JS) ─────────────────────────
+  static Color _floodColor(String risk) {
+    switch (risk) {
+      case 'high':
+        return const Color(0xFF0D2B6B);
+      case 'moderate':
+        return const Color(0xFF1565C0);
+      default:
+        return const Color(0xFF1976D2);
+    }
+  }
+
+  // ── Crime risk → colour (mirrors _zoneStyle in JS) ─────────────────────────
+  static Color _crimeColor(String risk) {
+    return risk == 'high' ? const Color(0xFFCB4335) : const Color(0xFFB7950B);
+  }
+
+  // ── Incident type → colour ──────────────────────────────────────────────────
+  static Color _incidentColor(String type) {
+    switch (type) {
+      case 'fire':
+        return const Color(0xFFC0392B);
+      case 'flood':
+      case 'flooding':
+        return const Color(0xFF1A5276);
+      case 'earthquake':
+        return const Color(0xFF784212);
+      case 'road_closed':
+        return const Color(0xFFE67E22);
+      case 'accident':
+        return const Color(0xFFE74C3C);
+      default:
+        return const Color(0xFF7F8C8D);
+    }
+  }
+
+  static double _incidentRadius(String type) {
+    switch (type) {
+      case 'fire':
+        return 500;
+      case 'flood':
+      case 'flooding':
+        return 600;
+      case 'earthquake':
+        return 4000;
+      case 'road_closed':
+        return 180;
+      case 'accident':
+        return 220;
+      default:
+        return 300;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<ExploreController>();
-    final route = ctrl.activeRoute;
-    final polylines = <Polyline>[];
-    final markers = <Marker>[];
+    final active = ctrl.activeRoute;
 
-    if (route != null) {
+    // ── 1. Build polylines for ALL routes ─────────────────────────────────────
+    final polylines = <Polyline>[];
+
+    for (final route in ctrl.routes) {
+      final isActive = active != null && route.id == active.id;
+      final opacity    = isActive ? 1.0 : 0.18;
+      final fallbackC  = route.safetyMeta.color;
+
       final pts = route.polyline.map((p) => LatLng(p[0], p[1])).toList();
-      polylines.add(
-        Polyline(points: pts, color: route.safetyMeta.color, strokeWidth: 5),
-      );
-      if (pts.isNotEmpty) {
-        markers.add(
-          Marker(
-            point: pts.first,
-            width: 40,
-            height: 40,
-            child: _mapPin(AppColors.teal, Icons.person_pin_circle_rounded),
-          ),
-        );
-        markers.add(
-          Marker(
-            point: pts.last,
-            width: 40,
-            height: 40,
-            child: _mapPin(route.safetyMeta.color, Icons.location_pin),
+      if (pts.length >= 2) {
+        polylines.add(
+          Polyline(
+            points: pts,
+            color: fallbackC.withValues(alpha: opacity),
+            strokeWidth: isActive ? 5.5 : 3.5,
           ),
         );
       }
     }
 
-    // Real GPS position marker (shown when location is enabled)
+    // ── 2. Hazard circles: crime zones, flood zones, incidents, reports ────────
+    final circles = <CircleMarker>[];
+
+    if (active != null) {
+      // Crime zones from route
+      for (final zone in (active.routeCrimeZones ?? [])) {
+        final c = zone['coords'] as List?;
+        if (c == null || c.length < 4) continue;
+        final risk = zone['risk'] as String? ?? 'moderate';
+        final midLat = ((c[0] as num) + (c[1] as num)) / 2;
+        final midLon = ((c[2] as num) + (c[3] as num)) / 2;
+        final latM = ((c[1] as num) - (c[0] as num)).abs() * 111000;
+        final lonM =
+            ((c[3] as num) - (c[2] as num)).abs() *
+            111000 *
+            _cos(midLat * 3.14159 / 180);
+        final r = (latM / 2 > lonM / 2 ? latM / 2 : lonM / 2)
+            .clamp(0, 700)
+            .toDouble();
+        final color = _crimeColor(risk);
+        circles.add(
+          CircleMarker(
+            point: LatLng(midLat.toDouble(), midLon.toDouble()),
+            radius: r,
+            useRadiusInMeter: true,
+            color: color.withValues(alpha: risk == 'high' ? 0.09 : 0.045),
+            borderColor: color.withValues(alpha: risk == 'high' ? 0.88 : 0.78),
+            borderStrokeWidth: risk == 'high' ? 2.0 : 1.2,
+          ),
+        );
+      }
+
+      // Flood zones from route (only rain-active)
+      for (final zone in (active.floodZonesMap ?? [])) {
+        final rainActive = zone['rain_active'] != false;
+        if (!rainActive) continue;
+        final lat = (zone['lat'] as num?)?.toDouble();
+        final lon = (zone['lon'] as num?)?.toDouble();
+        if (lat == null || lon == null) continue;
+        final risk = zone['risk'] as String? ?? 'low';
+        final radius = risk == 'high'
+            ? 400.0
+            : risk == 'moderate'
+            ? 330.0
+            : 265.0;
+        final fillOp = risk == 'high'
+            ? 0.18
+            : risk == 'moderate'
+            ? 0.13
+            : 0.09;
+        final color = _floodColor(risk);
+        circles.add(
+          CircleMarker(
+            point: LatLng(lat, lon),
+            radius: radius,
+            useRadiusInMeter: true,
+            color: color.withValues(alpha: fillOp),
+            borderColor: color.withValues(alpha: 0.85),
+            borderStrokeWidth: 2.5,
+          ),
+        );
+      }
+    }
+
+    // Community report / incident circles (from ctrl.hotspots — already populated
+    // by fetchSafetyOverlays and setAlertData earthquake hotspots)
+    for (final h in ctrl.hotspots) {
+      circles.add(
+        CircleMarker(
+          point: LatLng(h.lat, h.lng),
+          radius: h.radiusMeters,
+          useRadiusInMeter: true,
+          color: h.color,
+          borderColor: h.color.withValues(alpha: 1.0),
+          borderStrokeWidth: 1.5,
+        ),
+      );
+    }
+
+    // Incident circles from /api/routes response
+    for (final inc in ctrl.incidents) {
+      final lat = (inc['lat'] as num?)?.toDouble();
+      final lon = (inc['lon'] as num?)?.toDouble();
+      if (lat == null || lon == null) continue;
+      final type = inc['type'] as String? ?? 'other';
+      final color = _incidentColor(type);
+      final radius =
+          (inc['radius_m'] as num?)?.toDouble() ?? _incidentRadius(type);
+      circles.add(
+        CircleMarker(
+          point: LatLng(lat, lon),
+          radius: radius,
+          useRadiusInMeter: true,
+          color: color.withValues(alpha: 0.14),
+          borderColor: color.withValues(alpha: 0.85),
+          borderStrokeWidth: 2.0,
+        ),
+      );
+    }
+
+    // ── 3. Markers ────────────────────────────────────────────────────────────
+    final markers = <Marker>[];
+
+    // ── Origin A-pin and destination B-pin ───────────────────────────────────
+    // Use server-resolved geocoded coords from the last search.
+    // These are set as soon as searchRoutes() completes — no need to wait
+    // for the user to select a route (activeRoute).
+    // Fall back to polyline endpoints only if resolved coords aren't available.
+    final origLat = ctrl.resolvedOrigLat
+        ?? (active != null && active.polyline.isNotEmpty ? active.polyline.first[0] : null);
+    final origLon = ctrl.resolvedOrigLon
+        ?? (active != null && active.polyline.isNotEmpty ? active.polyline.first[1] : null);
+    final destLat = ctrl.resolvedDestLat
+        ?? (active != null && active.polyline.isNotEmpty ? active.polyline.last[0] : null);
+    final destLon = ctrl.resolvedDestLon
+        ?? (active != null && active.polyline.isNotEmpty ? active.polyline.last[1] : null);
+
+    if (origLat != null && origLon != null) {
+      markers.add(Marker(
+        point:     LatLng(origLat, origLon),
+        width:     34,
+        height:    34,
+        alignment: Alignment.bottomCenter,
+        child:     _svgPin(const Color(0xFF0984E3), 'A'),
+      ));
+    }
+    if (destLat != null && destLon != null) {
+      markers.add(Marker(
+        point:     LatLng(destLat, destLon),
+        width:     34,
+        height:    34,
+        alignment: Alignment.bottomCenter,
+        child:     _svgPin(const Color(0xFF6C5CE7), 'B'),
+      ));
+    }
+
+    // GPS blue-dot (real device location)
     if (ctrl.hasLocation && ctrl.lat != null && ctrl.lng != null) {
       markers.add(
         Marker(
@@ -1833,26 +2030,84 @@ class _MapLayer extends StatelessWidget {
       );
     }
 
+    // ── Crime / flood emoji pulse markers for active route ────────────────────
+    if (active != null) {
+      for (final zone in (active.routeCrimeZones ?? [])) {
+        final c = zone['coords'] as List?;
+        if (c == null || c.length < 4) continue;
+        final risk = zone['risk'] as String? ?? 'moderate';
+        final midLat = ((c[0] as num) + (c[1] as num)) / 2;
+        final midLon = ((c[2] as num) + (c[3] as num)) / 2;
+        final color = _crimeColor(risk);
+        final emoji = risk == 'high' ? '⚠️' : '🔶';
+        final name = zone['name'] as String? ?? 'Crime Zone';
+        markers.add(
+          Marker(
+            point: LatLng(midLat.toDouble(), midLon.toDouble()),
+            width: 60,
+            height: 26,
+            child: _riskPill(emoji, name, color),
+          ),
+        );
+      }
+
+      for (final zone in (active.floodZonesMap ?? [])) {
+        if (zone['rain_active'] == false) continue;
+        final lat = (zone['lat'] as num?)?.toDouble();
+        final lon = (zone['lon'] as num?)?.toDouble();
+        if (lat == null || lon == null) continue;
+        final risk = zone['risk'] as String? ?? 'low';
+        final color = _floodColor(risk);
+        final emoji = risk == 'high'
+            ? '🌊'
+            : risk == 'moderate'
+            ? '💧'
+            : '💦';
+        final label =
+            zone['label'] as String? ??
+            (risk == 'high'
+                ? 'Flooding!'
+                : risk == 'moderate'
+                ? 'Flooding'
+                : 'Low Flood');
+        markers.add(
+          Marker(
+            point: LatLng(lat, lon),
+            width: 70,
+            height: 26,
+            child: _riskPill(emoji, label, color),
+          ),
+        );
+      }
+    }
+
+    // Incident emoji markers
+    for (final inc in ctrl.incidents) {
+      final lat = (inc['lat'] as num?)?.toDouble();
+      final lon = (inc['lon'] as num?)?.toDouble();
+      if (lat == null || lon == null) continue;
+      final type = inc['type'] as String? ?? 'other';
+      final color = _incidentColor(type);
+      final emoji = _incidentEmoji(type);
+      final title = inc['title'] as String? ?? type;
+      markers.add(
+        Marker(
+          point: LatLng(lat, lon),
+          width: 70,
+          height: 26,
+          child: _riskPill(emoji, title, color),
+        ),
+      );
+    }
+
+    // ── Safe-spot POI markers ─────────────────────────────────────────────────
     final poiMarkers = ctrl.pois
         .map(
           (poi) => Marker(
             point: LatLng(poi.lat, poi.lng),
-            width: 36,
-            height: 36,
+            width: 32,
+            height: 32,
             child: _poiPin(poi.color, poi.icon, poi.label),
-          ),
-        )
-        .toList();
-
-    final circles = ctrl.hotspots
-        .map(
-          (h) => CircleMarker(
-            point: LatLng(h.lat, h.lng),
-            radius: h.radiusMeters,
-            useRadiusInMeter: true,
-            color: h.color,
-            borderColor: h.color.withValues(alpha: 1.0),
-            borderStrokeWidth: 1.5,
           ),
         )
         .toList();
@@ -1873,60 +2128,200 @@ class _MapLayer extends StatelessWidget {
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.ligtas.explore',
         ),
+        // Hazard circles go BELOW polylines and markers (mirrors hazardCircles pane)
         if (circles.isNotEmpty) CircleLayer(circles: circles),
+        // Route polylines
         if (polylines.isNotEmpty) PolylineLayer(polylines: polylines),
+        // Risk label pills and incident markers (hazardMarkers pane)
         if (markers.isNotEmpty) MarkerLayer(markers: markers),
+        // Safe-spot POIs on top
         if (poiMarkers.isNotEmpty) MarkerLayer(markers: poiMarkers),
       ],
     );
   }
 
-  Widget _gpsPin() => Container(
-    width: 20,
-    height: 20,
-    decoration: BoxDecoration(
-      color: AppColors.teal,
-      shape: BoxShape.circle,
-      border: Border.all(color: Colors.white, width: 3),
-      boxShadow: [
-        BoxShadow(
-          color: AppColors.teal.withValues(alpha: 0.5),
-          blurRadius: 12,
-          spreadRadius: 2,
+  // ── Pin marker: circle head + triangle tail ────────────────────────────────
+  Widget _svgPin(Color color, String letter) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2.5),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.5),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Text(
+              letter,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                height: 1,
+              ),
+            ),
+          ),
         ),
+        _TrianglePainter(color: color),
       ],
+    );
+  }
+
+  // ── GPS pulsing blue dot ───────────────────────────────────────────────────
+  Widget _gpsPin() => Center(
+    child: Container(
+      width: 18,
+      height: 18,
+      decoration: BoxDecoration(
+        color: AppColors.teal,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 3),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.teal.withValues(alpha: 0.5),
+            blurRadius: 12,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
     ),
   );
 
+  // ── Risk label pill (mirrors mkRiskIcon / mkFloodIcon in JS) ──────────────
+  Widget _riskPill(String emoji, String label, Color color) {
+    final short = label.length > 12 ? '${label.substring(0, 11)}…' : label;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.45),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.5),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 10)),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              short,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                height: 1,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Safe-spot POI pin ─────────────────────────────────────────────────────
   Widget _poiPin(Color color, IconData icon, String label) => Tooltip(
     message: label,
     child: Container(
-      width: 32,
-      height: 32,
+      width: 28,
+      height: 28,
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
+        color: color,
         shape: BoxShape.circle,
-        border: Border.all(color: color, width: 1.5),
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: Icon(icon, color: color, size: 16),
+      child: Icon(icon, color: Colors.white, size: 14),
     ),
   );
 
-  Widget _mapPin(Color color, IconData icon) => Container(
-    decoration: BoxDecoration(
-      color: color,
-      shape: BoxShape.circle,
-      border: Border.all(color: Colors.white, width: 2.5),
-      boxShadow: [
-        BoxShadow(
-          color: color.withValues(alpha: 0.4),
-          blurRadius: 8,
-          offset: const Offset(0, 2),
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  static String _incidentEmoji(String type) {
+    switch (type) {
+      case 'fire':
+        return '🔥';
+      case 'flood':
+      case 'flooding':
+        return '🌊';
+      case 'earthquake':
+        return '🌍';
+      case 'road_closed':
+        return '🚧';
+      case 'accident':
+        return '💥';
+      default:
+        return '⚠️';
+    }
+  }
+
+  static double _cos(double radians) {
+    // Simple Taylor approximation good enough for small angles in km scale
+    double x = radians;
+    double result = 1.0;
+    double term = 1.0;
+    for (int i = 1; i <= 6; i++) {
+      term *= -x * x / (2 * i * (2 * i - 1));
+      result += term;
+    }
+    return result;
+  }
+}
+
+// ── Teardrop SVG pin painter (matches mkPin in index.html) ───────────────────
+// ── Simple triangle tail for map pin ─────────────────────────────────────────
+// Triangle tail drawn with a rotated border trick — zero CustomPainter/Path
+class _TrianglePainter extends StatelessWidget {
+  final Color color;
+  const _TrianglePainter({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 10,
+      height: 10,
+      child: Center(
+        child: Transform.rotate(
+          angle: 0.785398, // 45 degrees
+          child: Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: const BorderRadius.only(
+                bottomRight: Radius.circular(2),
+              ),
+            ),
+          ),
         ),
-      ],
-    ),
-    child: Icon(icon, color: Colors.white, size: 20),
-  );
+      ),
+    );
+  }
 }
 
 // ── Nav header (state 4) ─────────────────────────────────────────────────────

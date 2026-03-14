@@ -87,6 +87,11 @@ class ApiClient {
       'seismic_banner': seismicBanner.toString(),
       'weather_risk': weatherRisk.toString(),
       'flood_risk': floodRisk.toString(),
+      // Resolved geocoded coordinates for A/B map pins
+      'orig_lat': decoded['orig_lat'],
+      'orig_lon': decoded['orig_lon'],
+      'dest_lat': decoded['dest_lat'],
+      'dest_lon': decoded['dest_lon'],
     };
   }
 
@@ -185,6 +190,19 @@ class ApiClient {
       floodWarning: r['flood_warning'] as String?,
       crimeWarning: r['crime_warning'] as String?,
       profileWarnings: r['profile_warnings'] as List<dynamic>?,
+      // ── Map overlay data for _MapLayer ────────────────────────────────────
+      // route_crime_zones: [{ risk, name, summary, coords:[latMin,latMax,lonMin,lonMax] }]
+      routeCrimeZones: (r['route_crime_zones'] is List)
+          ? (r['route_crime_zones'] as List)
+                .whereType<Map<String, dynamic>>()
+                .toList()
+          : null,
+      // flood_zones_map: [{ lat, lon, risk, label, depth_m, rain_active }]
+      floodZonesMap: (r['flood_zones_map'] is List)
+          ? (r['flood_zones_map'] as List)
+                .whereType<Map<String, dynamic>>()
+                .toList()
+          : null,
     );
   }
 
@@ -645,6 +663,7 @@ class ApiClient {
   /// ────────────────────────────────────────────────────────────────────────
 
   /// Fetch trusted SOS contacts for the current user.
+  /// Returns empty list if unauthenticated or endpoint unavailable.
   Future<List<Map<String, dynamic>>> getSosContacts({String? token}) async {
     try {
       final headers = {
@@ -654,9 +673,9 @@ class ApiClient {
 
       final resp = await http.get(_uri('/api/sos/contacts'), headers: headers);
 
-      if (resp.statusCode != 200) {
-        throw Exception('Failed to fetch SOS contacts');
-      }
+      // 401 = session not established yet — not an error, just not logged in
+      if (resp.statusCode == 401) return [];
+      if (resp.statusCode != 200) return [];
 
       final decoded = jsonDecode(resp.body);
       if (decoded is Map<String, dynamic>) {
@@ -667,7 +686,7 @@ class ApiClient {
       }
       return [];
     } catch (e) {
-      rethrow;
+      return []; // silently degrade — SOS contacts are non-critical on load
     }
   }
 

@@ -432,7 +432,7 @@ void _showReportDialog(BuildContext context) {
                       const lat = 14.5995;
                       const lon = 120.9842;
 
-                      await ApiClient.instance.submitReportJson(
+                      await ApiClient.instance.submitReport(
                         lat: lat,
                         lon: lon,
                         reportType: selectedType!,

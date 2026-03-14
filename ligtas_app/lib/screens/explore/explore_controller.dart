@@ -484,6 +484,26 @@ class ExploreController extends ChangeNotifier {
     }
   }
 
+  // ── Transport mode ─────────────────────────────────────────────
+  // 'transit' | 'walk' | 'car' | 'motorcycle'
+  String _activeMode = 'transit';
+  String get activeMode => _activeMode;
+
+  void setMode(String mode) {
+    _activeMode = mode;
+    notifyListeners();
+  }
+
+  // ── Resolved geocoded coordinates from last route search ──────
+  // Populated from orig_lat/orig_lon/dest_lat/dest_lon in API response.
+  // Used by _MapLayer to place the A and B pins accurately.
+  double? _resolvedOrigLat, _resolvedOrigLon;
+  double? _resolvedDestLat, _resolvedDestLon;
+  double? get resolvedOrigLat => _resolvedOrigLat;
+  double? get resolvedOrigLon => _resolvedOrigLon;
+  double? get resolvedDestLat => _resolvedDestLat;
+  double? get resolvedDestLon => _resolvedDestLon;
+
   // ── Search inputs ──────────────────────────────────────────────
   String _currentLocationText = '';
   String _destinationText = '';
@@ -581,14 +601,24 @@ class ExploreController extends ChangeNotifier {
       final response = await ApiClient.instance.searchRoutesWithAlerts(
         origin: _currentLocationText,
         destination: _destinationText,
-        mode: 'commute',
+        mode: _activeMode,
         extraParams: extraParams,
       );
 
-      final routes = (response['routes'] as List?)?.cast<RouteModel>() ?? [];
+      final rawRoutes = response['routes'];
+      final routes = rawRoutes is List<RouteModel>
+          ? rawRoutes
+          : (rawRoutes as List?)?.whereType<RouteModel>().toList() ?? [];
 
       if (routes.isNotEmpty) {
         setAllRoutes(routes);
+
+        // Store server-resolved geocoded coordinates for map pins
+        _resolvedOrigLat = (response['orig_lat'] as num?)?.toDouble();
+        _resolvedOrigLon = (response['orig_lon'] as num?)?.toDouble();
+        _resolvedDestLat = (response['dest_lat'] as num?)?.toDouble();
+        _resolvedDestLon = (response['dest_lon'] as num?)?.toDouble();
+        notifyListeners(); // repaint map with A/B pins immediately
 
         setAlertData(
           incidents:
@@ -675,7 +705,9 @@ class ExploreController extends ChangeNotifier {
         floodRisk: 'none',
       );
       showToast('No routes from server — showing sample routes', 'teal');
-    } catch (_) {
+    } catch (e, stack) {
+      debugPrint('[searchRoutes] ERROR: $e');
+      debugPrint('[searchRoutes] STACK: $stack');
       _allRoutes = mockRoutes;
       _applyFilters();
       setAlertData(
@@ -699,6 +731,10 @@ class ExploreController extends ChangeNotifier {
     _activeRoute = null;
     _filteredRoutes = List.from(_allRoutes);
     advisory = null;
+    _resolvedOrigLat = null;
+    _resolvedOrigLon = null;
+    _resolvedDestLat = null;
+    _resolvedDestLon = null;
     showToast('Search cleared', 'teal');
     notifyListeners();
   }

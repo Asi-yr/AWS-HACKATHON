@@ -676,6 +676,7 @@ class _SearchOverlayState extends State<_SearchOverlay> {
                 onBack: _back,
                 onUseCurrentLocation: _useCurrentLocation,
               ),
+              const _ModeSelectorRow(),
               Expanded(
                 child: _SuggestionList(
                   staticItems: _filteredStatic,
@@ -692,6 +693,83 @@ class _SearchOverlayState extends State<_SearchOverlay> {
       ),
     );
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MODE SELECTOR ROW — Transit / Walk / Car / Motorcycle
+// ═══════════════════════════════════════════════════════════════
+
+class _ModeSelectorRow extends StatelessWidget {
+  const _ModeSelectorRow();
+
+  static const _modes = [
+    _ModeOption(key: 'transit', label: 'Transit', emoji: '🚌'),
+    _ModeOption(key: 'walk', label: 'Walk', emoji: '🚶'),
+    _ModeOption(key: 'car', label: 'Car', emoji: '🚗'),
+    _ModeOption(key: 'motorcycle', label: 'Motorcycle', emoji: '🏍️'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<ExploreController>();
+    final isDark = context.watch<ThemeController>().isDark;
+
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.bg(isDark),
+        border: Border(bottom: BorderSide(color: AppColors.border(isDark))),
+      ),
+      child: Row(
+        children: _modes.map((m) {
+          final isActive = ctrl.activeMode == m.key;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => ctrl.setMode(m.key),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: isActive ? AppColors.teal : AppColors.card2(isDark),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isActive ? AppColors.teal : AppColors.border(isDark),
+                  ),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(m.emoji, style: const TextStyle(fontSize: 14)),
+                    const SizedBox(height: 1),
+                    Text(
+                      m.label,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: isActive
+                            ? Colors.white
+                            : AppColors.text2(isDark),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _ModeOption {
+  final String key, label, emoji;
+  const _ModeOption({
+    required this.key,
+    required this.label,
+    required this.emoji,
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
