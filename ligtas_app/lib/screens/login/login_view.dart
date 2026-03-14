@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_router.dart';
 import '../../core/session_manager.dart';
+import '../../core/api_client.dart';
 
 // ════════════════════════════════════════════════════════════════
 // LOGIN / REGISTRATION SCREEN  —  PLACEHOLDER
@@ -29,6 +30,124 @@ class LoginView extends StatefulWidget {
 
 class _LoginViewState extends State<LoginView> {
   bool _isLogin = true;
+  bool _isLoading = false;
+
+  late final TextEditingController _nameController;
+  late final TextEditingController _emailController;
+  late final TextEditingController _passwordController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController();
+    _emailController = TextEditingController();
+    _passwordController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleLogin() async {
+    final username = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    if (username.isEmpty || password.isEmpty) {
+      _showError('Please enter email and password');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final response = await ApiClient.instance.login(
+        username: username,
+        password: password,
+      );
+
+      if (!mounted) return;
+
+      if (response['ok'] == true && response['token'] != null) {
+        // Save token and user info
+        await SessionManager.instance.setLoggedIn(
+          true,
+          token: response['token'],
+          username: response['user'],
+        );
+        await SessionManager.instance.setLastRoute(AppRouter.explore);
+
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(context, AppRouter.explore);
+      } else {
+        _showError(response['message'] ?? 'Login failed');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _showError('Error: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _handleRegister() async {
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    if (name.isEmpty || email.isEmpty || password.isEmpty) {
+      _showError('Please fill all fields');
+      return;
+    }
+
+    if (password.length < 6) {
+      _showError('Password must be at least 6 characters');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final response = await ApiClient.instance.register(
+        username: name,
+        password: password,
+        email: email,
+      );
+
+      if (!mounted) return;
+
+      if (response['ok'] == true && response['token'] != null) {
+        // Auto-login after successful registration
+        await SessionManager.instance.setLoggedIn(
+          true,
+          token: response['token'],
+          username: response['user'],
+        );
+        await SessionManager.instance.setLastRoute(AppRouter.survey);
+
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(context, AppRouter.survey);
+      } else {
+        _showError(response['message'] ?? 'Registration failed');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _showError('Error: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.safeRed,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -86,31 +205,20 @@ class _LoginViewState extends State<LoginView> {
 
               // ── Fields ────────────────────────────────────────
               if (!_isLogin) ...[
-                _field('Full Name', Icons.person_outline_rounded, false),
+                _field('Full Name', Icons.person_outline_rounded, false, _nameController),
                 const SizedBox(height: 14),
               ],
-              _field('Email Address', Icons.email_outlined, false),
+              _field('Email Address', Icons.email_outlined, false, _emailController),
               const SizedBox(height: 14),
-              _field('Password', Icons.lock_outline_rounded, true),
+              _field('Password', Icons.lock_outline_rounded, true, _passwordController),
               const SizedBox(height: 28),
 
               // ── Primary CTA ───────────────────────────────────
-              // BACKEND: replace with real auth call (see header comment)
+              // BACKEND: Connected to /api/auth/login and /api/auth/register
               _PrimaryButton(
                 label: _isLogin ? 'Sign In' : 'Create Account',
-                onTap: () {
-                  if (_isLogin) {
-                    // Returning user → mark logged in and go to main shell
-                    SessionManager.instance.setLoggedIn(true);
-                    SessionManager.instance.setLastRoute(AppRouter.explore);
-                    Navigator.pushReplacementNamed(context, AppRouter.explore);
-                  } else {
-                    // New user → mark logged in and go to onboarding survey
-                    SessionManager.instance.setLoggedIn(true);
-                    SessionManager.instance.setLastRoute(AppRouter.survey);
-                    Navigator.pushReplacementNamed(context, AppRouter.survey);
-                  }
-                },
+                isLoading: _isLoading,
+                onTap: _isLoading ? null : (_isLogin ? _handleLogin : _handleRegister),
               ),
               const SizedBox(height: 20),
 
@@ -161,7 +269,8 @@ class _LoginViewState extends State<LoginView> {
     ),
   );
 
-  Widget _field(String hint, IconData icon, bool obscure) => TextField(
+  Widget _field(String hint, IconData icon, bool obscure, TextEditingController controller) => TextField(
+    controller: controller,
     obscureText: obscure,
     style: GoogleFonts.dmSans(fontSize: 14, color: AppColors.textLight),
     decoration: InputDecoration(
@@ -186,8 +295,13 @@ class _LoginViewState extends State<LoginView> {
 
 class _PrimaryButton extends StatelessWidget {
   final String label;
-  final VoidCallback onTap;
-  const _PrimaryButton({required this.label, required this.onTap});
+  final VoidCallback? onTap;
+  final bool isLoading;
+  const _PrimaryButton({
+    required this.label,
+    required this.onTap,
+    this.isLoading = false,
+  });
   @override
   Widget build(BuildContext context) => SizedBox(
     width: double.infinity,
@@ -199,9 +313,18 @@ class _PrimaryButton extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         elevation: 0,
       ),
-      onPressed: onTap,
-      child: Text(label,
-        style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w800)),
+      onPressed: isLoading ? null : onTap,
+      child: isLoading
+        ? const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+          )
+        : Text(label,
+            style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w800)),
     ),
   );
 }
