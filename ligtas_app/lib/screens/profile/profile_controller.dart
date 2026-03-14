@@ -221,14 +221,27 @@ class ProfileController extends ChangeNotifier {
   }
 
   // ── Edit Profile (password handled separately in Security sheet) ──
-  void saveProfile({
+  Future<void> saveProfile({
     required String name,
     required String username,
     required String commuterType,
-  }) {
+  }) async {
     user = user.copyWith(name: name, username: username, role: commuterType, commuterType: commuterType);
-    showToast("Profile updated!", "green");
     notifyListeners();
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token != null && token.isNotEmpty) {
+        await ApiClient.instance.saveSettings(
+          defaultCommuterType: commuterType,
+          transportPreference: user.preferences.transport,
+          displayName: name,
+          token: token,
+        );
+      }
+    } catch (e) {
+      debugPrint('[ProfileController] Error saving profile to backend: $e');
+    }
+    showToast("Profile updated!", "green");
   }
 
   // ── Change Password ───────────────────────────────────────────
@@ -448,6 +461,11 @@ class ProfileController extends ChangeNotifier {
   void closeEmail()    { emailOpen = false;    notifyListeners(); }
   void openTwoFA()     { twoFAOpen = true;     notifyListeners(); }
   void closeTwoFA()    { twoFAOpen = false;    notifyListeners(); }
+
+  // ── SOS Contacts Panel state ──────────────────────────────────
+  bool sosContactsOpen = false;
+  void openSosContacts()  { sosContactsOpen = true;  loadSosContacts(); notifyListeners(); }
+  void closeSosContacts() { sosContactsOpen = false; notifyListeners(); }
 
   void toggleTheme(BuildContext context) {
     context.read<ThemeController>().toggle();

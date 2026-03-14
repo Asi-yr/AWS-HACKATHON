@@ -65,6 +65,18 @@ class _ProfileBody extends StatelessWidget {
                 const RowDivider(),
                 ChevronRow(icon: Icons.notifications_rounded, title: 'Notifications', subtitle: 'Alerts and announcements', onTap: ctrl.showComingSoon),
               ]),
+              const SectionLabel('EMERGENCY'),
+              SettingsCard(children: [
+                ChevronRow(
+                  icon: Icons.emergency_share_rounded,
+                  title: 'SOS Contacts',
+                  subtitle: 'Trusted contacts for emergency alerts',
+                  trailing: ctrl.sosContacts.isNotEmpty
+                      ? '${ctrl.sosContacts.length}'
+                      : null,
+                  onTap: ctrl.openSosContacts,
+                ),
+              ]),
               const SectionLabel('ACCOUNT'),
               SettingsCard(children: [
                 ChevronRow(icon: Icons.lock_rounded, title: 'Password & Security', subtitle: 'Password, Email, Two-Factor Auth', onTap: ctrl.openSecurity),
@@ -74,11 +86,12 @@ class _ProfileBody extends StatelessWidget {
             ],
           )),
         ]),
-        if (ctrl.travelHistoryOpen) const _TravelHistoryPanel(),
-        if (ctrl.securityOpen)     const _SecurityPanel(),
-        if (ctrl.passwordOpen)     const _PasswordScreen(),
-        if (ctrl.emailOpen)        const _EmailScreen(),
-        if (ctrl.twoFAOpen)        const _TwoFAScreen(),
+        if (ctrl.travelHistoryOpen)  const _TravelHistoryPanel(),
+        if (ctrl.sosContactsOpen)    const _SosContactsPanel(),
+        if (ctrl.securityOpen)       const _SecurityPanel(),
+        if (ctrl.passwordOpen)       const _PasswordScreen(),
+        if (ctrl.emailOpen)          const _EmailScreen(),
+        if (ctrl.twoFAOpen)          const _TwoFAScreen(),
         if (ctrl.comingSoon) Positioned.fill(child: ComingSoonOverlay(onDismiss: ctrl.hideComingSoon)),
         LigtasToast(visible: ctrl.toastVis, message: ctrl.toastMsg, type: ctrl.toastType),
       ]),
@@ -130,7 +143,7 @@ class _ProfileHero extends StatelessWidget {
               border: Border.all(color: AppColors.primaryTeal(context.isDark), width: 2.5)),
             child: ClipOval(child: user.avatarUrl != null
               ? Image.network(user.avatarUrl!, fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => _fallback())
+                  errorBuilder: (c, e, s) => _fallback())
               : _fallback()),
           ),
           Positioned(bottom: 0, right: 0,
@@ -280,7 +293,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                   border: Border.all(color: AppColors.primaryTeal(context.isDark), width: 2.5)),
                 child: ClipOval(child: ctrl.user.avatarUrl != null
                   ? Image.network(ctrl.user.avatarUrl!, fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => _avatarFallback())
+                      errorBuilder: (c, e, s) => _avatarFallback())
                   : _avatarFallback()),
               ),
               Positioned.fill(child: ClipOval(child: Container(
@@ -767,6 +780,224 @@ Widget _inputField(String label, TextEditingController c,
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SOS Contacts Panel
+// ─────────────────────────────────────────────────────────────────────────────
+class _SosContactsPanel extends StatelessWidget {
+  const _SosContactsPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<ProfileController>();
+    final t    = context.lt;
+    return Positioned.fill(
+      child: Material(
+        color: t.bg,
+        child: Column(children: [
+          LigtasHeader(
+            title: 'SOS Contacts',
+            leading: GestureDetector(
+              onTap: ctrl.closeSosContacts,
+              child: Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: t.border)),
+                child: Icon(Icons.arrow_back_rounded, size: 16, color: t.text),
+              ),
+            ),
+            trailing: GestureDetector(
+              onTap: () => _showAddContactSheet(context, ctrl, t),
+              child: Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  color: AppColors.tealDim,
+                  border: Border.all(color: AppColors.teal.withValues(alpha: 0.4))),
+                child: Icon(Icons.add_rounded, size: 18, color: AppColors.teal),
+              ),
+            ),
+          ),
+          Expanded(child: ctrl.sosContacts.isEmpty
+            ? Center(child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 56, height: 56,
+                    decoration: BoxDecoration(
+                      color: AppColors.redDim,
+                      borderRadius: BorderRadius.circular(16)),
+                    child: Icon(Icons.emergency_share_rounded,
+                      color: AppColors.safeRed, size: 28)),
+                  const SizedBox(height: 14),
+                  Text('No Emergency Contacts',
+                    style: t.title(size: 15)),
+                  const SizedBox(height: 6),
+                  Text('Add trusted contacts who will be\nalerted in an SOS emergency.',
+                    style: t.body(size: 13, color: t.text2),
+                    textAlign: TextAlign.center),
+                  const SizedBox(height: 20),
+                  TealButton(
+                    label: 'Add Contact',
+                    fullWidth: false,
+                    onTap: () => _showAddContactSheet(context, ctrl, t),
+                  ),
+                ],
+              ))
+            : ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: ctrl.sosContacts.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 8),
+                itemBuilder: (_, i) {
+                  final c = ctrl.sosContacts[i];
+                  final name  = c['name']?.toString() ?? '';
+                  final type  = c['contact_type']?.toString() ?? 'phone';
+                  final value = c['contact_value']?.toString() ?? '';
+                  final id    = c['id'] as int? ?? 0;
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: t.card2,
+                      borderRadius: BorderRadius.circular(13),
+                      border: Border.all(color: t.border)),
+                    child: Row(children: [
+                      Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(
+                          color: AppColors.redDim,
+                          borderRadius: BorderRadius.circular(11)),
+                        child: Icon(
+                          type == 'email' ? Icons.email_rounded : Icons.phone_rounded,
+                          color: AppColors.safeRed, size: 20)),
+                      const SizedBox(width: 12),
+                      Expanded(child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(name, style: t.title(size: 13)),
+                          Text(value, style: t.body(size: 12, color: t.text2)),
+                        ],
+                      )),
+                      IconButton(
+                        icon: Icon(Icons.delete_outline_rounded,
+                          size: 18, color: t.text2),
+                        onPressed: () => ctrl.removeSosContact(contactId: id),
+                      ),
+                    ]),
+                  );
+                },
+              )
+          ),
+        ]),
+      ),
+    );
+  }
+
+  void _showAddContactSheet(
+      BuildContext context, ProfileController ctrl, dynamic t) {
+    final nameCtrl  = TextEditingController();
+    final valueCtrl = TextEditingController();
+    String contactType = 'phone';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: ctrl,
+        child: StatefulBuilder(
+          builder: (ctx, setS) => Container(
+            padding: EdgeInsets.fromLTRB(
+              20, 0, 20,
+              MediaQuery.of(ctx).viewInsets.bottom + 28),
+            decoration: BoxDecoration(
+              color: t.card,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
+            child: SingleChildScrollView(child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(child: Container(
+                  width: 36, height: 4,
+                  margin: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: t.border,
+                    borderRadius: BorderRadius.circular(2)))),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Add SOS Contact', style: t.title()),
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, color: t.text2),
+                    onPressed: () => Navigator.pop(ctx)),
+                ]),
+                const SizedBox(height: 16),
+                _inputField('Full Name', nameCtrl, Icons.person_outline_rounded,
+                  false, null, t, ctx),
+                const SizedBox(height: 12),
+                Text('Contact Type',
+                  style: t.body(size: 12, w: FontWeight.w600, color: t.text2)),
+                const SizedBox(height: 6),
+                Row(children: [
+                  _typeChip('Phone', 'phone', contactType, AppColors.teal, t,
+                    () => setS(() => contactType = 'phone')),
+                  const SizedBox(width: 8),
+                  _typeChip('Email', 'email', contactType, AppColors.teal, t,
+                    () => setS(() => contactType = 'email')),
+                ]),
+                const SizedBox(height: 12),
+                _inputField(
+                  contactType == 'email' ? 'Email Address' : 'Phone Number',
+                  valueCtrl,
+                  contactType == 'email'
+                    ? Icons.email_outlined
+                    : Icons.phone_outlined,
+                  false, null, t, ctx),
+                const SizedBox(height: 24),
+                TealButton(
+                  label: 'Add Contact',
+                  onTap: () {
+                    final n = nameCtrl.text.trim();
+                    final v = valueCtrl.text.trim();
+                    if (n.isEmpty || v.isEmpty) return;
+                    Navigator.pop(ctx);
+                    ctrl.addSosContact(
+                      name: n,
+                      contactType: contactType,
+                      contactValue: v,
+                    );
+                  },
+                ),
+              ],
+            )),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _typeChip(String label, String value, String current,
+      Color teal, dynamic t, VoidCallback onTap) {
+    final active = current == value;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        decoration: BoxDecoration(
+          color: active ? teal.withValues(alpha: 0.12) : t.card2,
+          borderRadius: BorderRadius.circular(50),
+          border: Border.all(
+            color: active ? teal.withValues(alpha: 0.5) : t.border,
+            width: active ? 1.5 : 1)),
+        child: Text(label,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 13, fontWeight: FontWeight.w700,
+            color: active ? teal : t.text2)),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Travel History Panel
+// ─────────────────────────────────────────────────────────────────────────────
 class _TravelHistoryPanel extends StatelessWidget {
   const _TravelHistoryPanel();
 

@@ -96,6 +96,15 @@ class ExploreController extends ChangeNotifier {
       _locationPopupVisible = false;
       showToast('Location enabled', 'green');
       notifyListeners();
+      // Reverse-geocode coordinates to a human-readable address label
+      final addr = await ApiClient.instance.reverseGeocode(
+        lat: pos.latitude,
+        lon: pos.longitude,
+      );
+      if (addr.isNotEmpty) {
+        _currentLocationText = addr;
+        notifyListeners();
+      }
     } catch (e) {
       showToast('Could not get location — enter manually', 'red');
       _locationPopupVisible = false;
@@ -267,41 +276,6 @@ class ExploreController extends ChangeNotifier {
 
         setAdvisory(newAdvisory);
       }
-
-      // ── 2. Fetch safe spots → PoiModel markers ───────────────────────────────
-      // Uses the dedicated /api/safe-spots/flutter endpoint which returns clean
-      // JSON (no Leaflet JS). Results are mapped to PoiModel for the map layer.
-      try {
-        final spotsData = await ApiClient.instance.getSafeSpots(
-          lat: lat,
-          lon: lon,
-          token: token,
-        );
-
-        if (spotsData['ok'] == true) {
-          final spotList = spotsData['spots'] as List? ?? [];
-          for (final spot in spotList) {
-            if (spot is Map<String, dynamic>) {
-              final sLat  = (spot['lat'] as num?)?.toDouble() ?? 0.0;
-              final sLon  = (spot['lon'] as num?)?.toDouble() ?? 0.0;
-              final type  = spot['type']  as String? ?? '';
-              final label = spot['label'] as String? ?? 'Safe Spot';
-              newPois.add(PoiModel(
-                lat: sLat, lng: sLon,
-                label: label,
-                icon:  _iconForSpotType(type),
-                color: _colorForSpotType(type),
-              ));
-            }
-          }
-        }
-      } catch (e) {
-        // Safe spots are optional — silently degrade
-        debugPrint('[ExploreController] Safe spots fetch error: $e');
-      }
-
-      setHotspots(newHotspots);
-      setPois(newPois);
     } catch (e) {
       debugPrint('[ExploreController] Error fetching safety overlays: $e');
     }

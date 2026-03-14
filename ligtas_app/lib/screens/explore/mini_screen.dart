@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api_client.dart';
 import '../../core/app_colors.dart';
 import '../../core/theme_controller.dart';
 import '../../data/mock_data.dart';
@@ -434,6 +437,7 @@ class _SearchOverlayState extends State<_SearchOverlay> {
 
   List<MiniItem> _filteredItems = [];
   String _lastQuery = '___INIT___';
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -484,14 +488,36 @@ class _SearchOverlayState extends State<_SearchOverlay> {
     final query = _isOriginFocused ? _currentCtrl.text : _destCtrl.text;
     if (query == _lastQuery) return;
     _lastQuery = query;
-    setState(() {
-      _filteredItems = query.isEmpty
-          ? List.from(miniItems)
-          : _searchItems(query);
-    });
+
+    if (query.isEmpty) {
+      setState(() => _filteredItems = List.from(miniItems));
+      return;
+    }
+
+    // Show immediate local results while API call is in-flight
+    setState(() => _filteredItems = _localSearch(query));
+
+    // Debounce API call — wait 400ms after user stops typing
+    if (query.length >= 3) {
+      _debounce?.cancel();
+      _debounce = Timer(const Duration(milliseconds: 400), () {
+        _fetchApiSuggestions(query);
+      });
+    }
   }
 
-  List<MiniItem> _searchItems(String query) {
+  Future<void> _fetchApiSuggestions(String query) async {
+    final results = await ApiClient.instance.getSuggestions(query);
+    if (!mounted) return;
+    // Only apply if the query hasn't changed since the call was made
+    final current = _isOriginFocused ? _currentCtrl.text : _destCtrl.text;
+    if (current != query) return;
+    if (results.isNotEmpty) {
+      setState(() => _filteredItems = results);
+    }
+  }
+
+  List<MiniItem> _localSearch(String query) {
     final lowerQuery = query.toLowerCase().trim();
     final scored = miniItems.map((item) {
       final nameLower = item.name.toLowerCase();
@@ -511,6 +537,7 @@ class _SearchOverlayState extends State<_SearchOverlay> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _currentFocus.removeListener(_syncFocus);
     _destFocus.removeListener(_syncFocus);
     _currentCtrl.removeListener(_onSearchChanged);

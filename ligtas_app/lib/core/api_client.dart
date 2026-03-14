@@ -918,4 +918,93 @@ class ApiClient {
       rethrow;
     }
   }
+
+  /// Fetch location suggestions from backend Nominatim proxy.
+  /// Returns up to 6 results as [MiniItem]s (type=pin).
+  /// Falls back to empty list on any error or if query is < 3 chars.
+  Future<List<MiniItem>> getSuggestions(String query) async {
+    if (query.trim().length < 3) return const [];
+    try {
+      final resp = await http
+          .get(_uri('/api/suggest?q=${Uri.encodeComponent(query.trim())}'))
+          .timeout(const Duration(seconds: 6));
+      if (resp.statusCode != 200) return const [];
+      final decoded = jsonDecode(resp.body);
+      if (decoded is! List) return const [];
+      return decoded.take(6).map<MiniItem>((item) {
+        final fullName = item['display_name']?.toString() ?? '';
+        final parts    = fullName.split(',');
+        final name     = parts.first.trim();
+        final sub      = parts.length > 1
+            ? parts.skip(1).take(2).join(',').trim()
+            : '';
+        return MiniItem(
+          type: MiniItemType.pin,
+          name: name.isEmpty ? fullName : name,
+          sub:  sub,
+        );
+      }).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Fetch nearby transit options (jeepneys, buses, MRT stops) around a point.
+  /// Returns raw list from `/api/nearby?lat=&lon=&radius=800`.
+  Future<List<Map<String, dynamic>>> getNearby({
+    required double lat,
+    required double lon,
+    double radius = 800,
+  }) async {
+    try {
+      final resp = await http
+          .get(_uri('/api/nearby?lat=$lat&lon=$lon&radius=$radius'))
+          .timeout(const Duration(seconds: 6));
+      if (resp.statusCode != 200) return const [];
+      final decoded = jsonDecode(resp.body);
+      if (decoded is List) return decoded.cast<Map<String, dynamic>>();
+      return const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Fetch safe spots (police, hospitals, fire stations) near a coordinate.
+  /// Returns list of spot maps from `/api/safe-spots`.
+  Future<List<Map<String, dynamic>>> getSafeSpots({
+    required double lat,
+    required double lon,
+    int radius = 1500,
+  }) async {
+    try {
+      final resp = await http
+          .get(_uri('/api/safe-spots?lat=$lat&lon=$lon&radius=$radius'))
+          .timeout(const Duration(seconds: 8));
+      if (resp.statusCode != 200) return const [];
+      final decoded = jsonDecode(resp.body);
+      final spots = decoded['spots'];
+      if (spots is List) return spots.cast<Map<String, dynamic>>();
+      return const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Reverse-geocode a lat/lon to a human-readable address label.
+  /// Returns an empty string on failure.
+  Future<String> reverseGeocode({
+    required double lat,
+    required double lon,
+  }) async {
+    try {
+      final resp = await http
+          .get(_uri('/api/reverse?lat=$lat&lon=$lon'))
+          .timeout(const Duration(seconds: 6));
+      if (resp.statusCode != 200) return '';
+      final decoded = jsonDecode(resp.body);
+      return decoded['address']?.toString() ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
 }

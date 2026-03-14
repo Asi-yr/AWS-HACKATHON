@@ -9,6 +9,8 @@ import '../../data/mock_data.dart';
 import 'explore_controller.dart';
 import 'mini_screen.dart';
 import '../../core/app_colors.dart';
+import '../../core/api_client.dart';
+import '../../core/session_manager.dart';
 //import '../../core/ligtas_theme.dart';
 import '../../core/theme_controller.dart';
 
@@ -230,6 +232,9 @@ class _ExploreScaffoldState extends State<_ExploreScaffold> {
 
             if (context.select<ExploreController, bool>((c) => c.locationPopupVisible))
               const _LocationPopup(),
+            // ── SOS button — always visible on the map, top-right ───────────
+            if (isState2 || isState3 || isNavigating)
+              const _SosButton(),
             // ── Advisory banner — floats at very top of map ──────────────
             // BACKEND: call ctrl.setAdvisory(AdvisoryModel(...)) to show,
             // ctrl.setAdvisory(null) to dismiss.
@@ -517,6 +522,59 @@ class _DetailsPanelState extends State<_DetailsPanel> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                // MMDA / Seismic alert banners (data fetched from /api/routes response)
+                if (ctrl.mmdaBanner.isNotEmpty) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF3CD),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFFFD700), width: 1),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.traffic_rounded, color: Color(0xFFB8860B), size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            ctrl.mmdaBanner,
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 11, color: const Color(0xFF856404), fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                if (ctrl.seismicBanner.isNotEmpty) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFE5E5),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFFF4444), width: 1),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.vibration_rounded, color: Color(0xFFCC0000), size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            ctrl.seismicBanner,
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 11, color: const Color(0xFF8B0000), fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 // Stat boxes - Duration, Fare, Distance
                 Row(
                   children: [
@@ -1660,6 +1718,97 @@ class _StopBar extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ── SOS button ────────────────────────────────────────────────────────────────
+// Floating red SOS button. Appears in all map states.
+// Tapping shows a confirmation dialog, then calls /api/sos with current GPS.
+class _SosButton extends StatelessWidget {
+  const _SosButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final topPad = MediaQuery.of(context).padding.top;
+    return Positioned(
+      top: topPad + 12,
+      right: 14,
+      child: GestureDetector(
+        onTap: () => _onSosTap(context),
+        child: Container(
+          width: 44, height: 44,
+          decoration: BoxDecoration(
+            color: AppColors.safeRed,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.safeRed.withValues(alpha: 0.45),
+                blurRadius: 16, offset: const Offset(0, 4)),
+            ],
+          ),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.emergency_share_rounded,
+                    color: Colors.white, size: 16),
+                const SizedBox(height: 1),
+                Text('SOS',
+                  style: GoogleFonts.plusJakartaSans(
+                    color: Colors.white, fontSize: 8, fontWeight: FontWeight.w900)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onSosTap(BuildContext context) async {
+    final ctrl = context.read<ExploreController>();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Send SOS Alert?'),
+        content: const Text(
+          'This will notify your trusted emergency contacts with your current location.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppColors.safeRed),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Send SOS'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final lat = ctrl.lat ?? 14.5995;
+    final lng = ctrl.lng ?? 120.9842;
+
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      final route = ctrl.activeRoute;
+      await ApiClient.instance.triggerSos(
+        lat: lat,
+        lon: lng,
+        message: 'SOS from Ligtas user',
+        routeSummary: route != null
+            ? 'En route via ${route.modes} (${route.minutes} min)'
+            : '',
+        token: token,
+      );
+      ctrl.showToast('SOS sent to your contacts', 'red');
+    } catch (_) {
+      ctrl.showToast('SOS sent (offline mode)', 'red');
+    }
   }
 }
 

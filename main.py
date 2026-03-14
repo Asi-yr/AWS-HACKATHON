@@ -1737,16 +1737,45 @@ def api_reports():
 def api_confirm_report():
     t_start = time.time()
     print("[DEBUG] [api_confirm_report] Hit /api/reports/confirm endpoint.")
-    if 'user' not in session:
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = token if token else session.get('user')
+    if not username:
         print("[DEBUG] [api_confirm_report] Unauthorized. Rejecting.")
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     
     report_id = request.json.get('report_id')
-    print(f"[DEBUG] [api_confirm_report] User '{session['user']}' confirming report_id {report_id}")
+    print(f"[DEBUG] [api_confirm_report] User '{username}' confirming report_id {report_id}")
     
-    result = confirm_report(chDB_perf, int(report_id), session['user'])
+    result = confirm_report(chDB_perf, int(report_id), username)
     print(f"[DEBUG] [api_confirm_report] confirm_report result: {result}. Took {time.time() - t_start:.4f}s")
     return jsonify(result)
+
+
+@app.route('/api/report', methods=['POST'])
+def api_report_json():
+    """JSON API endpoint for Flutter community report submission."""
+    t_start = time.time()
+    print("[DEBUG] [api_report_json] Receiving JSON community report POST...")
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = token if token else session.get('user')
+    if not username:
+        print("[DEBUG] [api_report_json] Unauthorized. Rejecting.")
+        return jsonify({'ok': False, 'message': 'Login required'}), 401
+    try:
+        data = request.get_json() or {}
+        rtype = data.get('report_type', '')
+        lat   = float(data.get('lat', 0))
+        lon   = float(data.get('lon', 0))
+        desc  = data.get('description', '')
+        print(f"[DEBUG] [api_report_json] Data -> user: {username}, rtype: {rtype}, lat: {lat}, lon: {lon}, desc: '{desc}'")
+        result = submit_report(chDB_perf, username, rtype, lat, lon, desc)
+        print(f"[DEBUG] [api_report_json] submit_report result: {result}. Took {time.time() - t_start:.4f}s")
+        return jsonify(result)
+    except Exception as e:
+        print(f"[DEBUG] [api_report_json] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 400
 
 
 @app.route('/api/report-types', methods=['GET'])
@@ -1977,7 +2006,10 @@ def api_sos():
     """Trigger SOS: log event, return share link + contact count."""
     t_start = time.time()
     print("[DEBUG] [api_sos] Processing SOS request...")
-    if 'user' not in session:
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = token if token else session.get('user')
+    if not username:
         print("[DEBUG][api_sos] Unauthorized user.")
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     try:
@@ -1987,8 +2019,8 @@ def api_sos():
         message = body.get('message', 'SOS from SafeRoute user')
         route_summary = body.get('route_summary', '')
         
-        print(f"[DEBUG] [api_sos] SOS Data -> User: {session['user']}, Lat: {lat}, Lon: {lon}, Message: '{message}', Route Summary: '{route_summary}'")
-        result  = log_sos_event(chDB_perf, session['user'], lat, lon, route_summary, message)
+        print(f"[DEBUG] [api_sos] SOS Data -> User: {username}, Lat: {lat}, Lon: {lon}, Message: '{message}', Route Summary: '{route_summary}'")
+        result  = log_sos_event(chDB_perf, username, lat, lon, route_summary, message)
         
         print(f"[DEBUG][api_sos] SOS log event result: {result}. Took {time.time() - t_start:.4f}s")
         return jsonify(result)
@@ -2001,9 +2033,12 @@ def api_sos():
 def api_sos_contacts_get():
     t_start = time.time()
     print("[DEBUG] [api_sos_contacts_get] Requesting SOS contacts.")
-    if 'user' not in session:
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = token if token else session.get('user')
+    if not username:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
-    contacts = get_trusted_contacts(chDB_perf, session['user'])
+    contacts = get_trusted_contacts(chDB_perf, username)
     print(f"[DEBUG][api_sos_contacts_get] Fetched {len(contacts)} contacts for user in {time.time() - t_start:.4f}s")
     return jsonify({'ok': True, 'contacts': contacts})
 
@@ -2012,7 +2047,10 @@ def api_sos_contacts_get():
 def api_sos_contacts_add():
     t_start = time.time()
     print("[DEBUG][api_sos_contacts_add] Adding SOS contact.")
-    if 'user' not in session:
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = token if token else session.get('user')
+    if not username:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     try:
         body = request.json or {}
@@ -2022,7 +2060,7 @@ def api_sos_contacts_add():
         
         print(f"[DEBUG] [api_sos_contacts_add] Contact payload -> name: '{name}', type: '{c_type}', value: '{c_val}'")
         result = add_trusted_contact(
-            chDB_perf, session['user'],
+            chDB_perf, username,
             name, c_type, c_val
         )
         print(f"[DEBUG] [api_sos_contacts_add] Added contact. Result: {result}. Took {time.time() - t_start:.4f}s")
@@ -2036,10 +2074,13 @@ def api_sos_contacts_add():
 def api_sos_contacts_delete(contact_id):
     t_start = time.time()
     print(f"[DEBUG] [api_sos_contacts_delete] Deleting contact ID {contact_id}.")
-    if 'user' not in session:
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = token if token else session.get('user')
+    if not username:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
         
-    result = remove_trusted_contact(chDB_perf, session['user'], contact_id)
+    result = remove_trusted_contact(chDB_perf, username, contact_id)
     print(f"[DEBUG] [api_sos_contacts_delete] Deletion result: {result}. Took {time.time() - t_start:.4f}s")
     return jsonify(result)
 
