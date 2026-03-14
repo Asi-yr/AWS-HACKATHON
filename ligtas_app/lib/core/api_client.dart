@@ -24,12 +24,12 @@ class ApiClient {
 
   /// Call the backend `/api/routes` endpoint with full response including alerts.
   /// Returns: {
-  ///   'routes': List<RouteModel>,
-  ///   'incidents': List<Map> or [],
-  ///   'mmda_banner': String or '',
-  ///   'mmda_closures_count': int or 0,
-  ///   'earthquakes': List<Map> or [],
-  ///   'seismic_banner': String or '',
+  ///   'routes': `List<RouteModel>`,
+  ///   'incidents': `List<Map>` or [],
+  ///   'mmda_banner': `String` or '',
+  ///   'mmda_closures_count': `int` or 0,
+  ///   'earthquakes': `List<Map>` or [],
+  ///   'seismic_banner': `String` or '',
   /// }
   Future<Map<String, dynamic>> searchRoutesWithAlerts({
     required String origin,
@@ -69,22 +69,22 @@ class ApiClient {
 
     // Extract alert data
     final incidents = decoded['incidents'] ?? [];
-    final mmda_banner = decoded['mmda_banner'] ?? '';
-    final mmda_closures = decoded['mmda_closures_count'] ?? 0;
+    final mmdaBanner = decoded['mmda_banner'] ?? '';
+    final mmdaClosures = decoded['mmda_closures_count'] ?? 0;
     final earthquakes = decoded['earthquakes'] ?? [];
-    final seismic_banner = decoded['seismic_banner'] ?? '';
-    final weather_risk = decoded['weather_risk'] ?? 'clear';
-    final flood_risk = decoded['flood_risk'] ?? 'none';
+    final seismicBanner = decoded['seismic_banner'] ?? '';
+    final weatherRisk = decoded['weather_risk'] ?? 'clear';
+    final floodRisk = decoded['flood_risk'] ?? 'none';
 
     return {
       'routes': routeList,
       'incidents': incidents is List ? incidents : [],
-      'mmda_banner': mmda_banner.toString(),
-      'mmda_closures_count': mmda_closures is int ? mmda_closures : 0,
+      'mmda_banner': mmdaBanner.toString(),
+      'mmda_closures_count': mmdaClosures is int ? mmdaClosures : 0,
       'earthquakes': earthquakes is List ? earthquakes : [],
-      'seismic_banner': seismic_banner.toString(),
-      'weather_risk': weather_risk.toString(),
-      'flood_risk': flood_risk.toString(),
+      'seismic_banner': seismicBanner.toString(),
+      'weather_risk': weatherRisk.toString(),
+      'flood_risk': floodRisk.toString(),
     };
   }
 
@@ -810,8 +810,10 @@ class ApiClient {
         'show_weather_banner': showWeatherBanner,
         'show_crime_banner': showCrimeBanner,
         'show_flood_banner': showFloodBanner,
-        if (displayName != null) 'display_name': displayName,
-        if (email != null) 'email': email,
+        if (displayName != null) ...
+          {'display_name': displayName},
+        if (email != null) ...
+          {'email': email},
       };
 
       final resp = await http.post(

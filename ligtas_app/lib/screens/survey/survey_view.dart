@@ -169,13 +169,13 @@ class _SurveyViewState extends State<SurveyView> {
       final token = await SessionManager.instance.getAuthToken();
       if (token == null || token.isEmpty) {
         // If not logged in, just proceed with local defaults (survey is pre-auth)
-        print('[SurveyView] Not logged in, using local defaults only');
+        debugPrint('[SurveyView] Not logged in, using local defaults only');
         _proceedToExplore();
         return;
       }
 
       // Save survey to backend
-      print('[SurveyView] Saving survey to backend...');
+      debugPrint('[SurveyView] Saving survey to backend...');
       await ApiClient.instance.saveSurvey(
         commuterTypes: _commuterTypes.toList(),
         transportModes: _transport.toList(),
@@ -183,10 +183,10 @@ class _SurveyViewState extends State<SurveyView> {
         token: token,
       );
 
-      print('[SurveyView] Survey saved successfully to backend');
+      debugPrint('[SurveyView] Survey saved successfully to backend');
       _proceedToExplore();
     } catch (e) {
-      print('[SurveyView] Error saving survey: $e');
+      debugPrint('[SurveyView] Error saving survey: $e');
       // Proceed anyway with local defaults if backend save fails
       _proceedToExplore();
     }

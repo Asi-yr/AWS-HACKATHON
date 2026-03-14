@@ -73,7 +73,7 @@ class ProfileController extends ChangeNotifier {
       }
     } catch (e) {
       // Silently fail and use current defaults
-      print('[ProfileController] Error loading settings: $e');
+      debugPrint('[ProfileController] Error loading settings: $e');
     }
   }
 
@@ -110,7 +110,7 @@ class ProfileController extends ChangeNotifier {
       }
     } catch (e) {
       // Silently fail and use mock data
-      print('[ProfileController] Error loading user: $e');
+      debugPrint('[ProfileController] Error loading user: $e');
     }
   }
 
@@ -150,7 +150,7 @@ class ProfileController extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       // Silently fail and use mock data
-      print('[ProfileController] Error loading travel history: $e');
+      debugPrint('[ProfileController] Error loading travel history: $e');
     }
   }
 
@@ -172,7 +172,7 @@ class ProfileController extends ChangeNotifier {
         );
       }
     } catch (e) {
-      print('[ProfileController] Error saving settings to backend: $e');
+      debugPrint('[ProfileController] Error saving settings to backend: $e');
     }
     
     showToast(newValue ? "AI Safety Assistant Enabled" : "AI Safety Assistant Disabled", "teal");
@@ -382,7 +382,7 @@ class ProfileController extends ChangeNotifier {
       _sosContacts = await ApiClient.instance.getSosContacts(token: token);
       notifyListeners();
     } catch (e) {
-      print('[ProfileController] Error loading SOS contacts: $e');
+      debugPrint('[ProfileController] Error loading SOS contacts: $e');
     }
   }
 

@@ -260,7 +260,7 @@ class ExploreController extends ChangeNotifier {
       }
     } catch (e) {
       // Silently fail - use empty overlays as fallback
-      print('[ExploreController] Error fetching safety overlays: $e');
+      debugPrint('[ExploreController] Error fetching safety overlays: $e');
     }
   }
 
@@ -344,7 +344,7 @@ class ExploreController extends ChangeNotifier {
         setAlertData(
           incidents: (response['incidents'] as List?)?.cast<Map<String, dynamic>>() ?? [],
           mmdaBanner: response['mmda_banner']?.toString() ?? '',
-          mmda_closures_count: response['mmda_closures_count'] as int? ?? 0,
+          mmdaClosuresCount: response['mmda_closures_count'] as int? ?? 0,
           earthquakes: (response['earthquakes'] as List?)?.cast<Map<String, dynamic>>() ?? [],
           seismicBanner: response['seismic_banner']?.toString() ?? '',
           weatherRisk: response['weather_risk']?.toString() ?? 'clear',
@@ -365,7 +365,7 @@ class ExploreController extends ChangeNotifier {
       setAlertData(
         incidents: [],
         mmdaBanner: '',
-        mmda_closures_count: 0,
+        mmdaClosuresCount: 0,
         earthquakes: [],
         seismicBanner: '',
         weatherRisk: 'clear',
@@ -380,7 +380,7 @@ class ExploreController extends ChangeNotifier {
       setAlertData(
         incidents: [],
         mmdaBanner: '',
-        mmda_closures_count: 0,
+        mmdaClosuresCount: 0,
         earthquakes: [],
         seismicBanner: '',
         weatherRisk: 'clear',
@@ -502,8 +502,8 @@ class ExploreController extends ChangeNotifier {
   String _mmdaBanner = '';
   String get mmdaBanner => _mmdaBanner;
 
-  int _mmda_closures_count = 0;
-  int get mmda_closures_count => _mmda_closures_count;
+  int _mmdaClosuresCount = 0;
+  int get mmdaClosuresCount => _mmdaClosuresCount;
 
   List<Map<String, dynamic>> _earthquakes = [];
   List<Map<String, dynamic>> get earthquakes => _earthquakes;
@@ -533,7 +533,7 @@ class ExploreController extends ChangeNotifier {
   void setAlertData({
     required List<Map<String, dynamic>> incidents,
     required String mmdaBanner,
-    required int mmda_closures_count,
+    required int mmdaClosuresCount,
     required List<Map<String, dynamic>> earthquakes,
     required String seismicBanner,
     required String weatherRisk,
@@ -541,7 +541,7 @@ class ExploreController extends ChangeNotifier {
   }) {
     _incidents = incidents;
     _mmdaBanner = mmdaBanner;
-    _mmda_closures_count = mmda_closures_count;
+    _mmdaClosuresCount = mmdaClosuresCount;
     _earthquakes = earthquakes;
     _seismicBanner = seismicBanner;
     _weatherRisk = weatherRisk;

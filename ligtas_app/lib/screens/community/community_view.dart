@@ -303,7 +303,7 @@ class _PostCardState extends State<_PostCard> {
                 await ApiClient.instance.confirmReport(reportId: post.id, token: token);
                 setState(() { _upvoted = true; _upvotes += 1; });
               } catch (e) {
-                print('Error confirming report: $e');
+                debugPrint('Error confirming report: $e');
               }
             },
             child: Row(children: [

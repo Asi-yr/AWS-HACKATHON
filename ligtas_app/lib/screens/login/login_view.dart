@@ -3,18 +3,17 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_router.dart';
 import '../../core/session_manager.dart';
-import '../../core/api_client.dart';
 
 // ════════════════════════════════════════════════════════════════
-// LOGIN / REGISTRATION SCREEN  —  Production Integration
+// LOGIN / REGISTRATION SCREEN  —  PLACEHOLDER
 // ════════════════════════════════════════════════════════════════
-// Wired to backend API:
+// Wire the actual auth logic here:
 //
-//   Sign In  →  BACKEND: POST /api/auth/login  { username, password }
+//   Sign In  →  BACKEND: POST /api/auth/login  { email, password }
 //                200 → save token → AppRouter.explore
 //                401 → show error
 //
-//   Register →  BACKEND: POST /api/auth/register  { username, email, password }
+//   Register →  BACKEND: POST /api/auth/register  { name, email, password }
 //                201 → AppRouter.survey  (first-time onboarding)
 //                409 → email already in use
 //
@@ -30,20 +29,6 @@ class LoginView extends StatefulWidget {
 
 class _LoginViewState extends State<LoginView> {
   bool _isLogin = true;
-  bool _isLoading = false;
-  String? _errorMessage;
-
-  final _usernameCtrl = TextEditingController();
-  final _emailCtrl = TextEditingController();
-  final _passwordCtrl = TextEditingController();
-
-  @override
-  void dispose() {
-    _usernameCtrl.dispose();
-    _emailCtrl.dispose();
-    _passwordCtrl.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -93,64 +78,39 @@ class _LoginViewState extends State<LoginView> {
                   border: Border.all(color: AppColors.borderLight)),
                 padding: const EdgeInsets.all(4),
                 child: Row(children: [
-                  _tab('Sign In',  _isLogin,  () => setState(() { _isLogin = true; _errorMessage = null; })),
-                  _tab('Register', !_isLogin, () => setState(() { _isLogin = false; _errorMessage = null; })),
+                  _tab('Sign In',  _isLogin,  () => setState(() => _isLogin = true)),
+                  _tab('Register', !_isLogin, () => setState(() => _isLogin = false)),
                 ]),
               ),
               const SizedBox(height: 28),
 
-              // ── Error message if present ──────────────────────
-              if (_errorMessage != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.shade200),
-                  ),
-                  child: Text(
-                    _errorMessage!,
-                    style: GoogleFonts.dmSans(
-                      fontSize: 13,
-                      color: Colors.red.shade700,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
               // ── Fields ────────────────────────────────────────
-              _field(
-                'Username',
-                Icons.person_outline_rounded,
-                false,
-                _usernameCtrl,
-              ),
-              const SizedBox(height: 14),
               if (!_isLogin) ...[
-                _field(
-                  'Email Address',
-                  Icons.email_outlined,
-                  false,
-                  _emailCtrl,
-                ),
+                _field('Full Name', Icons.person_outline_rounded, false),
                 const SizedBox(height: 14),
               ],
-              _field(
-                'Password',
-                Icons.lock_outline_rounded,
-                true,
-                _passwordCtrl,
-              ),
+              _field('Email Address', Icons.email_outlined, false),
+              const SizedBox(height: 14),
+              _field('Password', Icons.lock_outline_rounded, true),
               const SizedBox(height: 28),
 
               // ── Primary CTA ───────────────────────────────────
+              // BACKEND: replace with real auth call (see header comment)
               _PrimaryButton(
-                label: _isLoading
-                  ? 'Loading...'
-                  : (_isLogin ? 'Sign In' : 'Create Account'),
-                isLoading: _isLoading,
-                onTap: _isLoading ? null : _handleAuthSubmit,
+                label: _isLogin ? 'Sign In' : 'Create Account',
+                onTap: () {
+                  if (_isLogin) {
+                    // Returning user → mark logged in and go to main shell
+                    SessionManager.instance.setLoggedIn(true);
+                    SessionManager.instance.setLastRoute(AppRouter.explore);
+                    Navigator.pushReplacementNamed(context, AppRouter.explore);
+                  } else {
+                    // New user → mark logged in and go to onboarding survey
+                    SessionManager.instance.setLoggedIn(true);
+                    SessionManager.instance.setLastRoute(AppRouter.survey);
+                    Navigator.pushReplacementNamed(context, AppRouter.survey);
+                  }
+                },
               ),
               const SizedBox(height: 20),
 
@@ -173,7 +133,8 @@ class _LoginViewState extends State<LoginView> {
                 label: 'Continue with Google',
                 icon: Icons.g_mobiledata_rounded,
                 onTap: () {
-                  // TODO: wire Google OAuth / Firebase
+                  // new user  → AppRouter.survey
+                  // returning → AppRouter.explore
                 },
               ),
             ],
@@ -181,78 +142,6 @@ class _LoginViewState extends State<LoginView> {
         ),
       ),
     );
-  }
-
-  Future<void> _handleAuthSubmit() async {
-    setState(() => _errorMessage = null);
-
-    final username = _usernameCtrl.text.trim();
-    final email = _emailCtrl.text.trim();
-    final password = _passwordCtrl.text.trim();
-
-    // Validate input
-    if (username.isEmpty || password.isEmpty) {
-      setState(() => _errorMessage = 'Please fill in all required fields');
-      return;
-    }
-
-    if (!_isLogin && email.isEmpty) {
-      setState(() => _errorMessage = 'Email is required for registration');
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      if (_isLogin) {
-        // Login
-        final result = await ApiClient.instance.login(
-          username: username,
-          password: password,
-        );
-
-        if (result['ok'] == true) {
-          final token = result['token'] as String;
-          final user = result['user'] as String;
-
-          // Save token and mark as logged in
-          await SessionManager.instance.setLoggedIn(true, token: token, username: user);
-          await SessionManager.instance.setLastRoute(AppRouter.explore);
-
-          if (mounted) {
-            Navigator.pushReplacementNamed(context, AppRouter.explore);
-          }
-        }
-      } else {
-        // Register
-        final result = await ApiClient.instance.register(
-          username: username,
-          password: password,
-          email: email,
-        );
-
-        if (result['ok'] == true) {
-          final token = result['token'] as String;
-          final user = result['user'] as String;
-
-          // Save token and mark as logged in
-          await SessionManager.instance.setLoggedIn(true, token: token, username: user);
-          await SessionManager.instance.setLastRoute(AppRouter.survey);
-
-          if (mounted) {
-            Navigator.pushReplacementNamed(context, AppRouter.survey);
-          }
-        }
-      }
-    } catch (e) {
-      setState(() {
-        _errorMessage = e.toString().replaceAll('Exception: ', '');
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
   }
 
   Widget _tab(String label, bool active, VoidCallback onTap) => Expanded(
@@ -272,15 +161,8 @@ class _LoginViewState extends State<LoginView> {
     ),
   );
 
-  Widget _field(
-    String hint,
-    IconData icon,
-    bool obscure,
-    TextEditingController controller,
-  ) => TextField(
-    controller: controller,
+  Widget _field(String hint, IconData icon, bool obscure) => TextField(
     obscureText: obscure,
-    enabled: !_isLoading,
     style: GoogleFonts.dmSans(fontSize: 14, color: AppColors.textLight),
     decoration: InputDecoration(
       hintText: hint,
@@ -298,23 +180,14 @@ class _LoginViewState extends State<LoginView> {
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: AppColors.teal, width: 1.5)),
-      disabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.borderLight)),
     ),
   );
 }
 
 class _PrimaryButton extends StatelessWidget {
   final String label;
-  final bool isLoading;
-  final VoidCallback? onTap;
-  const _PrimaryButton({
-    required this.label,
-    required this.isLoading,
-    this.onTap,
-  });
-
+  final VoidCallback onTap;
+  const _PrimaryButton({required this.label, required this.onTap});
   @override
   Widget build(BuildContext context) => SizedBox(
     width: double.infinity,
@@ -325,27 +198,10 @@ class _PrimaryButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 15),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         elevation: 0,
-        disabledBackgroundColor: AppColors.teal.withOpacity(0.5),
       ),
       onPressed: onTap,
-      child: isLoading
-        ? SizedBox(
-            height: 20,
-            width: 20,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                Colors.white.withOpacity(0.8),
-              ),
-            ),
-          )
-        : Text(
-            label,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
+      child: Text(label,
+        style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w800)),
     ),
   );
 }
