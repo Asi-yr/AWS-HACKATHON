@@ -65,6 +65,50 @@ class ReportType {
 }
 
 class ExploreController extends ChangeNotifier {
+  ExploreController() {
+    _initLocation();
+  }
+
+  Future<void> _initLocation() async {
+    final perm = await Geolocator.checkPermission();
+
+    if (perm == LocationPermission.always ||
+        perm == LocationPermission.whileInUse) {
+      // Already granted — silently load location, keep popup hidden
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+        _hasLocation = true;
+
+        try {
+          final token = await SessionManager.instance.getAuthToken();
+          final rev = await ApiClient.instance.reverseGeocode(
+            lat: _lat!,
+            lon: _lng!,
+            token: token,
+          );
+          final address = rev['address'] as String? ?? '';
+          _currentLocationText = address.isNotEmpty
+              ? address
+              : '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
+        } catch (_) {
+          _currentLocationText =
+              '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
+        }
+      } catch (_) {
+        // Couldn't get position even with permission — leave popup hidden,
+        // user can still type manually
+      }
+    } else {
+      // Not yet granted — show the enable location popup
+      _locationPopupVisible = true;
+    }
+    notifyListeners();
+  }
+
   // ── App state ──────────────────────────────────────────────────
   AppState _state = AppState.state1;
   AppState get state => _state;
@@ -75,7 +119,7 @@ class ExploreController extends ChangeNotifier {
   }
 
   // ── Location ───────────────────────────────────────────────────
-  bool _locationPopupVisible = true;
+  bool _locationPopupVisible = false;
   bool get locationPopupVisible => _locationPopupVisible;
 
   bool _hasLocation = false;
