@@ -527,6 +527,11 @@ class _DetailsPanelState extends State<_DetailsPanel> {
                     _statBox('5.8 km', 'Distance', isDark),
                   ],
                 ),
+                // ── Live risk warnings from backend ─────────────────────────
+                // Reads seismicWarning, floodWarning, crimeWarning, and
+                // profileWarnings from RouteModel (set by /api/routes pipeline).
+                // Hidden automatically when all fields are null/empty.
+                ..._buildRouteWarnings(route, isDark),
                 const SizedBox(height: 16),
                 // Route name/title
                 Text(
@@ -658,6 +663,110 @@ class _DetailsPanelState extends State<_DetailsPanel> {
       ),
     );
   }
+
+  // ── Risk warning pills ──────────────────────────────────────────────────────
+  // Reads backend-populated warning fields from RouteModel:
+  //   route.seismicWarning  → phivolcs.py  (apply_seismic_to_routes)
+  //   route.floodWarning    → noah.py      (apply_route_flood_analysis)
+  //   route.crimeWarning    → crime_data.py
+  //   route.profileWarnings → vulnerable_profiles.py (list of strings)
+  //
+  // Returns an empty list when all fields are null — no extra space added.
+  List<Widget> _buildRouteWarnings(RouteModel route, bool isDark) {
+    final entries = <_RiskWarning>[];
+
+    final seismic = route.seismicWarning;
+    if (seismic != null && seismic.isNotEmpty) {
+      entries.add(_RiskWarning(
+        icon:  Icons.vibration_rounded,
+        color: const Color(0xFFE74C3C),
+        bg:    const Color(0x22E74C3C),
+        text:  seismic,
+      ));
+    }
+
+    final flood = route.floodWarning;
+    if (flood != null && flood.isNotEmpty) {
+      entries.add(_RiskWarning(
+        icon:  Icons.water_rounded,
+        color: const Color(0xFF3B82F6),
+        bg:    const Color(0x223B82F6),
+        text:  flood,
+      ));
+    }
+
+    final crime = route.crimeWarning;
+    if (crime != null && crime.isNotEmpty) {
+      entries.add(_RiskWarning(
+        icon:  Icons.warning_amber_rounded,
+        color: const Color(0xFFF59E0B),
+        bg:    const Color(0x22F59E0B),
+        text:  crime,
+      ));
+    }
+
+    final profile = route.profileWarnings;
+    if (profile != null) {
+      for (final w in profile) {
+        final text = w?.toString() ?? '';
+        if (text.isNotEmpty) {
+          entries.add(_RiskWarning(
+            icon:  Icons.person_rounded,
+            color: const Color(0xFF8E44AD),
+            bg:    const Color(0x228E44AD),
+            text:  text,
+          ));
+        }
+      }
+    }
+
+    if (entries.isEmpty) return [];
+
+    return [
+      const SizedBox(height: 14),
+      ...entries.map((e) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: e.bg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: e.color.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(e.icon, color: e.color, size: 15),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  e.text,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: e.color,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      )),
+    ];
+  }
+}
+
+// ── Warning pill data ─────────────────────────────────────────────────────────
+class _RiskWarning {
+  final IconData icon;
+  final Color    color;
+  final Color    bg;
+  final String   text;
+  const _RiskWarning({
+    required this.icon, required this.color,
+    required this.bg,   required this.text,
+  });
 }
 
 class _FilterChipsRow extends StatelessWidget {

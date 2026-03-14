@@ -177,6 +177,11 @@ class ApiClient {
       // Back-end does not yet expose explicit commuter/ligtas tags.
       commuterTags: const [],
       ligtasTags: const [],
+      // ── Live risk warnings from /api/routes pipeline ──────────────────────
+      seismicWarning:  r['seismic_warning']  as String?,
+      floodWarning:    r['flood_warning']    as String?,
+      crimeWarning:    r['crime_warning']    as String?,
+      profileWarnings: r['profile_warnings'] as List<dynamic>?,
     );
   }
 
@@ -480,6 +485,51 @@ class ApiClient {
       return jsonDecode(resp.body);
     } catch (e) {
       rethrow;
+    }
+  }
+
+  /// Fetch safe spots (hospitals, police, pharmacies, etc.) near a coordinate.
+  ///
+  /// Calls GET /api/safe-spots/flutter?lat=&lon=&radius=
+  ///
+  /// Returns the decoded JSON map from the server:
+  /// ```json
+  /// {
+  ///   "ok":    true,
+  ///   "spots": [
+  ///     { "id": "...", "name": "...", "type": "hospital",
+  ///       "label": "Hospital", "lat": 14.57, "lon": 120.98,
+  ///       "color": "#e74c3c", "priority": 1, "dist_m": 340 }
+  ///   ]
+  /// }
+  /// ```
+  /// Returns `{'ok': false, 'spots': []}` on any error — never throws.
+  Future<Map<String, dynamic>> getSafeSpots({
+    required double lat,
+    required double lon,
+    String? token,
+    int radiusMeters = 1500,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.get(
+        _uri('/api/safe-spots/flutter?lat=$lat&lon=$lon&radius=$radiusMeters'),
+        headers: headers,
+      );
+
+      if (resp.statusCode != 200) {
+        return {'ok': false, 'spots': []};
+      }
+
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      return {'ok': false, 'spots': []};
+    } catch (e) {
+      return {'ok': false, 'spots': []};
     }
   }
 
@@ -869,4 +919,3 @@ class ApiClient {
     }
   }
 }
-

@@ -174,95 +174,181 @@ class ExploreController extends ChangeNotifier {
   }
 
   /// Fetch safety overlay data from backend for a given location.
-  /// Populates hotspots, POIs, and advisory.
-  /// Called after routes are fetched to show safety context on map.
+  /// Populates hotspots (earthquake circles), POIs (safe spots), and advisory.
+  ///
+  /// Called after routes are fetched in [searchRoutes].
+  ///
+  /// BACKEND ENDPOINTS USED:
+  ///   GET /api/safety?lat=&lon=              → weather, crime, flood penalties + advisory
+  ///   GET /api/safe-spots/flutter?lat=&lon=  → hospital, police, fire, pharmacy markers
   Future<void> fetchSafetyOverlays({
     required double lat,
     required double lon,
   }) async {
     try {
       final token = await SessionManager.instance.getAuthToken();
+
+      // ── 1. Fetch area safety data (weather / crime / flood / seismic) ────────
       final safetyData = await ApiClient.instance.getSafety(
         lat: lat,
         lon: lon,
         token: token,
       );
 
+      final newHotspots = <HotspotModel>[];
+      final newPois     = <PoiModel>[];
+
       if (safetyData['ok'] == true) {
-        // Parse reports as hotspots (crime, flood, weather risks)
+        // ── Community reports → hotspot circles ──────────────────────────────
         final reports = safetyData['reports'] as List? ?? [];
-        final newHotspots = <HotspotModel>[];
-        
         for (final report in reports) {
           if (report is Map<String, dynamic>) {
-            final rLat = (report['lat'] as num?)?.toDouble() ?? 0.0;
-            final rLon = (report['lon'] as num?)?.toDouble() ?? 0.0;
+            final rLat  = (report['lat']  as num?)?.toDouble() ?? 0.0;
+            final rLon  = (report['lon']  as num?)?.toDouble() ?? 0.0;
             final label = report['label'] as String? ?? 'Safety Alert';
             final color = _colorFromReportType(report['type'] as String? ?? '');
             newHotspots.add(HotspotModel(
-              lat: rLat,
-              lng: rLon,
+              lat: rLat, lng: rLon,
               radiusMeters: 200,
-              label: label,
-              color: color,
+              label: label, color: color,
             ));
           }
         }
-        
-        // Parse crime, flood, weather into POIs if severity high
-        final crimePenalty = safetyData['crime']?['penalty'] as int? ?? 0;
-        final floodPenalty = safetyData['flood']?['penalty'] as int? ?? 0;
-        final weatherRisk = safetyData['weather']?['risk_level'] as String? ?? 'clear';
-        
-        final newPois = <PoiModel>[];
-        if (crimePenalty > 10) {
-          newPois.add(PoiModel(
-            lat: lat,
-            lng: lon,
-            label: 'High Crime Risk',
-            icon: Icons.warning_rounded,
-            color: const Color(0xFFF87171),
-          ));
+
+        // ── Seismic circles from /api/safety seismic block ───────────────────
+        // Each earthquake gets a translucent circle scaled to its damage radius.
+        final seismicBlock = safetyData['seismic'] as Map? ?? {};
+        final quakeList    = seismicBlock['earthquakes'] as List? ?? [];
+        for (final eq in quakeList) {
+          if (eq is Map<String, dynamic>) {
+            final eqLat    = (eq['lat']       as num?)?.toDouble();
+            final eqLon    = (eq['lon']       as num?)?.toDouble();
+            final radiusKm = (eq['radius_km'] as num?)?.toDouble() ?? 20.0;
+            final mag      = (eq['magnitude'] as num?)?.toDouble() ?? 0.0;
+            final severity = eq['severity']   as String? ?? 'moderate';
+            if (eqLat == null || eqLon == null) continue;
+            newHotspots.add(HotspotModel(
+              lat: eqLat, lng: eqLon,
+              radiusMeters: radiusKm * 1000,
+              label: 'M$mag Earthquake',
+              color: _colorFromEqSeverity(severity),
+            ));
+          }
         }
-        if (floodPenalty > 10) {
-          newPois.add(PoiModel(
-            lat: lat,
-            lng: lon,
-            label: 'Flood Risk',
-            icon: Icons.water_rounded,
-            color: const Color(0xFF3B82F6),
-          ));
-        }
-        if (weatherRisk != 'clear') {
-          newPois.add(PoiModel(
-            lat: lat,
-            lng: lon,
-            label: 'Severe Weather',
-            icon: Icons.cloud_rounded,
-            color: const Color(0xFFFCD34D),
-          ));
-        }
-        
-        // Set advisory if there are high penalties
+
+        // ── Advisory banner logic ─────────────────────────────────────────────
+        final crimePenalty  = safetyData['crime']?['penalty']    as int? ?? 0;
+        final floodPenalty  = safetyData['flood']?['penalty']    as int? ?? 0;
+        final weatherRisk   = safetyData['weather']?['risk_level'] as String? ?? 'clear';
+        final seismicCount  = seismicBlock['count'] as int? ?? 0;
+
         AdvisoryModel? newAdvisory;
-        if (crimePenalty > 15 || floodPenalty > 15) {
+        if (crimePenalty > 15) {
+          newAdvisory = const AdvisoryModel(
+            message: 'High crime risk in this area — exercise caution.',
+            type: 'danger',
+          );
+        } else if (floodPenalty > 15) {
+          newAdvisory = const AdvisoryModel(
+            message: 'Flood risk detected — consider alternate routes.',
+            type: 'warning',
+          );
+        } else if (weatherRisk == 'storm' || weatherRisk == 'heavy_rain') {
           newAdvisory = AdvisoryModel(
-            message: crimePenalty > 15
-              ? 'High crime risk in this area. Exercise caution.'
-              : 'Flood risk detected. Consider alternate routes.',
-            type: crimePenalty > 15 ? 'danger' : 'warning',
+            message: 'Severe weather in the area — stay safe.',
+            type: weatherRisk == 'storm' ? 'danger' : 'warning',
+          );
+        } else if (seismicCount > 0) {
+          newAdvisory = const AdvisoryModel(
+            message: 'Recent earthquake activity near your route.',
+            type: 'warning',
           );
         }
-        
-        setHotspots(newHotspots);
-        setPois(newPois);
+
         setAdvisory(newAdvisory);
       }
+
+      // ── 2. Fetch safe spots → PoiModel markers ───────────────────────────────
+      // Uses the dedicated /api/safe-spots/flutter endpoint which returns clean
+      // JSON (no Leaflet JS). Results are mapped to PoiModel for the map layer.
+      try {
+        final spotsData = await ApiClient.instance.getSafeSpots(
+          lat: lat,
+          lon: lon,
+          token: token,
+        );
+
+        if (spotsData['ok'] == true) {
+          final spotList = spotsData['spots'] as List? ?? [];
+          for (final spot in spotList) {
+            if (spot is Map<String, dynamic>) {
+              final sLat  = (spot['lat'] as num?)?.toDouble() ?? 0.0;
+              final sLon  = (spot['lon'] as num?)?.toDouble() ?? 0.0;
+              final type  = spot['type']  as String? ?? '';
+              final label = spot['label'] as String? ?? 'Safe Spot';
+              newPois.add(PoiModel(
+                lat: sLat, lng: sLon,
+                label: label,
+                icon:  _iconForSpotType(type),
+                color: _colorForSpotType(type),
+              ));
+            }
+          }
+        }
+      } catch (e) {
+        // Safe spots are optional — silently degrade
+        debugPrint('[ExploreController] Safe spots fetch error: $e');
+      }
+
+      setHotspots(newHotspots);
+      setPois(newPois);
     } catch (e) {
-      // Silently fail - use empty overlays as fallback
       debugPrint('[ExploreController] Error fetching safety overlays: $e');
     }
   }
+
+  // ── Earthquake severity → translucent map circle color ──────────────────────
+  Color _colorFromEqSeverity(String severity) {
+    switch (severity) {
+      case 'critical': return const Color(0x556C1A1A);
+      case 'high':     return const Color(0x44E74C3C);
+      case 'moderate': return const Color(0x33E67E22);
+      default:         return const Color(0x22F39C12);
+    }
+  }
+
+  // ── Safe-spot type → Flutter IconData ───────────────────────────────────────
+  // Must match the OSM amenity `type` strings returned by safe_spots.py.
+  IconData _iconForSpotType(String type) {
+    switch (type) {
+      case 'hospital':         return Icons.local_hospital_rounded;
+      case 'clinic':           return Icons.local_hospital_outlined;
+      case 'pharmacy':         return Icons.medical_services_rounded;
+      case 'police':           return Icons.local_police_rounded;
+      case 'fire_station':     return Icons.fire_truck_rounded;
+      case 'barangay_hall':    return Icons.account_balance_rounded;
+      case 'community_centre': return Icons.people_rounded;
+      case 'convenience':
+      case 'supermarket':      return Icons.store_rounded;
+      default:                 return Icons.place_rounded;
+    }
+  }
+
+  // ── Safe-spot type → map marker color ───────────────────────────────────────
+  Color _colorForSpotType(String type) {
+    switch (type) {
+      case 'hospital':
+      case 'clinic':           return const Color(0xFFE74C3C);
+      case 'pharmacy':         return const Color(0xFF27AE60);
+      case 'police':           return const Color(0xFF2980B9);
+      case 'fire_station':     return const Color(0xFFE67E22);
+      case 'barangay_hall':
+      case 'community_centre': return const Color(0xFF8E44AD);
+      default:                 return const Color(0xFF0D9E9E);
+    }
+  }
+
+
 
   Color _colorFromReportType(String type) {
     switch (type.toLowerCase()) {
@@ -340,22 +426,60 @@ class ExploreController extends ChangeNotifier {
       if (routes.isNotEmpty) {
         setAllRoutes(routes);
 
-        // WHAT NEEDS CONNECTION 🔗: Capture and store alert data
+        // ── Store all alert data from /api/routes ───────────────────────────
         setAlertData(
-          incidents: (response['incidents'] as List?)?.cast<Map<String, dynamic>>() ?? [],
-          mmdaBanner: response['mmda_banner']?.toString() ?? '',
+          incidents:         (response['incidents'] as List?)?.cast<Map<String, dynamic>>() ?? [],
+          mmdaBanner:        response['mmda_banner']?.toString() ?? '',
           mmdaClosuresCount: response['mmda_closures_count'] as int? ?? 0,
-          earthquakes: (response['earthquakes'] as List?)?.cast<Map<String, dynamic>>() ?? [],
-          seismicBanner: response['seismic_banner']?.toString() ?? '',
-          weatherRisk: response['weather_risk']?.toString() ?? 'clear',
-          floodRisk: response['flood_risk']?.toString() ?? 'none',
+          earthquakes:       (response['earthquakes'] as List?)?.cast<Map<String, dynamic>>() ?? [],
+          seismicBanner:     response['seismic_banner']?.toString() ?? '',
+          weatherRisk:       response['weather_risk']?.toString() ?? 'clear',
+          floodRisk:         response['flood_risk']?.toString() ?? 'none',
         );
 
-        // Fetch safety overlays for the current location or default Manila location
+        // ── Earthquake circles from /api/routes payload ─────────────────────
+        // /api/routes now includes lat, lon, radius_km, severity per quake.
+        // We build HotspotModel circles immediately — no extra network call.
+        final eqList = (response['earthquakes'] as List?)
+            ?.cast<Map<String, dynamic>>() ?? [];
+        final eqHotspots = <HotspotModel>[];
+        for (final eq in eqList) {
+          final eqLat    = (eq['lat']       as num?)?.toDouble();
+          final eqLon    = (eq['lon']       as num?)?.toDouble();
+          final radiusKm = (eq['radius_km'] as num?)?.toDouble() ?? 20.0;
+          final mag      = (eq['magnitude'] as num?)?.toDouble() ?? 0.0;
+          final severity = eq['severity']   as String? ?? 'moderate';
+          if (eqLat == null || eqLon == null) continue;
+          eqHotspots.add(HotspotModel(
+            lat: eqLat, lng: eqLon,
+            radiusMeters: radiusKm * 1000,
+            label: 'M$mag Earthquake',
+            color: _colorFromEqSeverity(severity),
+          ));
+        }
+        if (eqHotspots.isNotEmpty) setHotspots(eqHotspots);
+
+        // ── Advisory banners from route-level risk data ─────────────────────
+        final seismicBannerText = response['seismic_banner']?.toString() ?? '';
+        final wRisk             = response['weather_risk']?.toString() ?? 'clear';
+        if (seismicBannerText.isNotEmpty) {
+          setAdvisory(const AdvisoryModel(
+            message: 'Recent earthquake activity detected near your route.',
+            type: 'warning',
+          ));
+        } else if (wRisk == 'storm' || wRisk == 'heavy_rain') {
+          setAdvisory(AdvisoryModel(
+            message: 'Severe weather detected — travel with caution.',
+            type: wRisk == 'storm' ? 'danger' : 'warning',
+          ));
+        }
+
+        // ── Fetch safe-spot POIs + full area safety overlays ────────────────
+        // Runs after routes are shown — does not block the route list UI.
         final safeLat = _lat ?? 14.5995;
         final safeLon = _lng ?? 120.9842;
         await fetchSafetyOverlays(lat: safeLat, lon: safeLon);
-        
+
         return;
       }
 

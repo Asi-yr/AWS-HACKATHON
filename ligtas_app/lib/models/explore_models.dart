@@ -41,6 +41,17 @@ class RouteModel {
   /// BACKEND HOOK: populate from your API response.
   final List<String> ligtasTags;
 
+  // ── Live risk warnings from the /api/routes backend pipeline ───────────────
+  // All nullable — the detail panel shows nothing when these are null/empty.
+  //   seismicWarning  ← phivolcs.py  (apply_seismic_to_routes)
+  //   floodWarning    ← noah.py       (apply_route_flood_analysis)
+  //   crimeWarning    ← crime_data.py (apply_route_crime_to_routes)
+  //   profileWarnings ← vulnerable_profiles.py (list of strings)
+  final String?        seismicWarning;
+  final String?        floodWarning;
+  final String?        crimeWarning;
+  final List<dynamic>? profileWarnings;
+
   const RouteModel({
     required this.id,
     required this.modes,
@@ -51,11 +62,13 @@ class RouteModel {
     required this.safetyNote,
     required this.steps,
     required this.polyline,
-    // Default to empty lists so existing RouteModel usages don't break.
-    // Fill these in mock_data.dart (and eventually your API layer) for
-    // filtering to actually work.
-    this.commuterTags = const [],
-    this.ligtasTags   = const [],
+    this.commuterTags    = const [],
+    this.ligtasTags      = const [],
+    // Warning fields — null by default so all existing mock data is unaffected.
+    this.seismicWarning,
+    this.floodWarning,
+    this.crimeWarning,
+    this.profileWarnings,
   });
 
   SafetyMeta get safetyMeta {

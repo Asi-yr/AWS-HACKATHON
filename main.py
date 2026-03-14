@@ -1583,9 +1583,18 @@ def get_routes():
             nav_response["seismic_banner"] = get_seismic_banner_html(earthquakes)
             nav_response["epicenter_js"]   = get_epicenter_map_js(earthquakes)
             nav_response["earthquakes"]    =[
-                {"magnitude": e["magnitude"], "place": e["place"],
-                 "severity": e["severity"], "time_pht": e["time_pht"],
-                 "tsunami": e["tsunami"]}
+                {
+                    "magnitude": e["magnitude"],
+                    "place":     e["place"],
+                    "severity":  e["severity"],
+                    "time_pht":  e["time_pht"],
+                    "tsunami":   e["tsunami"],
+                    # ── Flutter needs these to build HotspotModel circles ──
+                    "lat":       e["lat"],
+                    "lon":       e["lon"],
+                    "radius_km": e["radius_km"],
+                    "color":     e["color"],
+                }
                 for e in earthquakes
             ]
         except Exception as _pe:
@@ -1906,6 +1915,7 @@ def api_safety():
 
     print(f"[DEBUG] [api_safety] Finalizing JSON response payload. Total time: {time.time() - t_start:.4f}s")
     return jsonify({
+        'ok': True,   # ── Flutter checks this in fetchSafetyOverlays()
         'weather': {
             'risk_level':  weather.get('risk_level'),
             'description': weather.get('description'),
@@ -2084,8 +2094,55 @@ def api_phivolcs():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/safe-spots', methods=['GET'])
-def api_safe_spots():
+@app.route('/api/safe-spots/flutter', methods=['GET'])
+def api_safe_spots_flutter():
+    """
+    Safe spots for Flutter app — returns plain JSON, NOT Leaflet JS.
+    Flutter calls this from fetchSafetyOverlays() and maps results to PoiModel.
+
+    Query params:
+        lat    (float)  — latitude
+        lon    (float)  — longitude
+        radius (int)    — search radius in metres (default 1500)
+
+    Response:
+        {
+          "ok": true,
+          "spots": [
+            {
+              "id":       "...",
+              "name":     "Philippine General Hospital",
+              "type":     "hospital",
+              "label":    "Hospital",
+              "icon":     "🏥",
+              "color":    "#e74c3c",
+              "lat":      14.5794,
+              "lon":      120.9822,
+              "address":  "...",
+              "priority": 1,
+              "dist_m":   340,
+              "open_24h": false
+            }, ...
+          ]
+        }
+    """
+    t_start = time.time()
+    print("[DEBUG][api_safe_spots_flutter] Flutter safe-spots request received.")
+    try:
+        lat    = float(request.args.get('lat',    14.5995))
+        lon    = float(request.args.get('lon',   120.9842))
+        radius = int(request.args.get('radius',    1500))
+        print(f"[DEBUG][api_safe_spots_flutter] lat={lat}, lon={lon}, radius={radius}")
+
+        spots = get_safe_spots_near(lat, lon, radius_m=radius)
+        print(f"[DEBUG][api_safe_spots_flutter] Returning {len(spots)} spots in {time.time()-t_start:.4f}s")
+        return jsonify({'ok': True, 'spots': spots, 'count': len(spots)})
+    except Exception as e:
+        print(f"[DEBUG][api_safe_spots_flutter] Exception: {e}")
+        return jsonify({'ok': False, 'error': str(e), 'spots': []}), 500
+
+
+
     """Safe spots (police, hospitals, fire stations, etc.) near a coordinate."""
     t_start = time.time()
     print("[DEBUG][api_safe_spots] Incoming query...")
