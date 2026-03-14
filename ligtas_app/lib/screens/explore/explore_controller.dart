@@ -757,6 +757,9 @@ class ExploreController extends ChangeNotifier {
       }
 
       // No routes found — clear routes, show empty state (do NOT fall back to mock)
+      // Surface the backend's own error message (e.g. "No route found near your
+      // origin/destination") so the user sees something actionable.
+      final backendError = response['error'] as String?;
       setAllRoutes([]);
       setAlertData(
         incidents: [],
@@ -767,7 +770,12 @@ class ExploreController extends ChangeNotifier {
         weatherRisk: 'clear',
         floodRisk: 'none',
       );
-      showToast('No routes found for this journey', 'teal');
+      showToast(
+        (backendError != null && backendError.isNotEmpty)
+            ? backendError
+            : 'No routes found — try a more specific destination',
+        'teal',
+      );
     } catch (e, stack) {
       debugPrint('[searchRoutes] ERROR: $e');
       debugPrint('[searchRoutes] STACK: $stack');

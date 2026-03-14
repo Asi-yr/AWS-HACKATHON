@@ -46,15 +46,39 @@ class ApiClient {
         'mode': mode,
         ...?extraParams,
       }),
-    );
+    ).timeout(const Duration(seconds: 90));
 
-    if (resp.statusCode != 200) {
-      throw Exception('Backend returned ${resp.statusCode}');
+    // ── Never throw on HTTP errors — always return a usable map ──────────
+    // The controller checks routes.isEmpty and surfaces the error as a toast.
+    // Throwing here crashes the app with an unhandled exception on every
+    // "no route found" / geocoding failure from the backend.
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(resp.body);
+    } catch (_) {
+      decoded = <String, dynamic>{};
+    }
+    if (decoded is! Map<String, dynamic>) {
+      decoded = <String, dynamic>{};
     }
 
-    final dynamic decoded = jsonDecode(resp.body);
-    if (decoded is! Map<String, dynamic>) {
-      throw Exception('Unexpected /api/routes payload shape');
+    // 4xx / 5xx — backend returned an error payload like {"error": "..."}
+    if (resp.statusCode != 200) {
+      return {
+        'routes': <RouteModel>[],
+        'error': (decoded['error'] ?? decoded['message'] ?? 'No route found (${resp.statusCode})').toString(),
+        'incidents': <dynamic>[],
+        'mmda_banner': '',
+        'mmda_closures_count': 0,
+        'earthquakes': <dynamic>[],
+        'seismic_banner': '',
+        'weather_risk': 'clear',
+        'flood_risk': 'none',
+        'orig_lat': null,
+        'orig_lon': null,
+        'dest_lat': null,
+        'dest_lon': null,
+      };
     }
 
     // Extract routes
@@ -95,46 +119,40 @@ class ApiClient {
     };
   }
 
-  /// Original method for backward compatibility.
-  /// Call the backend `/api/routes` endpoint and adapt the result into
-  /// the app's `RouteModel` shape used by ExploreView.
   Future<List<RouteModel>> searchRoutes({
     required String origin,
     required String destination,
     String mode = 'commute',
   }) async {
-    final resp = await http.post(
-      _uri('/api/routes'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'origin': origin,
-        'destination': destination,
-        // The backend accepts `mode` or `commuterType`.
-        'mode': mode,
-      }),
-    );
+    try {
+      final resp = await http.post(
+        _uri('/api/routes'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'origin': origin,
+          'destination': destination,
+          'mode': mode,
+        }),
+      ).timeout(const Duration(seconds: 90));
 
-    if (resp.statusCode != 200) {
-      throw Exception('Backend returned ${resp.statusCode}');
-    }
+      if (resp.statusCode != 200) return const [];
 
-    final dynamic decoded = jsonDecode(resp.body);
-    if (decoded is! Map<String, dynamic>) {
-      throw Exception('Unexpected /api/routes payload shape');
-    }
+      final dynamic decoded = jsonDecode(resp.body);
+      if (decoded is! Map<String, dynamic>) return const [];
 
-    final routesJson = decoded['routes'];
-    if (routesJson is! List) {
+      final routesJson = decoded['routes'];
+      if (routesJson is! List) return const [];
+
+      final List<RouteModel> result = [];
+      for (var i = 0; i < routesJson.length; i++) {
+        final r = routesJson[i];
+        if (r is! Map<String, dynamic>) continue;
+        result.add(_routeFromApi(i, r));
+      }
+      return result;
+    } catch (_) {
       return const [];
     }
-
-    final List<RouteModel> result = [];
-    for (var i = 0; i < routesJson.length; i++) {
-      final r = routesJson[i];
-      if (r is! Map<String, dynamic>) continue;
-      result.add(_routeFromApi(i, r));
-    }
-    return result;
   }
 
   RouteModel _routeFromApi(int index, Map<String, dynamic> r) {
@@ -142,8 +160,17 @@ class ApiClient {
     final String distanceStr = (r['distance'] ?? '').toString();
     final int minutes = _parseMinutes(timeStr);
 
-    final numFare = r['fare'];
-    final int fare = numFare is num ? numFare.round() : 0;
+    // ── Fare: backend sends either a plain num OR { display, value } ──────
+    final fareRaw = r['fare'];
+    final int fare;
+    if (fareRaw is num) {
+      fare = fareRaw.round();
+    } else if (fareRaw is Map) {
+      final v = fareRaw['value'];
+      fare = v is num ? v.round() : 0;
+    } else {
+      fare = 0;
+    }
 
     final numScore = r['safety_score'] ?? 75;
     final int safetyScore = numScore is num ? numScore.round() : 75;
@@ -152,23 +179,15 @@ class ApiClient {
         (r['mode_label'] ?? r['route_name'] ?? 'Route ${index + 1}').toString();
     final String modes = modeLabelRaw;
 
-    final String tag = _tagFromModeLabel(modeLabelRaw);
+    final String tag = _tagFromScore(safetyScore, r['tag'] as String?);
 
     final String safetyNote =
         (r['safety_note'] ??
                 'Safety score $safetyScore based on live risk data.')
             .toString();
 
-    // Basic step list: keep it simple and let the design drive the text.
-    final List<RouteStep> steps = [
-      RouteStep(
-        title: modes,
-        description: [
-          if (timeStr.isNotEmpty) timeStr,
-          if (distanceStr.isNotEmpty) distanceStr,
-        ].join(' · '),
-      ),
-    ];
+    // ── Build step list from segments (rich breakdown) ───────────────────
+    final List<RouteStep> steps = _buildSteps(r, modes, timeStr, distanceStr);
 
     final List<List<double>> polyline = _extractPolyline(r);
 
@@ -182,28 +201,83 @@ class ApiClient {
       safetyNote: safetyNote,
       steps: steps,
       polyline: polyline,
-      // Back-end does not yet expose explicit commuter/ligtas tags.
       commuterTags: const [],
       ligtasTags: const [],
-      // ── Live risk warnings from /api/routes pipeline ──────────────────────
       seismicWarning: r['seismic_warning'] as String?,
       floodWarning: r['flood_warning'] as String?,
       crimeWarning: r['crime_warning'] as String?,
       profileWarnings: r['profile_warnings'] as List<dynamic>?,
-      // ── Map overlay data for _MapLayer ────────────────────────────────────
-      // route_crime_zones: [{ risk, name, summary, coords:[latMin,latMax,lonMin,lonMax] }]
       routeCrimeZones: (r['route_crime_zones'] is List)
           ? (r['route_crime_zones'] as List)
                 .whereType<Map<String, dynamic>>()
                 .toList()
           : null,
-      // flood_zones_map: [{ lat, lon, risk, label, depth_m, rain_active }]
       floodZonesMap: (r['flood_zones_map'] is List)
           ? (r['flood_zones_map'] as List)
                 .whereType<Map<String, dynamic>>()
                 .toList()
           : null,
     );
+  }
+
+  /// Build a step list from backend segment data.
+  /// Falls back to a single summary step when no segments are present.
+  List<RouteStep> _buildSteps(
+    Map<String, dynamic> r,
+    String modes,
+    String timeStr,
+    String distanceStr,
+  ) {
+    final segments = r['segments'];
+    if (segments is List && segments.isNotEmpty) {
+      final steps = <RouteStep>[];
+      for (final seg in segments) {
+        if (seg is! Map<String, dynamic>) continue;
+        final type = (seg['type'] ?? '').toString();
+        final label = (seg['label'] ?? '').toString();
+        if (label.isEmpty && type.isEmpty) continue;
+
+        final String title;
+        final String desc;
+        switch (type) {
+          case 'walk':
+            title = label.isNotEmpty ? label : 'Walk';
+            final walkDist = seg['distance']?.toString() ?? '';
+            desc = walkDist.isNotEmpty ? walkDist : '';
+            break;
+          case 'train':
+            title = label.isNotEmpty ? label : 'Train';
+            final stations = seg['stations'] as List?;
+            final sc = stations?.length ?? 0;
+            desc = sc > 1 ? '$sc stations' : '';
+            break;
+          case 'jeepney':
+            title = label.isNotEmpty ? label : 'Jeepney';
+            desc = '';
+            break;
+          case 'bus':
+            title = label.isNotEmpty ? label : 'Bus';
+            desc = '';
+            break;
+          default:
+            title = label.isNotEmpty ? label : type;
+            desc = '';
+        }
+        steps.add(RouteStep(title: title, description: desc, vehicleName: type));
+      }
+      if (steps.isNotEmpty) return steps;
+    }
+
+    // Fallback single step
+    return [
+      RouteStep(
+        title: modes,
+        description: [
+          if (timeStr.isNotEmpty) timeStr,
+          if (distanceStr.isNotEmpty) distanceStr,
+        ].join(' · '),
+      ),
+    ];
   }
 
   List<List<double>> _extractPolyline(Map<String, dynamic> r) {
@@ -290,13 +364,14 @@ class ApiClient {
     return total.round();
   }
 
-  String _tagFromModeLabel(String modeLabel) {
-    final lower = modeLabel.toLowerCase();
-    if (lower.contains('fastest')) return 'fastest';
-    if (lower.contains('balanced')) return 'balanced';
-    if (lower.contains('only route')) return 'balanced';
-    if (lower.contains('alternate')) return 'moderate';
-    return 'balanced';
+  /// Derive a RouteModel tag from the backend `tag` field (if present)
+  /// or from the safety score as a fallback.
+  String _tagFromScore(int safetyScore, String? backendTag) {
+    if (backendTag != null && backendTag.isNotEmpty) return backendTag;
+    if (safetyScore >= 85) return 'safest';
+    if (safetyScore >= 75) return 'balanced';
+    if (safetyScore >= 65) return 'moderate';
+    return 'dangerous';
   }
 
   double? _toDouble(dynamic v) {
