@@ -94,4 +94,7 @@ ligtas_app/build/
 ligtas_app/.dart_tool/
 ligtas_app/.packages
 ligtas_app/pubspec.lock
+ligtas_app/.flutter-plugins
+ligtas_app/.flutter-plugins-dependencies
+ligtas_app/.metadata
 .flutter
