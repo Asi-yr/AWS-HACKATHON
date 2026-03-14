@@ -969,27 +969,6 @@ class ApiClient {
     }
   }
 
-  /// Fetch safe spots (police, hospitals, fire stations) near a coordinate.
-  /// Returns list of spot maps from `/api/safe-spots`.
-  Future<List<Map<String, dynamic>>> getSafeSpots({
-    required double lat,
-    required double lon,
-    int radius = 1500,
-  }) async {
-    try {
-      final resp = await http
-          .get(_uri('/api/safe-spots?lat=$lat&lon=$lon&radius=$radius'))
-          .timeout(const Duration(seconds: 8));
-      if (resp.statusCode != 200) return const [];
-      final decoded = jsonDecode(resp.body);
-      final spots = decoded['spots'];
-      if (spots is List) return spots.cast<Map<String, dynamic>>();
-      return const [];
-    } catch (_) {
-      return const [];
-    }
-  }
-
   /// Reverse-geocode a lat/lon to a human-readable address label.
   /// Returns an empty string on failure.
   Future<String> reverseGeocode({

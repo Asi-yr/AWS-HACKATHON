@@ -276,6 +276,32 @@ class ExploreController extends ChangeNotifier {
 
         setAdvisory(newAdvisory);
       }
+
+      // ── 2. Fetch safe-spot POIs (hospitals, police, fire stations, etc.) ────
+      final spotsData = await ApiClient.instance.getSafeSpots(
+        lat: lat,
+        lon: lon,
+        token: token,
+      );
+      final spotList = spotsData['spots'] as List? ?? [];
+      for (final spot in spotList) {
+        if (spot is Map<String, dynamic>) {
+          final sLat  = (spot['lat'] as num?)?.toDouble();
+          final sLon  = (spot['lon'] as num?)?.toDouble();
+          final label = spot['label'] as String? ?? spot['name'] as String? ?? 'Safe Spot';
+          final type  = spot['type']  as String? ?? '';
+          if (sLat == null || sLon == null) continue;
+          newPois.add(PoiModel(
+            lat: sLat, lng: sLon,
+            label: label,
+            icon: _iconForSpotType(type),
+            color: _colorForSpotType(type),
+          ));
+        }
+      }
+
+      setHotspots(newHotspots);
+      setPois(newPois);
     } catch (e) {
       debugPrint('[ExploreController] Error fetching safety overlays: $e');
     }
