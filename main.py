@@ -1440,9 +1440,20 @@ def get_routes():
     print(f"[DEBUG] [get_routes] Geocode resolution took {time.time() - t_geo:.4f}s")
     print(f"[DEBUG] [get_routes] Final coordinates -> Orig: ({orig_lat}, {orig_lon}), Dest: ({dest_lat}, {dest_lon})")
 
-    if not orig_lon or not dest_lon:
-        print("[DEBUG][get_routes] Missing locations. Returning error 400.")
-        return jsonify({"error": "Location not found."}), 400
+    if not orig_lon or not orig_lat:
+        print("[DEBUG][get_routes] Missing origin. Returning error 400.")
+        return jsonify({"error": "Could not find your origin location. Try a more specific address."}), 400
+
+    if not dest_lon or not dest_lat:
+        # Destination not found — return a friendly error that tells the app
+        # to show a "location not found" message rather than a generic failure.
+        print(f"[DEBUG][get_routes] Destination '{dest_text}' could not be geocoded.")
+        return jsonify({
+            "error": f"Could not find '{dest_text}'. Try a more specific address, landmark, or neighbourhood name.",
+            "error_type": "dest_not_found",
+            "origin_lat": orig_lat,
+            "origin_lon": orig_lon,
+        }), 400
 
     # Calculate the route
     print("[DEBUG] [get_routes] Calling get_navigation_data()...")

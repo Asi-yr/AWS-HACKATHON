@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -43,6 +44,11 @@ final preferenceOptions = [
   FilterOption(key: 'cheapest', label: 'Cheapest', icon: Icons.savings_rounded),
   FilterOption(key: 'balanced', label: 'Balanced', icon: Icons.balance_rounded),
   FilterOption(key: 'moderate', label: 'Moderate', icon: Icons.adjust_rounded),
+  FilterOption(
+    key: 'avoid_flood',
+    label: 'Avoid Flood Zones',
+    icon: Icons.water_damage_rounded,
+  ),
 ];
 
 // ── Vulnerable profile options ──────────────────────────────────────────────
@@ -869,7 +875,11 @@ class _DetailsPanelState extends State<_DetailsPanel> {
                     _statBox('${route.minutes} min', 'Duration', isDark),
                     const SizedBox(width: 8),
                     _statBox(
-                      route.fare > 0 ? '₱${route.fare}' : '—',
+                      route.fareDisplay.isNotEmpty
+                          ? route.fareDisplay
+                          : route.fare > 0
+                          ? '₱${route.fare}'
+                          : '—',
                       'Fare',
                       isDark,
                     ),
@@ -1100,13 +1110,19 @@ class _DetailsPanelState extends State<_DetailsPanel> {
       );
     }
     final flood = route.floodWarning;
-    if (flood != null && flood.isNotEmpty) {
+    final showFlood = flood != null && flood.isNotEmpty;
+    // Show flood warning if: raining, OR user has "Avoid Flood Zones" filter active
+    final floodCtrl = context.read<ExploreController>();
+    final floodFilterActive =
+        floodCtrl.isRaining ||
+        floodCtrl.preferenceFilters.contains('avoid_flood');
+    if (showFlood && floodFilterActive) {
       entries.add(
         _RiskWarning(
           icon: Icons.water_rounded,
           color: const Color(0xFF3B82F6),
           bg: const Color(0x223B82F6),
-          text: flood,
+          text: flood!,
         ),
       );
     }
@@ -1691,7 +1707,7 @@ class _SafeSpotsToggleBar extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                isOn ? '🏥 Safe Spots: ON' : '🏥 Include Safe Spots',
+                isOn ? 'Safe Spots: ON' : 'Include Safe Spots',
                 style: GoogleFonts.plusJakartaSans(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
@@ -1700,7 +1716,7 @@ class _SafeSpotsToggleBar extends StatelessWidget {
               ),
             ),
             Text(
-              '🚔 🏥 💊',
+              'Hospital · Police · Pharmacy',
               style: TextStyle(
                 fontSize: 10,
                 color: isOn ? Colors.white70 : AppColors.text3(isDark),
@@ -2007,7 +2023,7 @@ class _RouteCard extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 10),
                       Icon(
                         Icons.payments_rounded,
                         size: 13,
@@ -2015,28 +2031,50 @@ class _RouteCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        '₱${route.fare}',
+                        route.fareDisplay.isNotEmpty
+                            ? route.fareDisplay
+                            : route.fare > 0
+                            ? '₱${route.fare}'
+                            : '—',
                         style: GoogleFonts.plusJakartaSans(
                           color: AppColors.text2(isDark),
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
+                      if (route.distance.isNotEmpty) ...[
+                        const SizedBox(width: 10),
+                        Icon(
+                          Icons.straighten_rounded,
+                          size: 13,
+                          color: AppColors.text2(isDark),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          route.distance,
+                          style: GoogleFonts.plusJakartaSans(
+                            color: AppColors.text2(isDark),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
-                  // ── Live risk warnings (inline, compact) ──────────────
                   if (route.seismicWarning != null &&
                       route.seismicWarning!.isNotEmpty)
                     _inlineWarning(
-                      '🌍',
+                      Icons.crisis_alert_rounded,
                       route.seismicWarning!,
                       const Color(0xFFE74C3C),
                       isDark,
                     ),
                   if (route.floodWarning != null &&
-                      route.floodWarning!.isNotEmpty)
+                      route.floodWarning!.isNotEmpty &&
+                      (ctrl.isRaining ||
+                          ctrl.preferenceFilters.contains('avoid_flood')))
                     _inlineWarning(
-                      '🌊',
+                      Icons.water_rounded,
                       route.floodWarning!,
                       const Color(0xFF1565C0),
                       isDark,
@@ -2044,7 +2082,7 @@ class _RouteCard extends StatelessWidget {
                   if (route.crimeWarning != null &&
                       route.crimeWarning!.isNotEmpty)
                     _inlineWarning(
-                      '🚨',
+                      Icons.shield_rounded,
                       route.crimeWarning!,
                       const Color(0xFFF59E0B),
                       isDark,
@@ -2052,20 +2090,38 @@ class _RouteCard extends StatelessWidget {
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: meta.bgColor,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                '${route.safetyScore}%',
-                style: GoogleFonts.plusJakartaSans(
-                  color: meta.color,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: route.tagMeta.bg,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    route.tagMeta.label,
+                    style: GoogleFonts.plusJakartaSans(
+                      color: route.tagMeta.fg,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 4),
+                Text(
+                  '${route.safetyScore}% safe',
+                  style: GoogleFonts.plusJakartaSans(
+                    color: meta.color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -2073,12 +2129,12 @@ class _RouteCard extends StatelessWidget {
     );
   }
 
-  Widget _inlineWarning(String emoji, String text, Color color, bool isDark) {
+  Widget _inlineWarning(IconData icon, String text, Color color, bool isDark) {
     return Padding(
       padding: const EdgeInsets.only(top: 5),
       child: Row(
         children: [
-          Text(emoji, style: const TextStyle(fontSize: 11)),
+          Icon(icon, size: 12, color: color),
           const SizedBox(width: 4),
           Expanded(
             child: Text(
@@ -2088,7 +2144,7 @@ class _RouteCard extends StatelessWidget {
                 fontWeight: FontWeight.w600,
                 color: color,
               ),
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -2244,8 +2300,35 @@ class _MapLayer extends StatefulWidget {
 
 class _MapLayerState extends State<_MapLayer> {
   double? _lastOrigLat, _lastOrigLon, _lastDestLat, _lastDestLon;
-  // Track active route ID to re-fit camera and redraw when user selects a route
   String? _lastActiveRouteId;
+  double _currentZoom = 14.0;
+  StreamSubscription<MapEvent>? _mapEventSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _mapEventSub = widget.mapCtrl.mapEventStream.listen((event) {
+      if (event is MapEventMove || event is MapEventScrollWheelZoom) {
+        final z = widget.mapCtrl.camera.zoom;
+        final crossed =
+            (_currentZoom < 13 && z >= 13) ||
+            (_currentZoom >= 13 && z < 13) ||
+            (_currentZoom < 15 && z >= 15) ||
+            (_currentZoom >= 15 && z < 15);
+        if (crossed && mounted) {
+          setState(() => _currentZoom = z);
+        } else {
+          _currentZoom = z;
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _mapEventSub?.cancel();
+    super.dispose();
+  }
 
   @override
   void didChangeDependencies() {
@@ -2263,6 +2346,18 @@ class _MapLayerState extends State<_MapLayer> {
     final dLat = ctrl.resolvedDestLat;
     final dLon = ctrl.resolvedDestLon;
     final activeId = ctrl.activeRoute?.id;
+
+    // When a new search starts the controller resets coords to null.
+    // Clear our cache so the next geocode result always triggers a camera move,
+    // even if the destination is close to the previous one.
+    if (oLat == null && oLon == null && dLat == null && dLon == null) {
+      _lastOrigLat = null;
+      _lastOrigLon = null;
+      _lastDestLat = null;
+      _lastDestLon = null;
+      _lastActiveRouteId = null;
+      return;
+    }
 
     final hasOrig = oLat != null && oLon != null;
     final hasDest = dLat != null && dLon != null;
@@ -2364,14 +2459,21 @@ class _MapLayerState extends State<_MapLayer> {
       case 'walk':
         return const Color(0xFF7F8C8D); // grey
       case 'jeepney':
+      case 'puj':
         return const Color(0xFFE67E22); // orange
       case 'bus':
         return const Color(0xFF16A085); // teal
       case 'train':
+      case 'lrt':
+      case 'mrt':
         return const Color(0xFF27AE60); // green
       case 'road':
       case 'car':
+      case 'driving':
         return const Color(0xFF2980B9); // blue
+      case 'transit':
+      case 'motorcycle':
+        return const Color(0xFF8E44AD); // purple
       default:
         return const Color(0xFF2980B9);
     }
@@ -2434,6 +2536,13 @@ class _MapLayerState extends State<_MapLayer> {
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<ExploreController>();
+
+    // Trigger camera fit after every rebuild so A/B pins appear as soon as
+    // the early geocode step sets resolvedOrig/DestLat — not just on init.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fitBoundsIfChanged();
+    });
+
     final active = ctrl.activeRoute;
 
     // ── 1. Route polylines — per-segment color by transport mode ─────────────
@@ -2489,36 +2598,38 @@ class _MapLayerState extends State<_MapLayer> {
           final sc = seg['coords'];
           final segPts = <LatLng>[];
 
-          if (sc is List) {
-            // Handle flat [[lat,lon],...] or nested train [[[lat,lon],...],...]
-            if (sc.isNotEmpty && sc.first is List) {
-              final first = sc.first as List;
-              if (first.isNotEmpty && first.first is List) {
-                // Nested (train segments)
-                for (final sub in sc) {
-                  if (sub is List) {
-                    for (final p in sub) {
-                      if (p is List && p.length >= 2) {
-                        final lat = (p[0] as num?)?.toDouble();
-                        final lon = (p[1] as num?)?.toDouble();
-                        if (lat != null && lon != null) {
-                          segPts.add(LatLng(lat, lon));
-                        }
-                      }
+          if (sc is List && sc.isNotEmpty) {
+            // Detect format: flat [[lat,lon]], nested [[[lat,lon],...]], or num pairs
+            final first = sc.first;
+            if (first is List && first.isNotEmpty && first.first is List) {
+              // Nested (train segments: [[[lat,lon],...], ...])
+              for (final sub in sc) {
+                if (sub is List) {
+                  for (final p in sub) {
+                    if (p is List && p.length >= 2) {
+                      final lat = (p[0] as num?)?.toDouble();
+                      final lon = (p[1] as num?)?.toDouble();
+                      if (lat != null && lon != null)
+                        segPts.add(LatLng(lat, lon));
                     }
                   }
                 }
-              } else {
-                // Flat
-                for (final p in sc) {
-                  if (p is List && p.length >= 2) {
-                    final lat = (p[0] as num?)?.toDouble();
-                    final lon = (p[1] as num?)?.toDouble();
-                    if (lat != null && lon != null) {
-                      segPts.add(LatLng(lat, lon));
-                    }
-                  }
+              }
+            } else if (first is List && first.length >= 2) {
+              // Flat [[lat,lon], ...]
+              for (final p in sc) {
+                if (p is List && p.length >= 2) {
+                  final lat = (p[0] as num?)?.toDouble();
+                  final lon = (p[1] as num?)?.toDouble();
+                  if (lat != null && lon != null) segPts.add(LatLng(lat, lon));
                 }
+              }
+            } else if (first is num) {
+              // Raw flat pair [lat, lon] (single coord stored at root)
+              if (sc.length >= 2) {
+                final lat = (sc[0] as num?)?.toDouble();
+                final lon = (sc[1] as num?)?.toDouble();
+                if (lat != null && lon != null) segPts.add(LatLng(lat, lon));
               }
             }
           }
@@ -2571,16 +2682,14 @@ class _MapLayerState extends State<_MapLayer> {
             point: LatLng(midLat.toDouble(), midLon.toDouble()),
             radius: r,
             useRadiusInMeter: true,
-            color: color.withValues(alpha: risk == 'high' ? 0.09 : 0.045),
-            borderColor: color.withValues(alpha: risk == 'high' ? 0.88 : 0.78),
-            borderStrokeWidth: risk == 'high' ? 2.0 : 1.2,
+            color: color.withValues(alpha: risk == 'high' ? 0.12 : 0.07),
+            borderStrokeWidth: 0,
           ),
         );
       }
 
-      // Flood zones — ONLY show when it is actively raining
+      // Flood zones — ONLY when actively raining
       for (final zone in (active.floodZonesMap ?? [])) {
-        // rain_active from backend overrides; fall back to weatherRisk check
         final bool showFlood = zone['rain_active'] is bool
             ? (zone['rain_active'] as bool)
             : ctrl.isRaining;
@@ -2595,10 +2704,10 @@ class _MapLayerState extends State<_MapLayer> {
             ? 330.0
             : 265.0;
         final fillOp = risk == 'high'
-            ? 0.18
+            ? 0.16
             : risk == 'moderate'
-            ? 0.13
-            : 0.09;
+            ? 0.11
+            : 0.07;
         final color = _floodColor(risk);
         circles.add(
           CircleMarker(
@@ -2606,15 +2715,12 @@ class _MapLayerState extends State<_MapLayer> {
             radius: radius,
             useRadiusInMeter: true,
             color: color.withValues(alpha: fillOp),
-            borderColor: color.withValues(alpha: 0.85),
-            borderStrokeWidth: 2.5,
+            borderStrokeWidth: 0,
           ),
         );
       }
     }
 
-    // Community report / incident circles (from ctrl.hotspots — already populated
-    // by fetchSafetyOverlays and setAlertData earthquake hotspots)
     for (final h in ctrl.hotspots) {
       circles.add(
         CircleMarker(
@@ -2622,13 +2728,11 @@ class _MapLayerState extends State<_MapLayer> {
           radius: h.radiusMeters,
           useRadiusInMeter: true,
           color: h.color,
-          borderColor: h.color.withValues(alpha: 1.0),
-          borderStrokeWidth: 1.5,
+          borderStrokeWidth: 0,
         ),
       );
     }
 
-    // Incident circles from /api/routes response
     for (final inc in ctrl.incidents) {
       final lat = (inc['lat'] as num?)?.toDouble();
       final lon = (inc['lon'] as num?)?.toDouble();
@@ -2642,9 +2746,8 @@ class _MapLayerState extends State<_MapLayer> {
           point: LatLng(lat, lon),
           radius: radius,
           useRadiusInMeter: true,
-          color: color.withValues(alpha: 0.14),
-          borderColor: color.withValues(alpha: 0.85),
-          borderStrokeWidth: 2.0,
+          color: color.withValues(alpha: 0.12),
+          borderStrokeWidth: 0,
         ),
       );
     }
@@ -2653,10 +2756,6 @@ class _MapLayerState extends State<_MapLayer> {
     final markers = <Marker>[];
 
     // ── Origin A-pin and destination B-pin ───────────────────────────────────
-    // Use server-resolved geocoded coords from the last search.
-    // These are set as soon as searchRoutes() completes — no need to wait
-    // for the user to select a route (activeRoute).
-    // Fall back to polyline endpoints only if resolved coords aren't available.
     final origLat =
         ctrl.resolvedOrigLat ??
         (active != null && active.polyline.isNotEmpty
@@ -2713,7 +2812,8 @@ class _MapLayerState extends State<_MapLayer> {
       );
     }
 
-    // ── Crime / flood emoji pulse markers for active route ────────────────────
+    // ── Hazard markers: no emojis, zoom-gated ─────────────────────────────────
+    // < 13: hidden  |  13–14: dot only  |  ≥ 15: icon + label pill
     if (active != null) {
       for (final zone in (active.routeCrimeZones ?? [])) {
         final c = zone['coords'] as List?;
@@ -2722,83 +2822,152 @@ class _MapLayerState extends State<_MapLayer> {
         final midLat = ((c[0] as num) + (c[1] as num)) / 2;
         final midLon = ((c[2] as num) + (c[3] as num)) / 2;
         final color = _crimeColor(risk);
-        final emoji = risk == 'high' ? '⚠️' : '🔶';
         final name = zone['name'] as String? ?? 'Crime Zone';
-        markers.add(
-          Marker(
-            point: LatLng(midLat.toDouble(), midLon.toDouble()),
-            width: 60,
-            height: 26,
-            child: _riskPill(emoji, name, color),
-          ),
-        );
+        final summary = zone['summary'] as String? ?? '';
+        if (_currentZoom >= 13) {
+          markers.add(
+            Marker(
+              point: LatLng(midLat.toDouble(), midLon.toDouble()),
+              width: _currentZoom >= 15 ? 110 : 14,
+              height: 28,
+              child: GestureDetector(
+                onTap: () =>
+                    _showZoneSheet(context, name, summary, color, risk),
+                child: _currentZoom >= 15
+                    ? _labelPill(Icons.warning_rounded, name, color)
+                    : _dotPin(color),
+              ),
+            ),
+          );
+        }
       }
 
       for (final zone in (active.floodZonesMap ?? [])) {
-        final rainActive = zone['rain_active'] is bool
-            ? zone['rain_active'] as bool
+        final bool rainActive = zone['rain_active'] is bool
+            ? (zone['rain_active'] as bool)
             : ctrl.isRaining;
-        if (rainActive == false) continue;
+        if (!rainActive) continue;
         final lat = (zone['lat'] as num?)?.toDouble();
         final lon = (zone['lon'] as num?)?.toDouble();
         if (lat == null || lon == null) continue;
         final risk = zone['risk'] as String? ?? 'low';
-        final color = _floodColor(risk);
-        final emoji = risk == 'high'
-            ? '🌊'
-            : risk == 'moderate'
-            ? '💧'
-            : '💦';
         final label =
             zone['label'] as String? ??
             (risk == 'high'
-                ? 'Flooding!'
-                : risk == 'moderate'
                 ? 'Flooding'
+                : risk == 'moderate'
+                ? 'Flood Risk'
                 : 'Low Flood');
-        markers.add(
-          Marker(
-            point: LatLng(lat, lon),
-            width: 70,
-            height: 26,
-            child: _riskPill(emoji, label, color),
-          ),
-        );
+        final color = _floodColor(risk);
+        if (_currentZoom >= 13) {
+          markers.add(
+            Marker(
+              point: LatLng(lat, lon),
+              width: _currentZoom >= 15 ? 110 : 14,
+              height: 28,
+              child: _currentZoom >= 15
+                  ? _labelPill(Icons.water_rounded, label, color)
+                  : _dotPin(color),
+            ),
+          );
+        }
       }
     }
 
-    // Incident emoji markers
     for (final inc in ctrl.incidents) {
       final lat = (inc['lat'] as num?)?.toDouble();
       final lon = (inc['lon'] as num?)?.toDouble();
       if (lat == null || lon == null) continue;
       final type = inc['type'] as String? ?? 'other';
       final color = _incidentColor(type);
-      final emoji = _incidentEmoji(type);
       final title = inc['title'] as String? ?? type;
-      markers.add(
-        Marker(
-          point: LatLng(lat, lon),
-          width: 70,
-          height: 26,
-          child: _riskPill(emoji, title, color),
-        ),
-      );
+      if (_currentZoom >= 13) {
+        markers.add(
+          Marker(
+            point: LatLng(lat, lon),
+            width: _currentZoom >= 15 ? 110 : 14,
+            height: 28,
+            child: _currentZoom >= 15
+                ? _labelPill(_incidentIcon(type), title, color)
+                : _dotPin(color),
+          ),
+        );
+      }
     }
 
-    // ── Safe-spot POI markers (only shown when toggle is ON) ─────────────────
-    final poiMarkers = ctrl.safeSpotsVisible
-        ? ctrl.pois
-              .map(
-                (poi) => Marker(
-                  point: LatLng(poi.lat, poi.lng),
-                  width: 32,
-                  height: 32,
-                  child: _poiPin(poi.color, poi.icon, poi.label),
-                ),
-              )
-              .toList()
-        : <Marker>[];
+    // ── Safe-spot POI markers — cluster at zoom<15, individual pins at zoom≥15
+    final poiMarkers = <Marker>[];
+    if (ctrl.safeSpotsVisible && ctrl.pois.isNotEmpty) {
+      if (_currentZoom >= 15) {
+        for (final poi in ctrl.pois) {
+          poiMarkers.add(
+            Marker(
+              point: LatLng(poi.lat, poi.lng),
+              width: 88,
+              height: 48,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _poiDot(poi.color, poi.icon),
+                  const SizedBox(height: 2),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.93),
+                      borderRadius: BorderRadius.circular(4),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.12),
+                          blurRadius: 3,
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      poi.name.isNotEmpty ? poi.name : poi.label,
+                      style: TextStyle(
+                        fontSize: 8,
+                        fontWeight: FontWeight.w700,
+                        color: poi.color,
+                        height: 1,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+      } else {
+        final Map<String, List<PoiModel>> byType = {};
+        for (final poi in ctrl.pois) {
+          byType.putIfAbsent(poi.label, () => []).add(poi);
+        }
+        for (final entry in byType.entries) {
+          final list = entry.value;
+          final cLat =
+              list.map((p) => p.lat).reduce((a, b) => a + b) / list.length;
+          final cLon =
+              list.map((p) => p.lng).reduce((a, b) => a + b) / list.length;
+          poiMarkers.add(
+            Marker(
+              point: LatLng(cLat, cLon),
+              width: 52,
+              height: 28,
+              child: _poiCluster(
+                list.first.icon,
+                list.first.color,
+                list.length,
+              ),
+            ),
+          );
+        }
+      }
+    }
 
     return FlutterMap(
       mapController: widget.mapCtrl,
@@ -2927,47 +3096,220 @@ class _MapLayerState extends State<_MapLayer> {
     );
   }
 
-  // ── Safe-spot POI pin ─────────────────────────────────────────────────────
-  Widget _poiPin(Color color, IconData icon, String label) => Tooltip(
-    message: label,
-    child: Container(
-      width: 28,
-      height: 28,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Icon(icon, color: Colors.white, size: 14),
+  Widget _dotPin(Color color) => Container(
+    width: 12,
+    height: 12,
+    decoration: BoxDecoration(
+      color: color,
+      shape: BoxShape.circle,
+      boxShadow: [
+        BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 3),
+      ],
     ),
   );
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
-  static String _incidentEmoji(String type) {
+  Widget _labelPill(IconData icon, String name, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(14),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.22),
+          blurRadius: 5,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: Colors.white, size: 11),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            name,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              height: 1,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _poiDot(Color color, IconData icon) => Container(
+    width: 28,
+    height: 28,
+    decoration: BoxDecoration(
+      color: color,
+      shape: BoxShape.circle,
+      border: Border.all(color: Colors.white, width: 2),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.25),
+          blurRadius: 5,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Icon(icon, color: Colors.white, size: 13),
+  );
+
+  // Kept for backward compat — no longer called
+  Widget _poiPin(Color color, IconData icon, String label) =>
+      _poiDot(color, icon);
+
+  Widget _poiCluster(IconData icon, Color color, int count) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(14),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.25),
+          blurRadius: 5,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: Colors.white, size: 11),
+        const SizedBox(width: 3),
+        Text(
+          '$count',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            height: 1,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  void _showZoneSheet(
+    BuildContext ctx,
+    String name,
+    String summary,
+    Color color,
+    String risk,
+  ) {
+    showModalBottomSheet(
+      context: ctx,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E2530),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.warning_rounded, color: color, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        '${risk[0].toUpperCase()}${risk.substring(1)} Crime Risk',
+                        style: TextStyle(
+                          color: color.withValues(alpha: 0.75),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (summary.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                summary,
+                style: const TextStyle(
+                  color: Color(0xFFCBD5E1),
+                  fontSize: 12,
+                  height: 1.5,
+                ),
+              ),
+            ],
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.shield_rounded, color: color, size: 15),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Stay alert. Keep valuables secure and use busy routes.',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static IconData _incidentIcon(String type) {
     switch (type) {
       case 'fire':
-        return '🔥';
+        return Icons.local_fire_department_rounded;
       case 'flood':
       case 'flooding':
-        return '🌊';
+        return Icons.water_rounded;
       case 'earthquake':
-        return '🌍';
+        return Icons.crisis_alert_rounded;
       case 'road_closed':
-        return '🚧';
+        return Icons.do_not_disturb_rounded;
       case 'accident':
-        return '💥';
+        return Icons.car_crash_rounded;
       default:
-        return '⚠️';
+        return Icons.warning_rounded;
     }
   }
 
+  // ── Helpers ──────────────────────────────────────────────────────────────
   static double _cos(double radians) {
     // Simple Taylor approximation good enough for small angles in km scale
     double x = radians;
@@ -3534,8 +3876,8 @@ class _MmdaBanner extends StatelessWidget {
     }
 
     final msg = status.isCoded && status.codingMessage != null
-        ? '🚦 ${status.codingMessage}'
-        : '🚧 ${status.closuresCount} MMDA road closure${status.closuresCount > 1 ? 's' : ''} active — check route';
+        ? status.codingMessage!
+        : '${status.closuresCount} MMDA road closure${status.closuresCount > 1 ? 's' : ''} active — check route';
 
     return Positioned(
       top: 0,

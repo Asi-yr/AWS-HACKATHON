@@ -323,9 +323,9 @@ _JEEPNEY_CELL    = 0.008        # ~890 m per cell
 _JEEPNEY_SAMPLES = 5            # intermediate line-sample points per route
 
 # Distance thresholds (metres)
-_JBOARD_LIM  = 800              # max walk from user to board point on route
-_JALIGHT_LIM = 950              # max walk from alight point to user destination
-_JXFER_LIM   = 600              # max walk for a jeepney→jeepney transfer
+_JBOARD_LIM  = 1000             # max walk from user to board point on route (was 800)
+_JALIGHT_LIM = 1200             # max walk from alight point to user destination (was 950)
+_JXFER_LIM   = 800              # max walk for a jeepney→jeepney transfer (was 600)
 _JXFER_PEN   = 300              # transfer penalty (added to candidate score)
 
 
@@ -1244,9 +1244,9 @@ def _route_poly(route_id):
 
 _TYPE_COLOR = {'PUJ': '#e67e22', 'PUB': '#16a085', 'RAIL': '#27ae60'}
 _TYPE_LABEL = {'PUJ': 'jeepney', 'PUB': 'bus',     'RAIL': 'train'}
-_BOARD_LIM  = 800
-_ALIGHT_LIM = 950
-_XFER_LIM   = 600
+_BOARD_LIM  = 1000
+_ALIGHT_LIM = 1200
+_XFER_LIM   = 800
 _XFER_PEN   = 300
 
 
@@ -2361,6 +2361,64 @@ def get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, f
         combined = surface_routes + train_routes
         if not combined:
             print(f"[DEBUG][{fn}] !! Zero routes recovered from all pipelines")
+            print(f"[DEBUG][{fn}] Attempting OSRM road fallback for transit...")
+            try:
+                osrm_url = (
+                    f"https://router.project-osrm.org/route/v1/driving/"
+                    f"{orig_lon},{orig_lat};{dest_lon},{dest_lat}"
+                    f"?overview=full&geometries=geojson&alternatives=true&steps=true"
+                )
+                resp = requests.get(osrm_url, timeout=15)
+                osrm = resp.json()
+                if osrm.get('code') == 'Ok' and osrm.get('routes'):
+                    fallback = []
+                    labels = ['Fastest', 'Balanced', 'Alternate']
+                    colors = ['#2980b9', '#27ae60', '#7f8c8d']
+                    for fi, rt in enumerate(osrm['routes'][:3]):
+                        dur_min = int(rt['duration'] / 60)
+                        dist_km = round(rt['distance'] / 1000, 1)
+                        all_coords = [[c[1], c[0]] for c in rt['geometry']['coordinates']]
+
+                        # Build segments from OSRM legs/steps for per-segment coloring
+                        segments = []
+                        for leg in rt.get('legs', []):
+                            for step in leg.get('steps', []):
+                                step_geom = step.get('geometry', {})
+                                step_coords = [[c[1], c[0]] for c in step_geom.get('coordinates', [])]
+                                if len(step_coords) < 2:
+                                    continue
+                                mode_hint = step.get('mode', 'driving')
+                                seg_type = 'walk' if mode_hint == 'walking' else 'transit'
+                                segments.append({
+                                    'type': seg_type,
+                                    'coords': step_coords,
+                                    'label': step.get('name', 'Transit route'),
+                                    'duration': int(step.get('duration', 0) / 60),
+                                })
+
+                        # Fall back to single segment if steps not available
+                        if not segments:
+                            segments = [{'type': 'transit', 'coords': all_coords,
+                                         'label': 'Transit Route', 'duration': dur_min}]
+
+                        fallback.append({
+                            'id': fi,
+                            'name': f"Transit Route {fi+1}",
+                            'time': f"{dur_min} mins",
+                            'distance': f"{dist_km} km",
+                            'mode_label': labels[fi] if fi < len(labels) else f"Route {fi+1}",
+                            'mode_label_color': colors[fi] if fi < len(colors) else '#7f8c8d',
+                            'coords': all_coords,
+                            'segments': segments,
+                        })
+                    if fallback:
+                        print(f"[DEBUG][{fn}] OSRM fallback succeeded: {len(fallback)} routes")
+                        combined = fallback
+            except Exception as fe:
+                print(f"[DEBUG][{fn}] OSRM fallback failed: {fe}")
+
+        if not combined:
+            print(f"[DEBUG][{fn}] !! All pipelines exhausted — no route found")
             print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
             return {"error": "No route found near your origin/destination."}
 

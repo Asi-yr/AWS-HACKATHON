@@ -25,12 +25,14 @@ class HotspotModel {
 
 class PoiModel {
   final double lat, lng;
+  final String name;
   final String label;
   final IconData icon;
   final Color color;
   const PoiModel({
     required this.lat,
     required this.lng,
+    this.name = '',
     required this.label,
     required this.icon,
     this.color = const Color(0xFF0D9E9E),
@@ -366,6 +368,7 @@ class ExploreController extends ChangeNotifier {
   Future<void> fetchSafetyOverlays({
     required double lat,
     required double lon,
+    List<List<double>> polyline = const [],
   }) async {
     try {
       final token = await SessionManager.instance.getAuthToken();
@@ -457,32 +460,55 @@ class ExploreController extends ChangeNotifier {
       }
 
       // ── Safe spots → PoiModel markers ───────────────────────────
+      // Sample 5 evenly-spaced points along the combined polyline so POIs
+      // cover the full route, not just one midpoint.
       try {
-        final spotsData = await ApiClient.instance.getSafeSpots(
-          lat: lat,
-          lon: lon,
-          token: token,
-        );
-
-        if (spotsData['ok'] == true) {
-          final spotList = spotsData['spots'] as List? ?? [];
-          for (final spot in spotList) {
-            if (spot is Map<String, dynamic>) {
-              final sLat = (spot['lat'] as num?)?.toDouble() ?? 0.0;
-              final sLon = (spot['lon'] as num?)?.toDouble() ?? 0.0;
-              final type = spot['type'] as String? ?? '';
-              final label = spot['label'] as String? ?? 'Safe Spot';
-              newPois.add(
-                PoiModel(
-                  lat: sLat,
-                  lng: sLon,
-                  label: label,
-                  icon: _iconForSpotType(type),
-                  color: _colorForSpotType(type),
-                ),
-              );
-            }
+        final seenIds = <String>{};
+        final sampleCoords = <Map<String, double>>[];
+        if (polyline.length >= 2) {
+          final total = polyline.length;
+          for (final idx in <int>{
+            0,
+            total ~/ 4,
+            total ~/ 2,
+            (total * 3) ~/ 4,
+            total - 1,
+          }) {
+            sampleCoords.add({
+              'lat': polyline[idx][0],
+              'lon': polyline[idx][1],
+            });
           }
+        } else {
+          sampleCoords.add({'lat': lat, 'lon': lon});
+        }
+        for (final coord in sampleCoords) {
+          try {
+            final spotsData = await ApiClient.instance.getSafeSpots(
+              lat: coord['lat']!,
+              lon: coord['lon']!,
+              token: token,
+              radiusMeters: 800,
+            );
+            if (spotsData['ok'] == true) {
+              for (final spot in (spotsData['spots'] as List? ?? [])) {
+                if (spot is! Map<String, dynamic>) continue;
+                final sid = spot['id']?.toString() ?? '';
+                if (sid.isNotEmpty) {
+                  if (seenIds.contains(sid)) continue;
+                  seenIds.add(sid);
+                }
+                newPois.add(PoiModel(
+                  lat: (spot['lat'] as num?)?.toDouble() ?? 0.0,
+                  lng: (spot['lon'] as num?)?.toDouble() ?? 0.0,
+                  name: spot['name'] as String? ?? '',
+                  label: spot['label'] as String? ?? 'Safe Spot',
+                  icon: _iconForSpotType(spot['type'] as String? ?? ''),
+                  color: _colorForSpotType(spot['type'] as String? ?? ''),
+                ));
+              }
+            }
+          } catch (_) {}
         }
       } catch (_) {
         // Safe spots are optional — silently degrade
@@ -490,6 +516,9 @@ class ExploreController extends ChangeNotifier {
 
       setHotspots(newHotspots);
       setPois(newPois);
+      if (newPois.isNotEmpty && !_safeSpotsVisible) {
+        _safeSpotsVisible = true;
+      }
     } catch (e) {
       debugPrint('[ExploreController] Error fetching safety overlays: $e');
     }
@@ -886,14 +915,21 @@ class ExploreController extends ChangeNotifier {
           );
         }
 
-        // ── Fetch safe-spot POIs along the route midpoint ────────
-        // Use the midpoint of the first route's polyline so POIs are
-        // centred on the actual route, not the user's GPS position.
-        final poly = routes.first.polyline;
-        final midIdx = poly.length ~/ 2;
-        final safeLat = poly.isNotEmpty ? poly[midIdx][0] : (_lat ?? 14.5995);
-        final safeLon = poly.isNotEmpty ? poly[midIdx][1] : (_lng ?? 120.9842);
-        await fetchSafetyOverlays(lat: safeLat, lon: safeLon);
+        // ── Fetch safe-spot POIs along ALL routes combined ────────
+        // Merge every route polyline so POIs cover whichever route
+        // the user selects, not just the first one.
+        final allPoly = <List<double>>[];
+        for (final r in routes) {
+          allPoly.addAll(r.polyline);
+        }
+        final midIdx = allPoly.length ~/ 2;
+        final safeLat = allPoly.isNotEmpty ? allPoly[midIdx][0] : (_lat ?? 14.5995);
+        final safeLon = allPoly.isNotEmpty ? allPoly[midIdx][1] : (_lng ?? 120.9842);
+        await fetchSafetyOverlays(
+          lat: safeLat,
+          lon: safeLon,
+          polyline: allPoly,
+        );
 
         return;
       }
@@ -1224,9 +1260,6 @@ class ExploreController extends ChangeNotifier {
   RouteModel? get activeRoute => _activeRoute;
 
   void selectRoute(RouteModel r) {
-    // Resolve from _allRoutes by ID so the exact same object reference is used
-    // everywhere — this ensures route.id == active.id always matches correctly
-    // in _MapLayerState after _applyFilters() creates new list copies.
     _activeRoute = _allRoutes.firstWhere(
       (route) => route.id == r.id,
       orElse: () => r,
@@ -1234,6 +1267,14 @@ class ExploreController extends ChangeNotifier {
     _state = AppState.state3;
     SessionManager.instance.setHasActiveRoute(false);
     notifyListeners();
+
+    // Re-fetch safe spots along the newly selected route so markers
+    // always follow the route the user is actually viewing.
+    final poly = _activeRoute!.polyline;
+    if (poly.isNotEmpty) {
+      final mid = poly[poly.length ~/ 2];
+      fetchSafetyOverlays(lat: mid[0], lon: mid[1], polyline: poly);
+    }
   }
 
   void startNavigation() {

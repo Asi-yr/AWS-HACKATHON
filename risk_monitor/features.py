@@ -599,7 +599,9 @@ def _try_parse_pagasa_response(data: dict) -> dict | None:
     name   = (active.get("name") or active.get("international_name")
               or active.get("typhoon_name") or "Tropical Cyclone")
     signal = int(active.get("signal") or active.get("max_signal")
-                 or active.get("psws") or 1)
+                 or active.get("psws") or 0)
+    if signal == 0:
+        return None  # Active cyclone but no signal number — treat as inactive
 
     return {
         "active":   True,

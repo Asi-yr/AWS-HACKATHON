@@ -80,6 +80,7 @@ class ApiClient {
                     decoded['message'] ??
                     'No route found (${resp.statusCode})')
                 .toString(),
+        'error_type': decoded['error_type']?.toString() ?? '',
         'incidents': <dynamic>[],
         'mmda_banner': '',
         'mmda_closures_count': 0,
@@ -87,8 +88,8 @@ class ApiClient {
         'seismic_banner': '',
         'weather_risk': 'clear',
         'flood_risk': 'none',
-        'orig_lat': null,
-        'orig_lon': null,
+        'orig_lat': decoded['origin_lat'],
+        'orig_lon': decoded['origin_lon'],
         'dest_lat': null,
         'dest_lon': null,
       };
@@ -498,10 +499,34 @@ class ApiClient {
   static String? _mergeWarnings(String? a, String? b) {
     final parts = [a, b]
         .where((s) => s != null && s.trim().isNotEmpty)
-        .map((s) => s!.trim())
+        .map((s) => _cleanWarningText(s!.trim()))
+        .where((s) => s.isNotEmpty)
         .toList();
     if (parts.isEmpty) return null;
     return parts.join('\n');
+  }
+
+  /// Strip raw backend warning text to something readable.
+  /// Backend sends: "⚠️ Jollibee, MCU EDSA: 🚨 High crime risk — keep doors locked | Also: long geocoded address..."
+  /// We want: "High crime risk — keep doors locked, avoid isolated roads."
+  static String _cleanWarningText(String raw) {
+    // Remove everything after " | Also:" (geocoded address spam)
+    var s = raw.split(RegExp(r'\s*\|\s*Also:')).first.trim();
+    // Strip emoji characters
+    s = s
+        .replaceAll(RegExp(r'[\u{1F000}-\u{1FFFF}]', unicode: true), '')
+        .trim();
+    s = s.replaceAll(RegExp(r'[\u{2600}-\u{27BF}]', unicode: true), '').trim();
+    // Strip location prefix "AreaName: warning" → keep only the warning
+    final colonIdx = s.indexOf(': ');
+    if (colonIdx > 0 && colonIdx < 60) {
+      final prefix = s.substring(0, colonIdx);
+      if (!prefix.toLowerCase().contains('risk') &&
+          !prefix.toLowerCase().contains('crime')) {
+        s = s.substring(colonIdx + 2).trim();
+      }
+    }
+    return s.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
   }
 
   // ── Forward geocoding ─────────────────────────────────────────────────────
@@ -1227,15 +1252,15 @@ class ApiClient {
       if (decoded is! List) return const [];
       return decoded.take(6).map<MiniItem>((item) {
         final fullName = item['display_name']?.toString() ?? '';
-        final parts    = fullName.split(',');
-        final name     = parts.first.trim();
-        final sub      = parts.length > 1
+        final parts = fullName.split(',');
+        final name = parts.first.trim();
+        final sub = parts.length > 1
             ? parts.skip(1).take(2).join(',').trim()
             : '';
         return MiniItem(
           type: MiniItemType.pin,
           name: name.isEmpty ? fullName : name,
-          sub:  sub,
+          sub: sub,
         );
       }).toList();
     } catch (_) {
@@ -1272,11 +1297,9 @@ class ApiClient {
     String? token,
   }) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/community/weather')
-          .replace(queryParameters: {
-        'lat': lat.toString(),
-        'lon': lon.toString(),
-      });
+      final uri = Uri.parse('$baseUrl/api/community/weather').replace(
+        queryParameters: {'lat': lat.toString(), 'lon': lon.toString()},
+      );
       final resp = await http
           .get(uri, headers: _headers(token))
           .timeout(const Duration(seconds: 10));
@@ -1295,7 +1318,10 @@ class ApiClient {
   Future<List<Map<String, dynamic>>> getOfficialNews({String? token}) async {
     try {
       final resp = await http
-          .get(Uri.parse('$baseUrl/api/community/news'), headers: _headers(token))
+          .get(
+            Uri.parse('$baseUrl/api/community/news'),
+            headers: _headers(token),
+          )
           .timeout(const Duration(seconds: 10));
       if (resp.statusCode != 200) return const [];
       final decoded = jsonDecode(resp.body);
@@ -1319,8 +1345,9 @@ class ApiClient {
     try {
       final qp = <String, String>{};
       if (since != null && since > 0) qp['since'] = since.toStringAsFixed(3);
-      final uri = Uri.parse('$baseUrl/api/notifications')
-          .replace(queryParameters: qp.isEmpty ? null : qp);
+      final uri = Uri.parse(
+        '$baseUrl/api/notifications',
+      ).replace(queryParameters: qp.isEmpty ? null : qp);
       final resp = await http
           .get(uri, headers: _headers(token))
           .timeout(const Duration(seconds: 10));
@@ -1334,5 +1361,4 @@ class ApiClient {
       return const [];
     }
   }
-
 }
