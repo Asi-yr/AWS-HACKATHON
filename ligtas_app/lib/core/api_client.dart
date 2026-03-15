@@ -473,14 +473,6 @@ class ApiClient {
     }
   }
 
-  String _tagFromScore(int safetyScore, String? backendTag) {
-    if (backendTag != null && backendTag.isNotEmpty) return backendTag;
-    if (safetyScore >= 85) return 'safest';
-    if (safetyScore >= 75) return 'balanced';
-    if (safetyScore >= 65) return 'moderate';
-    return 'dangerous';
-  }
-
   double? _toDouble(dynamic v) {
     if (v is double) return v;
     if (v is int) return v.toDouble();
