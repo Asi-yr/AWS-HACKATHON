@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
+import '../../core/app_tab_controller.dart';
 import '../../core/custom_theme.dart';
 import '../../core/api_client.dart';
 import '../../core/session_manager.dart';
 import '../../widgets/shared_widgets.dart';
+import '../explore/explore_controller.dart';
 
 // ── COMMUNITY VIEW ────────────────────────────────────────────
 // Merged: frontend design richness  +  tetsing backend connectivity
@@ -309,11 +312,19 @@ class _CommunityViewState extends State<CommunityView> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _reportTypes = [];
 
+  // Weather + News state
+  Map<String, dynamic>? _weather;
+  List<Map<String, dynamic>> _forecast = [];
+  List<Map<String, dynamic>> _news     = [];
+  bool _weatherLoading = true;
+
   @override
   void initState() {
     super.initState();
     _fetchReports();
     _fetchReportTypes();
+    _fetchWeather();
+    _fetchNews();
   }
 
   Future<void> _fetchReportTypes() async {
@@ -334,6 +345,46 @@ class _CommunityViewState extends State<CommunityView> {
       if (mounted) setState(() { _posts = posts; _isLoading = false; });
     } catch (_) {
       if (mounted) setState(() { _posts = List.from(_mockPosts); _isLoading = false; });
+    }
+  }
+
+  Future<void> _fetchWeather() async {
+    if (mounted) setState(() => _weatherLoading = true);
+    try {
+      // Use GPS from ExploreController if already acquired; fall back to Manila
+      final ctrl = context.read<ExploreController>();
+      final lat  = ctrl.lat  ?? 14.5995;
+      final lon  = ctrl.lng  ?? 120.9842;
+      final token = await SessionManager.instance.getAuthToken();
+      final data  = await ApiClient.instance
+          .getCommunityWeather(lat: lat, lon: lon, token: token);
+      if (mounted) {
+        setState(() {
+          if (data.isNotEmpty && data['ok'] == true) {
+            _weather  = data['current']  as Map<String, dynamic>?;
+            _forecast = (data['forecast'] as List? ?? [])
+                .cast<Map<String, dynamic>>();
+            // Override flood info into _weather for the card
+            final flood = data['flood'] as Map<String, dynamic>?;
+            if (flood != null) {
+              _weather = {...?_weather, 'flood': flood};
+            }
+          }
+          _weatherLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _weatherLoading = false);
+    }
+  }
+
+  Future<void> _fetchNews() async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      final items = await ApiClient.instance.getOfficialNews(token: token);
+      if (mounted) setState(() => _news = items);
+    } catch (_) {
+      // Keep empty list — section simply won't render
     }
   }
 
@@ -386,12 +437,26 @@ class _CommunityViewState extends State<CommunityView> {
 
     return RefreshIndicator(
       color: AppColors.teal,
-      onRefresh: _fetchReports,
+      onRefresh: () async {
+        await Future.wait([_fetchReports(), _fetchWeather(), _fetchNews()]);
+      },
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
         children: [
-          _AlertBanner(),
-          const SizedBox(height: 12),
+          _WeatherCard(
+            weather: _weather,
+            loading: _weatherLoading,
+            isDark: context.isDark,
+          ),
+          const SizedBox(height: 10),
+          if (_forecast.isNotEmpty) ...[
+            _ForecastStrip(days: _forecast, isDark: context.isDark),
+            const SizedBox(height: 10),
+          ],
+          if (_news.isNotEmpty) ...[
+            _OfficialNewsSection(items: _news, isDark: context.isDark),
+            const SizedBox(height: 10),
+          ],
           _buildCategoryPills(),
           const SizedBox(height: 4),
           _buildSectionHeader(),
@@ -593,6 +658,9 @@ class _CommunityViewState extends State<CommunityView> {
                       }
                       setDlgState(() => isSubmitting = true);
                       try {
+                        final gps = context.read<ExploreController>();
+                        final reportLat = gps.lat ?? 14.5995;
+                        final reportLon = gps.lng ?? 120.9842;
                         final token =
                             await SessionManager.instance.getAuthToken();
                         if (token == null || token.isEmpty) {
@@ -606,8 +674,8 @@ class _CommunityViewState extends State<CommunityView> {
                           return;
                         }
                         await ApiClient.instance.submitReport(
-                          lat: 14.5995,
-                          lon: 120.9842,
+                          lat: reportLat,
+                          lon: reportLon,
                           reportType: selectedType!,
                           description: descCtrl.text.trim(),
                           token: token,
@@ -688,46 +756,6 @@ class _NotifBtn extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────
-// ALERT BANNER
-// ─────────────────────────────────────────────────────────────
-
-class _AlertBanner extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final t = context.lt;
-    final redColor = context.isDark ? AppColors.redDark : AppColors.red;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.red.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.red.withValues(alpha: 0.25)),
-      ),
-      child: Row(children: [
-        Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: AppColors.red.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(Icons.warning_rounded, color: redColor, size: 18),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Flash Flood Warning',
-                style: GoogleFonts.plusJakartaSans(
-                    fontSize: 13, fontWeight: FontWeight.w800, color: redColor)),
-            Text('PAGASA: Low-lying areas in QC · 30m ago',
-                style: t.body(size: 11, color: t.text2)),
-          ]),
-        ),
-      ]),
-    );
-  }
-}
-
 // ─────────────────────────────────────────────────────────────
 // POST CARD
 // ─────────────────────────────────────────────────────────────
@@ -1199,6 +1227,566 @@ class _NotifSheet extends StatelessWidget {
           ),
         ),
       ]),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// WEATHER CARD
+// ─────────────────────────────────────────────────────────────
+
+class _WeatherCard extends StatelessWidget {
+  final Map<String, dynamic>? weather;
+  final bool loading;
+  final bool isDark;
+
+  const _WeatherCard({
+    required this.weather,
+    required this.loading,
+    required this.isDark,
+  });
+
+  Color _hexColor(String? hex, Color fallback) {
+    if (hex == null) return fallback;
+    try {
+      final clean = hex.replaceAll('#', '');
+      return Color(int.parse('FF$clean', radix: 16));
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.lt;
+
+    if (loading) {
+      return Container(
+        height: 130,
+        decoration: BoxDecoration(
+          color: t.card,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: t.border),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.teal),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (weather == null) {
+      return Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: t.card,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: t.border),
+        ),
+        child: Row(children: [
+          Icon(Icons.cloud_off_rounded, color: t.text3, size: 28),
+          const SizedBox(width: 12),
+          Text('Weather unavailable', style: t.body(size: 13, color: t.text2)),
+        ]),
+      );
+    }
+
+    final description  = weather!['description']?.toString() ?? 'Clear sky';
+    final tempC        = (weather!['temp_c']        as num?)?.toDouble() ?? 0.0;
+    final feelsLike    = (weather!['feels_like_c']  as num?)?.toDouble() ?? 0.0;
+    final humidity     = (weather!['humidity_pct']  as num?)?.toInt()   ?? 0;
+    final windKph      = (weather!['wind_kph']      as num?)?.toDouble() ?? 0.0;
+    final colorHex     = weather!['color']?.toString();
+    final cardColor    = _hexColor(colorHex, AppColors.teal);
+
+    final flood        = weather!['flood'] as Map<String, dynamic>?;
+    final floodActive  = flood?['active'] == true;
+    final floodLabel   = flood?['label']?.toString() ?? 'Flood Warning Active';
+    final floodColorHx = flood?['color']?.toString();
+    final floodColor   = _hexColor(floodColorHx, const Color(0xFFe74c3c));
+
+    // Icon based on description keywords
+    String icon = '🌤️';
+    final desc = description.toLowerCase();
+    if (desc.contains('heavy rain') || desc.contains('heavy shower')) {
+      icon = '🌧️';
+    } else if (desc.contains('rain') || desc.contains('drizzle') || desc.contains('shower')) {
+      icon = '🌦️';
+    } else if (desc.contains('thunder') || desc.contains('storm')) {
+      icon = '⛈️';
+    } else if (desc.contains('snow') || desc.contains('sleet')) {
+      icon = '🌨️';
+    } else if (desc.contains('fog') || desc.contains('mist') || desc.contains('haze')) {
+      icon = '🌫️';
+    } else if (desc.contains('cloud')) {
+      icon = '☁️';
+    } else if (desc.contains('clear') || desc.contains('sunny')) {
+      icon = '☀️';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            cardColor.withValues(alpha: isDark ? 0.80 : 0.90),
+            cardColor.withValues(alpha: isDark ? 0.50 : 0.70),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Text(icon, style: const TextStyle(fontSize: 32)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(description,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      )),
+                  const SizedBox(height: 2),
+                  if (floodActive)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: floodColor.withValues(alpha: 0.25),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.5)),
+                      ),
+                      child: Text(floodLabel,
+                          style: GoogleFonts.dmSans(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          )),
+                    ),
+                ],
+              ),
+            ),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text('${tempC.toStringAsFixed(0)}°C',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  )),
+              Text('Feels like ${feelsLike.toStringAsFixed(0)}°',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 11,
+                    color: Colors.white.withValues(alpha: 0.85),
+                  )),
+            ]),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            _WeatherStat(icon: '💧', label: '$humidity%', sub: 'Humidity'),
+            const SizedBox(width: 16),
+            _WeatherStat(icon: '💨', label: '${windKph.toStringAsFixed(0)} kph', sub: 'Wind'),
+            const Spacer(),
+            _WeatherActionBtn(
+              label: 'View Map',
+              icon: Icons.map_rounded,
+              onTap: () {
+                // Switch to the Home/Explore tab (index 0) via AppTabController
+                context.read<AppTabController>().switchTo(0);
+              },
+            ),
+            const SizedBox(width: 8),
+            _WeatherActionBtn(
+              label: 'Details',
+              icon: Icons.info_outline_rounded,
+              onTap: () => _showWeatherDetails(context, weather!),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shows a bottom sheet with the full parsed weather details.
+void _showWeatherDetails(
+    BuildContext context, Map<String, dynamic> weather) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  final t = context.lt;
+
+  final description = weather['description']?.toString() ?? 'N/A';
+  final tempC       = (weather['temp_c']       as num?)?.toDouble() ?? 0.0;
+  final feelsLike   = (weather['feels_like_c'] as num?)?.toDouble() ?? 0.0;
+  final humidity    = (weather['humidity_pct'] as num?)?.toInt()    ?? 0;
+  final windKph     = (weather['wind_kph']     as num?)?.toDouble() ?? 0.0;
+  final city        = weather['city']?.toString() ?? '';
+
+  final flood       = weather['flood'] as Map<String, dynamic>?;
+  final floodActive = flood?['active'] == true;
+  final floodLabel  = flood?['label']?.toString() ?? 'Flood Warning Active';
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => Container(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 36),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.cardDark : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: t.border,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text('Current Weather',
+              style: GoogleFonts.plusJakartaSans(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: t.text)),
+          if (city.isNotEmpty) ...
+            [const SizedBox(height: 2),
+            Text(city, style: t.body(size: 12, color: t.text2))],
+          const SizedBox(height: 16),
+          _DetailRow(label: 'Condition',  value: description),
+          _DetailRow(label: 'Temperature', value: '${tempC.toStringAsFixed(1)} °C'),
+          _DetailRow(label: 'Feels like',  value: '${feelsLike.toStringAsFixed(1)} °C'),
+          _DetailRow(label: 'Humidity',    value: '$humidity %'),
+          _DetailRow(label: 'Wind speed',  value: '${windKph.toStringAsFixed(1)} kph'),
+          if (floodActive) ...[  
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFe74c3c).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: const Color(0xFFe74c3c).withValues(alpha: 0.4)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.warning_amber_rounded,
+                    size: 16, color: Color(0xFFe74c3c)),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text(floodLabel,
+                        style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFFe74c3c)))),
+              ]),
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
+}
+
+class _DetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _DetailRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.lt;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: t.body(size: 13, color: t.text2)),
+          Text(value,
+              style: GoogleFonts.dmSans(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: t.text)),
+        ],
+      ),
+    );
+  }
+}
+
+class _WeatherStat extends StatelessWidget {
+  final String icon;
+  final String label;
+  final String sub;
+  const _WeatherStat({
+    required this.icon,
+    required this.label,
+    required this.sub,
+  });
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(children: [
+        Text(icon, style: const TextStyle(fontSize: 12)),
+        const SizedBox(width: 4),
+        Text(label,
+            style: GoogleFonts.dmSans(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            )),
+      ]),
+      Text(sub,
+          style: GoogleFonts.dmSans(
+            fontSize: 10,
+            color: Colors.white.withValues(alpha: 0.75),
+          )),
+    ],
+  );
+}
+
+class _WeatherActionBtn extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _WeatherActionBtn({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 12, color: Colors.white),
+        const SizedBox(width: 4),
+        Text(label,
+            style: GoogleFonts.dmSans(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            )),
+      ]),
+    ),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 5-DAY FORECAST STRIP
+// ─────────────────────────────────────────────────────────────
+
+class _ForecastStrip extends StatelessWidget {
+  final List<Map<String, dynamic>> days;
+  final bool isDark;
+  const _ForecastStrip({required this.days, required this.isDark});
+
+  Color _hexColor(String? hex, Color fallback) {
+    if (hex == null) return fallback;
+    try {
+      final clean = hex.replaceAll('#', '');
+      return Color(int.parse('FF$clean', radix: 16));
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.lt;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text('5-Day Forecast',
+              style: t.title(size: 14)),
+        ),
+        SizedBox(
+          height: 100,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.zero,
+            itemCount: days.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (_, i) {
+              final d          = days[i];
+              final dayLabel   = d['day_label']?.toString()  ?? '---';
+              final icon       = d['icon']?.toString()       ?? '🌤️';
+              final tempMax    = (d['temp_max_c'] as num?)?.toDouble() ?? 0.0;
+              final tempMin    = (d['temp_min_c'] as num?)?.toDouble() ?? 0.0;
+              final riskLabel  = d['risk_label']?.toString() ?? 'LOW';
+              final riskColor  = _hexColor(d['risk_color']?.toString(), AppColors.teal);
+
+              return Container(
+                width: 70,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                decoration: BoxDecoration(
+                  color: t.card,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: t.border),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(dayLabel,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: t.text2,
+                        )),
+                    Text(icon, style: const TextStyle(fontSize: 22)),
+                    Text('${tempMax.toStringAsFixed(0)}°/${tempMin.toStringAsFixed(0)}°',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: t.text,
+                        )),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: riskColor.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(riskLabel,
+                          style: GoogleFonts.dmSans(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: riskColor,
+                          )),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// OFFICIAL NEWS SECTION
+// ─────────────────────────────────────────────────────────────
+
+class _OfficialNewsSection extends StatelessWidget {
+  final List<Map<String, dynamic>> items;
+  final bool isDark;
+  const _OfficialNewsSection({required this.items, required this.isDark});
+
+  Color _sourceColor(String source) {
+    switch (source.toUpperCase()) {
+      case 'PAGASA':  return const Color(0xFF1a73e8);
+      case 'MMDA':    return const Color(0xFFf57c00);
+      case 'NDRRMC':  return const Color(0xFFc0392b);
+      case 'PHIVOLCS': return const Color(0xFF8e44ad);
+      default:         return AppColors.teal;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.lt;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(children: [
+            Text('Official News', style: t.title(size: 14)),
+            const Spacer(),
+            Text('Live', style: GoogleFonts.dmSans(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppColors.teal,
+            )),
+          ]),
+        ),
+        ...items.take(6).map((item) {
+          final source   = item['source']?.toString()      ?? 'NDRRMC';
+          final headline = item['headline']?.toString()    ?? '';
+          final when     = item['published_at']?.toString() ?? '';
+          final srcColor = _sourceColor(source);
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: t.card,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: t.border),
+            ),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                width: 52,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 5, vertical: 3),
+                decoration: BoxDecoration(
+                  color: srcColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                      color: srcColor.withValues(alpha: 0.3)),
+                ),
+                child: Text(source,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      color: srcColor,
+                    )),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(headline,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: t.text,
+                        )),
+                    if (when.isNotEmpty) ...[ 
+                      const SizedBox(height: 3),
+                      Text(when,
+                          style: GoogleFonts.dmSans(
+                            fontSize: 10,
+                            color: t.text3,
+                          )),
+                    ],
+                  ],
+                ),
+              ),
+            ]),
+          );
+        }),
+      ],
     );
   }
 }

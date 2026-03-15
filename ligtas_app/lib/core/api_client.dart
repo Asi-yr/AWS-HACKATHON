@@ -444,7 +444,7 @@ class ApiClient {
     for (final variant in variants) {
       try {
         final uri = Uri.parse(
-          '$baseUrl/api/suggest',
+          '\$baseUrl/api/suggest',
         ).replace(queryParameters: {'q': variant});
         final resp = await http
             .get(uri, headers: _headers(token))
@@ -1143,15 +1143,15 @@ class ApiClient {
       if (decoded is! List) return const [];
       return decoded.take(6).map<MiniItem>((item) {
         final fullName = item['display_name']?.toString() ?? '';
-        final parts = fullName.split(',');
-        final name = parts.first.trim();
-        final sub = parts.length > 1
+        final parts    = fullName.split(',');
+        final name     = parts.first.trim();
+        final sub      = parts.length > 1
             ? parts.skip(1).take(2).join(',').trim()
             : '';
         return MiniItem(
           type: MiniItemType.pin,
           name: name.isEmpty ? fullName : name,
-          sub: sub,
+          sub:  sub,
         );
       }).toList();
     } catch (_) {
@@ -1178,4 +1178,50 @@ class ApiClient {
       return const [];
     }
   }
+
+  /// GET /api/community/weather?lat=&lon=
+  /// Returns { ok, current: {...}, flood: {...}, forecast: [...] }
+  /// Falls back to empty map on any error.
+  Future<Map<String, dynamic>> getCommunityWeather({
+    required double lat,
+    required double lon,
+    String? token,
+  }) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/community/weather')
+          .replace(queryParameters: {
+        'lat': lat.toString(),
+        'lon': lon.toString(),
+      });
+      final resp = await http
+          .get(uri, headers: _headers(token))
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) return const {};
+      final decoded = jsonDecode(resp.body);
+      if (decoded is! Map<String, dynamic>) return const {};
+      return decoded;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// GET /api/community/news
+  /// Returns list of official news items from PAGASA, MMDA, NDRRMC sources.
+  /// Falls back to empty list on any error.
+  Future<List<Map<String, dynamic>>> getOfficialNews({String? token}) async {
+    try {
+      final resp = await http
+          .get(Uri.parse('$baseUrl/api/community/news'), headers: _headers(token))
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) return const [];
+      final decoded = jsonDecode(resp.body);
+      if (decoded is! Map<String, dynamic>) return const [];
+      final items = decoded['items'];
+      if (items is List) return items.cast<Map<String, dynamic>>();
+      return const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
 }

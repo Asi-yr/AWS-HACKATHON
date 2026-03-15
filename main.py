@@ -25,7 +25,7 @@ from risk_monitor.features         import (
     get_night_banner_html, enrich_routes_with_scores,
     attach_fares, apply_night_safety,
 )
-from risk_monitor.weather          import get_weather_risk, get_weather_banner_html
+from risk_monitor.weather          import get_weather_risk, get_weather_banner_html, get_forecast
 from risk_monitor.noah             import get_flood_risk_at, get_flood_warning_html, add_noah_flood_layer
 from risk_monitor.community_reports import (
     init_report_tables, submit_report, confirm_report,
@@ -1958,12 +1958,14 @@ def api_safety():
     return jsonify({
         'ok': True,   # ── Flutter checks this in fetchSafetyOverlays()
         'weather': {
-            'risk_level':  weather.get('risk_level'),
-            'description': weather.get('description'),
-            'temp_c':      weather.get('temp_c'),
-            'wind_kph':    weather.get('wind_kph'),
-            'rain_mm':     weather.get('rain_mm'),
-            'color':       weather.get('color'),
+            'risk_level':   weather.get('risk_level'),
+            'description':  weather.get('description'),
+            'temp_c':       weather.get('temp_c'),
+            'feels_like_c': weather.get('feels_like_c'),
+            'humidity_pct': weather.get('humidity_pct'),
+            'wind_kph':     weather.get('wind_kph'),
+            'rain_mm':      weather.get('rain_mm'),
+            'color':        weather.get('color'),
         },
         'flood': {
             'risk_level': flood.get('risk_level'),
@@ -2016,6 +2018,123 @@ def api_safety():
             for r in reports
         ],
     })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  COMMUNITY SCREEN — Weather + News endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/community/weather', methods=['GET'])
+def api_community_weather():
+    """Current weather + 5-day forecast + flood status for the community screen.
+    GET /api/community/weather?lat=&lon=
+    """
+    try:
+        lat = float(request.args.get('lat', 14.5995))
+        lon = float(request.args.get('lon', 120.9842))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'Invalid coordinates'}), 400
+
+    weather  = get_weather_risk(lat, lon)
+    flood    = get_flood_risk_at(lat, lon)
+    forecast = get_forecast(lat, lon, days=5)
+
+    # Determine flood warning active
+    flood_active = flood.get('risk_level', 'none') not in ('none', 'low')
+
+    return jsonify({
+        'ok': True,
+        'current': {
+            'description':  weather.get('description', 'Clear sky'),
+            'risk_level':   weather.get('risk_level', 'clear'),
+            'temp_c':       weather.get('temp_c', 0),
+            'feels_like_c': weather.get('feels_like_c', 0),
+            'humidity_pct': weather.get('humidity_pct', 0),
+            'wind_kph':     weather.get('wind_kph', 0),
+            'rain_mm':      weather.get('rain_mm', 0),
+            'color':        weather.get('color', '#7f8c8d'),
+            'fetched_at':   weather.get('fetched_at', ''),
+        },
+        'flood': {
+            'active':     flood_active,
+            'risk_level': flood.get('risk_level', 'none'),
+            'label':      flood.get('label', ''),
+            'color':      flood.get('color', '#7f8c8d'),
+        },
+        'forecast': forecast,
+    })
+
+
+@app.route('/api/community/news', methods=['GET'])
+def api_community_news():
+    """Official-source news items for the community screen.
+    Aggregates: typhoon signals (PAGASA), MMDA road closures,
+    and real-time incidents (GDACS/USGS/PHIVOLCS).
+    GET /api/community/news
+    Returns: { ok, items: [ {source, headline, summary, url, published_at, severity} ] }
+    """
+    from datetime import datetime, timezone, timedelta
+    _PHT = timezone(timedelta(hours=8))
+    now_str = datetime.now(_PHT).strftime('%Y-%m-%d %H:%M PHT')
+
+    items = []
+
+    # 1. PAGASA typhoon signal
+    try:
+        typhoon = get_typhoon_signal()
+        if typhoon and typhoon.get('signal', 0) > 0:
+            items.append({
+                'source':       'PAGASA',
+                'headline':     f"Typhoon Signal #{typhoon.get('signal')} — {typhoon.get('name', 'Active')}",
+                'summary':      typhoon.get('description', 'Tropical Cyclone Wind Signal raised.'),
+                'url':          'https://www.pagasa.dost.gov.ph/',
+                'published_at': typhoon.get('issued_at', now_str),
+                'severity':     'high' if typhoon.get('signal', 0) >= 2 else 'moderate',
+            })
+    except Exception as _e:
+        print(f'[api_community_news] typhoon error: {_e}')
+
+    # 2. MMDA road closures
+    try:
+        closures = get_road_closures()
+        for c in closures[:3]:   # cap at 3 MMDA items
+            items.append({
+                'source':       'MMDA',
+                'headline':     c.get('title', 'Road closure advisory'),
+                'summary':      c.get('description', ''),
+                'url':          'https://www.mmda.gov.ph/',
+                'published_at': c.get('date', now_str),
+                'severity':     'moderate',
+            })
+    except Exception as _e:
+        print(f'[api_community_news] mmda error: {_e}')
+
+    # 3. Real-time incidents (GDACS / USGS / PHIVOLCS)
+    try:
+        incidents = get_active_incidents(ph_only=True)
+        # Map source names to display labels
+        _src_map = {
+            'gdacs':    'NDRRMC',
+            'usgs':     'PHIVOLCS',
+            'phivolcs': 'PHIVOLCS',
+            'mmda':     'MMDA',
+            'pagasa':   'PAGASA',
+        }
+        for inc in incidents[:6]:   # cap at 6 incident items
+            raw_src  = inc.get('source', 'NDRRMC').lower()
+            src_label = _src_map.get(raw_src, inc.get('source', 'NDRRMC'))
+            items.append({
+                'source':       src_label,
+                'headline':     inc.get('title', 'Hazard alert'),
+                'summary':      inc.get('description', ''),
+                'url':          inc.get('source_url', ''),
+                'published_at': inc.get('reported_at', now_str),
+                'severity':     inc.get('severity', 'moderate'),
+            })
+    except Exception as _e:
+        print(f'[api_community_news] incidents error: {_e}')
+
+    return jsonify({'ok': True, 'items': items})
 
 
 # ══════════════════════════════════════════════════════════════════════════════
