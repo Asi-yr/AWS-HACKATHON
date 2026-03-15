@@ -2226,6 +2226,177 @@ def api_community_news():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  NOTIFICATIONS  (polled every ~30 s by the Flutter app)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/notifications', methods=['GET'])
+def api_notifications():
+    """Aggregate real-time notifications for the Flutter community screen.
+
+    GET /api/notifications?since=<unix_epoch_seconds>
+
+    Returns:
+      { ok: true, notifications: [ {id, body, type, created_at, created_epoch} ] }
+
+    ``since`` is optional.  When provided only notifications whose
+    ``created_epoch`` is strictly greater than ``since`` are returned, so the
+    app can do efficient incremental polls.
+
+    Notification types (map to icons on the client):
+      flood | typhoon | seismic | fire | crime | verify | info
+    """
+    from datetime import datetime, timezone, timedelta
+    _PHT = timezone(timedelta(hours=8))
+
+    try:
+        since_epoch = float(request.args.get('since', 0))
+    except (TypeError, ValueError):
+        since_epoch = 0.0
+
+    notifications = []
+
+    def _epoch(dt_str: str) -> float:
+        """Parse an ISO/PHT date string to a UTC epoch float, or return now."""
+        try:
+            for fmt in ('%Y-%m-%d %H:%M PHT', '%Y-%m-%dT%H:%M:%S',
+                        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+                try:
+                    dt = datetime.strptime(dt_str, fmt)
+                    if fmt.endswith('PHT'):
+                        dt = dt.replace(tzinfo=_PHT)
+                    else:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt.timestamp()
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+        return datetime.now(timezone.utc).timestamp()
+
+    now_epoch = datetime.now(timezone.utc).timestamp()
+
+    # ── 1. Typhoon signal ────────────────────────────────────────────────────
+    try:
+        typhoon = get_typhoon_signal()
+        if typhoon and typhoon.get('signal', 0) > 0:
+            sig = typhoon.get('signal', 1)
+            name = typhoon.get('name', 'Active Typhoon')
+            ep = _epoch(typhoon.get('issued_at', ''))
+            notifications.append({
+                'id':            f"typhoon_{sig}_{name.replace(' ', '_')}",
+                'body':          f"Typhoon Signal #{sig} raised — {name}",
+                'type':          'typhoon',
+                'created_at':    typhoon.get('issued_at', ''),
+                'created_epoch': ep,
+            })
+    except Exception as _e:
+        print(f'[api_notifications] typhoon error: {_e}')
+
+    # ── 2. Flood / Weather alert ─────────────────────────────────────────────
+    try:
+        flood = get_flood_risk_at(14.5995, 120.9842)
+        risk = flood.get('risk_level', 'none')
+        if risk not in ('none', 'low'):
+            label = flood.get('label', 'Flood risk elevated')
+            ep = now_epoch - 300  # treat as 5-min-old alert
+            notifications.append({
+                'id':            f"flood_{risk}",
+                'body':          f"High flood risk detected — {label}",
+                'type':          'flood',
+                'created_at':    datetime.fromtimestamp(ep, _PHT).strftime('%Y-%m-%d %H:%M PHT'),
+                'created_epoch': ep,
+            })
+    except Exception as _e:
+        print(f'[api_notifications] flood error: {_e}')
+
+    # ── 3. MMDA road closures ────────────────────────────────────────────────
+    try:
+        closures = get_road_closures()
+        for c in closures[:2]:
+            title = c.get('title', 'Road closure advisory')
+            ep = _epoch(c.get('date', ''))
+            notifications.append({
+                'id':            f"mmda_{abs(hash(title)) % 100000}",
+                'body':          title,
+                'type':          'info',
+                'created_at':    c.get('date', ''),
+                'created_epoch': ep,
+            })
+    except Exception as _e:
+        print(f'[api_notifications] mmda error: {_e}')
+
+    # ── 4. Seismic alerts ────────────────────────────────────────────────────
+    try:
+        quakes = get_recent_earthquakes(hours_back=12)
+        for q in quakes[:2]:
+            mag = q.get('magnitude', 0)
+            place = q.get('place', 'Philippines')
+            ep = _epoch(q.get('time', ''))
+            tsunami = ' — TSUNAMI WARNING' if q.get('tsunami') else ''
+            notifications.append({
+                'id':            f"quake_M{mag}_{abs(hash(place)) % 100000}",
+                'body':          f"M{mag} earthquake near {place}{tsunami}",
+                'type':          'seismic',
+                'created_at':    q.get('time', ''),
+                'created_epoch': ep,
+            })
+    except Exception as _e:
+        print(f'[api_notifications] seismic error: {_e}')
+
+    # ── 5. Active incidents (GDACS / NDRRMC) ────────────────────────────────
+    try:
+        incidents = get_active_incidents(ph_only=True)
+        for inc in incidents[:3]:
+            itype = inc.get('type', 'fire').lower()
+            ntype = 'fire' if 'fire' in itype else \
+                    'flood' if 'flood' in itype else \
+                    'crime' if 'crime' in itype else 'info'
+            title = inc.get('title', 'Hazard alert')
+            ep = _epoch(inc.get('reported_at', ''))
+            notifications.append({
+                'id':            f"incident_{abs(hash(title)) % 100000}",
+                'body':          title,
+                'type':          ntype,
+                'created_at':    inc.get('reported_at', ''),
+                'created_epoch': ep,
+            })
+    except Exception as _e:
+        print(f'[api_notifications] incidents error: {_e}')
+
+    # ── 6. Highly-confirmed community reports ───────────────────────────────
+    try:
+        reports = get_all_active_reports(chDB_perf, limit=20)
+        for r in reports:
+            confs = r.get('confirmations', 0)
+            if confs >= 5:
+                ep = _epoch(r.get('reported_at', ''))
+                rtype = r.get('report_type', 'report').lower()
+                ntype = 'flood' if 'flood' in rtype else \
+                        'fire'  if 'fire'  in rtype else \
+                        'crime' if 'crime' in rtype else 'verify'
+                body = f"Community report verified by {confs} people — {r.get('description', '')[:60]}"
+                notifications.append({
+                    'id':            f"report_{r.get('id', 0)}",
+                    'body':          body,
+                    'type':          ntype,
+                    'created_at':    r.get('reported_at', ''),
+                    'created_epoch': ep,
+                })
+    except Exception as _e:
+        print(f'[api_notifications] reports error: {_e}')
+
+    # ── Sort newest first, apply ``since`` filter ────────────────────────────
+    notifications.sort(key=lambda n: n['created_epoch'], reverse=True)
+    if since_epoch > 0:
+        notifications = [n for n in notifications if n['created_epoch'] > since_epoch]
+
+    # Cap at 20 to keep response light
+    notifications = notifications[:20]
+
+    return jsonify({'ok': True, 'notifications': notifications})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  SOS / EMERGENCY
 # ══════════════════════════════════════════════════════════════════════════════
 

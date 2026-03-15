@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -307,7 +308,7 @@ class CommunityView extends StatefulWidget {
 
 class _CommunityViewState extends State<CommunityView> {
   List<_Post> _posts = [];
-  final List<_Notif> _notifs = List.from(_mockNotifs);
+  List<_Notif> _notifs = [];
   _Category _activeCategory = _Category.all;
   bool _isLoading = true;
   List<Map<String, dynamic>> _reportTypes = [];
@@ -318,6 +319,13 @@ class _CommunityViewState extends State<CommunityView> {
   List<Map<String, dynamic>> _news     = [];
   bool _weatherLoading = true;
 
+  // Notification polling
+  Timer? _notifTimer;
+  // Track IDs the user has tapped (marked read) across polls
+  final Set<String> _readNotifIds = {};
+  // Epoch of the latest notification we've already fetched (for incremental polling)
+  double _notifLastEpoch = 0;
+
   @override
   void initState() {
     super.initState();
@@ -325,6 +333,18 @@ class _CommunityViewState extends State<CommunityView> {
     _fetchReportTypes();
     _fetchWeather();
     _fetchNews();
+    _fetchNotifications();
+    // Poll for new notifications every 30 seconds
+    _notifTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _fetchNotifications(incremental: true),
+    );
+  }
+
+  @override
+  void dispose() {
+    _notifTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _fetchReportTypes() async {
@@ -386,6 +406,121 @@ class _CommunityViewState extends State<CommunityView> {
     } catch (_) {
       // Keep empty list — section simply won't render
     }
+  }
+
+  /// Fetch notifications from /api/notifications.
+  /// On the first call (incremental=false) full list is loaded.
+  /// On subsequent calls (incremental=true) only items newer than the
+  /// last seen epoch are requested, then prepended.
+  Future<void> _fetchNotifications({bool incremental = false}) async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      final since = incremental ? _notifLastEpoch : null;
+      final raw = await ApiClient.instance
+          .getNotifications(token: token, since: since);
+
+      if (!mounted || raw.isEmpty) return;
+
+      final fetched = raw.map(_notifFromApi).toList();
+
+      setState(() {
+        if (incremental) {
+          // Prepend new items; preserve existing list (with user read state)
+          final existingIds = _notifs.map((n) => n.id).toSet();
+          final fresh = fetched.where((n) => !existingIds.contains(n.id));
+          _notifs.insertAll(0, fresh);
+        } else {
+          // Full replace on first load, applying any already-read IDs
+          _notifs
+            ..clear()
+            ..addAll(fetched.map((n) {
+              if (_readNotifIds.contains(n.id)) n.unread = false;
+              return n;
+            }));
+        }
+        // Advance the epoch cursor so incremental polls only fetch newer items
+        if (fetched.isNotEmpty) {
+          final maxEpoch = raw
+              .map((m) => (m['created_epoch'] as num?)?.toDouble() ?? 0.0)
+              .fold<double>(0, (a, b) => b > a ? b : a);
+          if (maxEpoch > _notifLastEpoch) _notifLastEpoch = maxEpoch;
+        }
+      });
+    } catch (_) {
+      // Backend unreachable — seed with mock data on first load only
+      if (!incremental && mounted && _notifs.isEmpty) {
+        setState(() => _notifs.addAll(_mockNotifs));
+      }
+    }
+  }
+
+  /// Map a backend notification map to a [_Notif] model.
+  static _Notif _notifFromApi(Map<String, dynamic> m) {
+    final type      = m['type']?.toString() ?? 'info';
+    final body      = m['body']?.toString() ?? '';
+    final createdAt = m['created_at']?.toString() ?? '';
+    final epoch     = (m['created_epoch'] as num?)?.toDouble() ?? 0.0;
+
+    // Compute a human-readable time-ago string
+    String timeAgo = 'recently';
+    if (epoch > 0) {
+      final diff =
+          DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(
+              (epoch * 1000).round()));
+      if (diff.inMinutes < 1) {
+        timeAgo = 'just now';
+      } else if (diff.inMinutes < 60) {
+        timeAgo = '${diff.inMinutes}m ago';
+      } else if (diff.inHours < 24) {
+        timeAgo = '${diff.inHours}h ago';
+      } else {
+        timeAgo = '${diff.inDays}d ago';
+      }
+    } else if (createdAt.isNotEmpty) {
+      timeAgo = createdAt;
+    }
+
+    // Derive icon + color from notification type
+    final IconData icon;
+    final Color iconColor;
+    switch (type) {
+      case 'flood':
+        icon = Icons.water;
+        iconColor = AppColors.blue;
+        break;
+      case 'typhoon':
+        icon = Icons.cyclone;
+        iconColor = AppColors.redDark;
+        break;
+      case 'seismic':
+        icon = Icons.crisis_alert;
+        iconColor = AppColors.yellow;
+        break;
+      case 'fire':
+        icon = Icons.local_fire_department;
+        iconColor = const Color(0xFFE63946);
+        break;
+      case 'crime':
+        icon = Icons.security;
+        iconColor = AppColors.yellow;
+        break;
+      case 'verify':
+        icon = Icons.thumb_up_rounded;
+        iconColor = AppColors.teal;
+        break;
+      default:
+        icon = Icons.notifications_rounded;
+        iconColor = AppColors.teal;
+    }
+
+    return _Notif(
+      id: m['id']?.toString() ?? UniqueKey().toString(),
+      body: body,
+      timeAgo: timeAgo,
+      icon: icon,
+      iconColor: iconColor,
+      unread: true,
+    );
   }
 
   int get _unreadCount => _notifs.where((n) => n.unread).length;
@@ -557,7 +692,10 @@ class _CommunityViewState extends State<CommunityView> {
         unreadCount: _unreadCount,
         onMarkRead: (id) => setState(() {
           final idx = _notifs.indexWhere((n) => n.id == id);
-          if (idx >= 0) _notifs[idx].unread = false;
+          if (idx >= 0) {
+            _notifs[idx].unread = false;
+            _readNotifIds.add(id);
+          }
         }),
         onClose: () => Navigator.pop(context),
       ),

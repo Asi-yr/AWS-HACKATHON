@@ -1308,4 +1308,31 @@ class ApiClient {
     }
   }
 
+  /// GET /api/notifications[?since=<unix_epoch_seconds>]
+  /// Returns aggregated real-time notifications from backend sources.
+  /// Pass [since] (epoch seconds) to receive only newer items on incremental polls.
+  /// Falls back to empty list on any error.
+  Future<List<Map<String, dynamic>>> getNotifications({
+    String? token,
+    double? since,
+  }) async {
+    try {
+      final qp = <String, String>{};
+      if (since != null && since > 0) qp['since'] = since.toStringAsFixed(3);
+      final uri = Uri.parse('$baseUrl/api/notifications')
+          .replace(queryParameters: qp.isEmpty ? null : qp);
+      final resp = await http
+          .get(uri, headers: _headers(token))
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) return const [];
+      final decoded = jsonDecode(resp.body);
+      if (decoded is! Map<String, dynamic>) return const [];
+      final items = decoded['notifications'];
+      if (items is List) return items.cast<Map<String, dynamic>>();
+      return const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
 }
