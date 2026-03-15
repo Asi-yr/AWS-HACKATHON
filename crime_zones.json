@@ -1,0 +1,7001 @@
+{
+  "_comment": "crime_zones.json — SafeRoute Metro Manila crime zone database. coords: [lat_min, lat_max, lon_min, lon_max]. Zones with coords enable coordinate-based route-path scanning. aliases allow alternate spellings to match user text input.",
+  "zones": [
+    {
+      "name": "tondo",
+      "risk": "high",
+      "summary": "Frequent snatching, holdups, and street crime reported throughout district.",
+      "coords": [
+        14.605,
+        14.628,
+        120.96,
+        120.982
+      ],
+      "aliases": [
+        "tondo manila",
+        "tondo district"
+      ]
+    },
+    {
+      "name": "gagalangin",
+      "risk": "high",
+      "summary": "High crime density; snatching and drug-related incidents frequently reported.",
+      "coords": [
+        14.616,
+        14.623,
+        120.962,
+        120.972
+      ]
+    },
+    {
+      "name": "balut",
+      "risk": "high",
+      "summary": "High crime in residential-industrial mix; robbery and theft reported.",
+      "coords": [
+        14.62,
+        14.628,
+        120.964,
+        120.975
+      ]
+    },
+    {
+      "name": "isla puting bato",
+      "risk": "high",
+      "summary": "Snatching and robbery incidents reported in waterfront informal settlement.",
+      "coords": [
+        14.625,
+        14.63,
+        120.958,
+        120.965
+      ]
+    },
+    {
+      "name": "moriones",
+      "risk": "high",
+      "summary": "Street crime and holdups reported especially at night.",
+      "coords": [
+        14.608,
+        14.616,
+        120.962,
+        120.972
+      ],
+      "aliases": [
+        "moriones street"
+      ]
+    },
+    {
+      "name": "maypajo",
+      "risk": "high",
+      "summary": "High crime corridor near Tondo-Caloocan border; snatching hotspot.",
+      "coords": [
+        14.623,
+        14.634,
+        120.965,
+        120.978
+      ],
+      "aliases": [
+        "barrio maypajo"
+      ]
+    },
+    {
+      "name": "vitas",
+      "risk": "high",
+      "summary": "Frequent crime reports in waterfront settlement area.",
+      "coords": [
+        14.628,
+        14.636,
+        120.958,
+        120.966
+      ]
+    },
+    {
+      "name": "blumentritt",
+      "risk": "high",
+      "summary": "High foot-traffic market area with frequent pickpocketing and snatching.",
+      "coords": [
+        14.615,
+        14.622,
+        120.978,
+        120.986
+      ],
+      "aliases": [
+        "blumentritt road",
+        "blumentritt street"
+      ]
+    },
+    {
+      "name": "herbosa",
+      "risk": "high",
+      "summary": "Active snatching area; stay alert especially at night.",
+      "coords": [
+        14.608,
+        14.615,
+        120.972,
+        120.98
+      ]
+    },
+    {
+      "name": "north harbor",
+      "risk": "high",
+      "summary": "High crime near port terminals, especially at night.",
+      "coords": [
+        14.63,
+        14.643,
+        120.956,
+        120.97
+      ],
+      "aliases": [
+        "north port",
+        "port area tondo"
+      ]
+    },
+    {
+      "name": "onyx street",
+      "risk": "high",
+      "summary": "Snatching incidents frequently reported on this street.",
+      "coords": [
+        14.606,
+        14.612,
+        120.968,
+        120.974
+      ],
+      "aliases": [
+        "onyx"
+      ]
+    },
+    {
+      "name": "north bay boulevard north",
+      "risk": "high",
+      "summary": "Snatching and holdups frequently reported along this coastal corridor.",
+      "coords": [
+        14.66,
+        14.667,
+        120.94,
+        120.951
+      ],
+      "aliases": [
+        "nbbn"
+      ]
+    },
+    {
+      "name": "quiapo",
+      "risk": "high",
+      "summary": "Pickpocketing and snatching extremely common in crowded market areas.",
+      "coords": [
+        14.597,
+        14.605,
+        120.982,
+        120.99
+      ],
+      "aliases": [
+        "quiapo manila",
+        "quiapo district"
+      ]
+    },
+    {
+      "name": "divisoria",
+      "risk": "high",
+      "summary": "High foot-traffic market with frequent theft, pickpocketing, and snatching.",
+      "coords": [
+        14.598,
+        14.607,
+        120.97,
+        120.982
+      ],
+      "aliases": [
+        "divisoria market",
+        "tutuban area"
+      ]
+    },
+    {
+      "name": "sampaloc",
+      "risk": "high",
+      "summary": "Dense university-belt area with frequent street crime.",
+      "coords": [
+        14.604,
+        14.62,
+        120.987,
+        121.002
+      ],
+      "aliases": [
+        "sampaloc manila"
+      ]
+    },
+    {
+      "name": "c.m. recto",
+      "risk": "high",
+      "summary": "University belt notorious for snatching, pickpocketing, and phone theft.",
+      "coords": [
+        14.599,
+        14.606,
+        120.983,
+        120.998
+      ],
+      "aliases": [
+        "claro m recto",
+        "recto avenue",
+        "recto",
+        "cm recto"
+      ]
+    },
+    {
+      "name": "azcarraga",
+      "risk": "high",
+      "summary": "Busy Manila street near Quiapo; frequent theft and snatching.",
+      "coords": [
+        14.602,
+        14.608,
+        120.982,
+        120.992
+      ],
+      "aliases": [
+        "azcarraga street"
+      ]
+    },
+    {
+      "name": "sta. cruz",
+      "risk": "high",
+      "summary": "Robbery and snatching incidents frequently reported in this district.",
+      "coords": [
+        14.599,
+        14.61,
+        120.977,
+        120.986
+      ],
+      "aliases": [
+        "santa cruz",
+        "sta cruz manila"
+      ]
+    },
+    {
+      "name": "pandacan",
+      "risk": "high",
+      "summary": "Holdups and snatching near industrial areas; stay alert.",
+      "coords": [
+        14.581,
+        14.594,
+        121.0,
+        121.013
+      ]
+    },
+    {
+      "name": "grace park",
+      "risk": "high",
+      "summary": "One of Caloocan's highest-crime areas; frequent snatching and assault reports.",
+      "coords": [
+        14.648,
+        14.665,
+        120.968,
+        120.985
+      ],
+      "aliases": [
+        "grace park west",
+        "grace park east"
+      ]
+    },
+    {
+      "name": "sangandaan",
+      "risk": "high",
+      "summary": "High crime density, snatching and drug incidents near Monumento.",
+      "coords": [
+        14.656,
+        14.668,
+        120.972,
+        120.984
+      ]
+    },
+    {
+      "name": "monumento",
+      "risk": "high",
+      "summary": "Busy transit interchange; frequent snatching, pickpocketing, and holdups.",
+      "coords": [
+        14.654,
+        14.661,
+        120.983,
+        120.992
+      ],
+      "aliases": [
+        "monumento caloocan",
+        "andres bonifacio monument"
+      ]
+    },
+    {
+      "name": "10th avenue caloocan",
+      "risk": "high",
+      "summary": "Frequent snatching and theft reported along this corridor.",
+      "coords": [
+        14.644,
+        14.656,
+        120.97,
+        120.98
+      ],
+      "aliases": [
+        "10th avenue",
+        "diez y seis de agosto"
+      ]
+    },
+    {
+      "name": "8th avenue caloocan",
+      "risk": "high",
+      "summary": "High crime activity near Caloocan market strip.",
+      "coords": [
+        14.639,
+        14.649,
+        120.965,
+        120.975
+      ],
+      "aliases": [
+        "8th avenue"
+      ]
+    },
+    {
+      "name": "9th avenue caloocan",
+      "risk": "high",
+      "summary": "Snatching and theft reported frequently.",
+      "coords": [
+        14.644,
+        14.651,
+        120.968,
+        120.975
+      ],
+      "aliases": [
+        "9th avenue"
+      ]
+    },
+    {
+      "name": "deparo",
+      "risk": "moderate",
+      "summary": "Some crime activity in dense residential zone.",
+      "coords": [
+        14.69,
+        14.71,
+        120.958,
+        120.975
+      ]
+    },
+    {
+      "name": "camarin",
+      "risk": "moderate",
+      "summary": "Residential area with some reported crime.",
+      "coords": [
+        14.705,
+        14.73,
+        120.958,
+        120.978
+      ]
+    },
+    {
+      "name": "bagong silang caloocan",
+      "risk": "moderate",
+      "summary": "Large resettlement area with moderate crime; snatching reported.",
+      "coords": [
+        14.71,
+        14.755,
+        120.965,
+        121.0
+      ],
+      "aliases": [
+        "bagong silang",
+        "caloocan north"
+      ]
+    },
+    {
+      "name": "navotas fish port",
+      "risk": "high",
+      "summary": "High crime fishing port community; frequent incidents reported at night.",
+      "coords": [
+        14.654,
+        14.67,
+        120.937,
+        120.951
+      ],
+      "aliases": [
+        "navotas port"
+      ]
+    },
+    {
+      "name": "tangos",
+      "risk": "high",
+      "summary": "High crime density in waterfront settlement.",
+      "coords": [
+        14.66,
+        14.673,
+        120.94,
+        120.95
+      ]
+    },
+    {
+      "name": "nbbs dagat-dagatan",
+      "risk": "high",
+      "summary": "Frequently cited as high-crime coastal community.",
+      "coords": [
+        14.668,
+        14.678,
+        120.94,
+        120.951
+      ],
+      "aliases": [
+        "nbbs dagat",
+        "dagat-dagatan"
+      ]
+    },
+    {
+      "name": "tinajeros",
+      "risk": "moderate",
+      "summary": "Some crime activity in densely populated coastal area.",
+      "coords": [
+        14.66,
+        14.672,
+        120.95,
+        120.965
+      ]
+    },
+    {
+      "name": "longos",
+      "risk": "moderate",
+      "summary": "Coastal community with some crime reports; watch for snatching.",
+      "coords": [
+        14.67,
+        14.682,
+        120.949,
+        120.962
+      ]
+    },
+    {
+      "name": "hulong duhat",
+      "risk": "moderate",
+      "summary": "Dense community with moderate crime risk.",
+      "coords": [
+        14.656,
+        14.668,
+        120.949,
+        120.96
+      ]
+    },
+    {
+      "name": "welcome rotonda",
+      "risk": "high",
+      "summary": "High-crime transit hub; frequent holdups, snatching, and robbery reported.",
+      "coords": [
+        14.61,
+        14.617,
+        120.994,
+        121.002
+      ],
+      "aliases": [
+        "welcome circle",
+        "welcome philippines"
+      ]
+    },
+    {
+      "name": "españa boulevard",
+      "risk": "high",
+      "summary": "University belt corridor with frequent snatching and phone theft.",
+      "coords": [
+        14.608,
+        14.614,
+        120.988,
+        120.999
+      ],
+      "aliases": [
+        "espana",
+        "espana blvd",
+        "españa"
+      ]
+    },
+    {
+      "name": "port area manila",
+      "risk": "high",
+      "summary": "Isolated dock roads; holdup incidents reported, poorly lit at night.",
+      "coords": [
+        14.583,
+        14.602,
+        120.968,
+        120.986
+      ],
+      "aliases": [
+        "port area",
+        "south harbor",
+        "south port",
+        "north port"
+      ]
+    },
+    {
+      "name": "binondo",
+      "risk": "moderate",
+      "summary": "Busy Chinatown market area; watch for pickpockets in crowds.",
+      "coords": [
+        14.596,
+        14.603,
+        120.971,
+        120.982
+      ],
+      "aliases": [
+        "chinatown manila",
+        "chinatown"
+      ]
+    },
+    {
+      "name": "intramuros",
+      "risk": "moderate",
+      "summary": "Tourist zone with bag-snatching incidents; be cautious at night.",
+      "coords": [
+        14.587,
+        14.598,
+        120.97,
+        120.984
+      ]
+    },
+    {
+      "name": "ermita",
+      "risk": "moderate",
+      "summary": "Night economy area; petty crime and pickpocketing reported.",
+      "coords": [
+        14.576,
+        14.59,
+        120.981,
+        120.996
+      ]
+    },
+    {
+      "name": "malate",
+      "risk": "moderate",
+      "summary": "Entertainment district; theft and snatching at night reported.",
+      "coords": [
+        14.564,
+        14.58,
+        120.984,
+        120.998
+      ]
+    },
+    {
+      "name": "paco",
+      "risk": "moderate",
+      "summary": "Residential area with some reported snatching; stay alert near market.",
+      "coords": [
+        14.574,
+        14.587,
+        120.994,
+        121.008
+      ]
+    },
+    {
+      "name": "san andres bukid",
+      "risk": "moderate",
+      "summary": "Dense informal settlement with petty theft and snatching reports.",
+      "coords": [
+        14.559,
+        14.574,
+        120.996,
+        121.008
+      ],
+      "aliases": [
+        "san andres",
+        "san andres manila"
+      ]
+    },
+    {
+      "name": "sta. mesa",
+      "risk": "moderate",
+      "summary": "Snatching incidents near university area; stay on busy streets.",
+      "coords": [
+        14.599,
+        14.613,
+        121.003,
+        121.016
+      ],
+      "aliases": [
+        "santa mesa"
+      ]
+    },
+    {
+      "name": "cubao",
+      "risk": "moderate",
+      "summary": "Major transport hub; pickpocketing and bag-snatching frequently reported.",
+      "coords": [
+        14.616,
+        14.629,
+        121.049,
+        121.062
+      ],
+      "aliases": [
+        "araneta cubao",
+        "cubao quezon city"
+      ]
+    },
+    {
+      "name": "commonwealth avenue",
+      "risk": "moderate",
+      "summary": "Long road corridor; snatching incidents reported at night.",
+      "coords": [
+        14.655,
+        14.73,
+        121.059,
+        121.065
+      ],
+      "aliases": [
+        "commonwealth",
+        "comm ave"
+      ]
+    },
+    {
+      "name": "quirino highway",
+      "risk": "moderate",
+      "summary": "Some crime reports along this Quezon City corridor.",
+      "coords": [
+        14.68,
+        14.74,
+        121.039,
+        121.048
+      ],
+      "aliases": [
+        "quirino hiway"
+      ]
+    },
+    {
+      "name": "roosevelt avenue",
+      "risk": "moderate",
+      "summary": "Moderate crime risk along this busy road.",
+      "coords": [
+        14.665,
+        14.71,
+        121.004,
+        121.01
+      ],
+      "aliases": [
+        "roosevelt"
+      ]
+    },
+    {
+      "name": "payatas",
+      "risk": "moderate",
+      "summary": "Resettlement community with some crime reports; stay alert.",
+      "coords": [
+        14.72,
+        14.75,
+        121.088,
+        121.11
+      ]
+    },
+    {
+      "name": "balintawak",
+      "risk": "moderate",
+      "summary": "Transport hub with moderate crime risk; watch bags at terminal.",
+      "coords": [
+        14.658,
+        14.673,
+        120.985,
+        121.0
+      ],
+      "aliases": [
+        "balintawak market"
+      ]
+    },
+    {
+      "name": "kamuning",
+      "risk": "moderate",
+      "summary": "Some snatching incidents in market and transport areas.",
+      "coords": [
+        14.631,
+        14.643,
+        121.038,
+        121.052
+      ]
+    },
+    {
+      "name": "muñoz",
+      "risk": "moderate",
+      "summary": "Transport hub with moderate pickpocket risk near MRT station.",
+      "coords": [
+        14.648,
+        14.66,
+        121.017,
+        121.03
+      ],
+      "aliases": [
+        "munoz",
+        "muñoz station area",
+        "munoz quezon city"
+      ]
+    },
+    {
+      "name": "quezon avenue",
+      "risk": "moderate",
+      "summary": "Busy road corridor with some theft incidents near terminals.",
+      "coords": [
+        14.639,
+        14.643,
+        121.001,
+        121.042
+      ],
+      "aliases": [
+        "quezon ave"
+      ]
+    },
+    {
+      "name": "aurora boulevard",
+      "risk": "moderate",
+      "summary": "Busy road with moderate petty crime; watch bags at jeep stops.",
+      "coords": [
+        14.622,
+        14.626,
+        121.01,
+        121.078
+      ],
+      "aliases": [
+        "aurora blvd",
+        "aurora"
+      ]
+    },
+    {
+      "name": "tandang sora",
+      "risk": "moderate",
+      "summary": "Residential area with some snatching incidents reported.",
+      "coords": [
+        14.7,
+        14.728,
+        121.031,
+        121.06
+      ],
+      "aliases": [
+        "tandang sora avenue"
+      ]
+    },
+    {
+      "name": "baesa",
+      "risk": "moderate",
+      "summary": "Some crime activity near Caloocan border.",
+      "coords": [
+        14.668,
+        14.683,
+        120.986,
+        120.998
+      ]
+    },
+    {
+      "name": "diliman",
+      "risk": "low",
+      "summary": "University area; generally safe with active campus patrol.",
+      "coords": [
+        14.649,
+        14.678,
+        121.046,
+        121.07
+      ],
+      "aliases": [
+        "up diliman",
+        "diliman quezon city"
+      ]
+    },
+    {
+      "name": "katipunan avenue",
+      "risk": "low",
+      "summary": "University corridor; generally safe and well-lit.",
+      "coords": [
+        14.628,
+        14.678,
+        121.079,
+        121.085
+      ],
+      "aliases": [
+        "katipunan",
+        "loyola heights",
+        "ateneo area",
+        "miriam area"
+      ]
+    },
+    {
+      "name": "eastwood city",
+      "risk": "low",
+      "summary": "Well-secured commercial complex with CCTV.",
+      "coords": [
+        14.598,
+        14.609,
+        121.078,
+        121.089
+      ],
+      "aliases": [
+        "eastwood",
+        "libis"
+      ]
+    },
+    {
+      "name": "fairview",
+      "risk": "low",
+      "summary": "Suburban residential area with low reported crime."
+    },
+    {
+      "name": "novaliches",
+      "risk": "low",
+      "summary": "Suburban area with low crime."
+    },
+    {
+      "name": "batasan hills",
+      "risk": "low",
+      "summary": "Government complex area; well-patrolled.",
+      "coords": [
+        14.687,
+        14.715,
+        121.1,
+        121.128
+      ],
+      "aliases": [
+        "batasan complex",
+        "batasan"
+      ]
+    },
+    {
+      "name": "timog avenue",
+      "risk": "low",
+      "summary": "Entertainment district with good lighting and security.",
+      "coords": [
+        14.641,
+        14.647,
+        121.014,
+        121.027
+      ],
+      "aliases": [
+        "timog",
+        "tomas morato"
+      ]
+    },
+    {
+      "name": "white plains",
+      "risk": "low",
+      "summary": "Low-crime upscale residential subdivision.",
+      "coords": [
+        14.628,
+        14.644,
+        121.059,
+        121.078
+      ]
+    },
+    {
+      "name": "east avenue",
+      "risk": "low",
+      "summary": "Hospital and government zone; generally safe.",
+      "coords": [
+        14.63,
+        14.659,
+        121.033,
+        121.04
+      ],
+      "aliases": [
+        "east avenue quezon city"
+      ]
+    },
+    {
+      "name": "project 6",
+      "risk": "low",
+      "summary": "Residential neighborhood with low crime.",
+      "coords": [
+        14.661,
+        14.681,
+        121.023,
+        121.044
+      ]
+    },
+    {
+      "name": "project 7",
+      "risk": "low",
+      "summary": "Residential neighborhood with low crime.",
+      "coords": [
+        14.649,
+        14.666,
+        121.012,
+        121.035
+      ]
+    },
+    {
+      "name": "up campus",
+      "risk": "low",
+      "summary": "University of the Philippines campus; active security.",
+      "coords": [
+        14.648,
+        14.674,
+        121.049,
+        121.069
+      ],
+      "aliases": [
+        "up diliman campus",
+        "university of the philippines"
+      ]
+    },
+    {
+      "name": "bgc",
+      "risk": "low",
+      "summary": "Well-secured business district; active CCTV and patrol.",
+      "coords": [
+        14.549,
+        14.572,
+        121.041,
+        121.062
+      ],
+      "aliases": [
+        "bonifacio global city",
+        "bonifacio global",
+        "fort bonifacio",
+        "the fort"
+      ]
+    },
+    {
+      "name": "ayala center",
+      "risk": "low",
+      "summary": "Premium business district; heavily secured.",
+      "coords": [
+        14.556,
+        14.57,
+        121.019,
+        121.038
+      ],
+      "aliases": [
+        "ayala",
+        "glorietta",
+        "greenbelt",
+        "makati cbd"
+      ]
+    },
+    {
+      "name": "poblacion makati",
+      "risk": "moderate",
+      "summary": "Nightlife district; petty theft and snatching at night.",
+      "coords": [
+        14.566,
+        14.579,
+        121.029,
+        121.043
+      ],
+      "aliases": [
+        "p. burgos",
+        "poblacion",
+        "pburgos"
+      ]
+    },
+    {
+      "name": "east rembo",
+      "risk": "moderate",
+      "summary": "Some crime reports in resettlement area.",
+      "coords": [
+        14.546,
+        14.562,
+        121.057,
+        121.071
+      ],
+      "aliases": [
+        "rembo"
+      ]
+    },
+    {
+      "name": "west rembo",
+      "risk": "moderate",
+      "summary": "Some crime reports; dense residential area.",
+      "coords": [
+        14.536,
+        14.554,
+        121.04,
+        121.056
+      ]
+    },
+    {
+      "name": "comembo",
+      "risk": "moderate",
+      "summary": "Informal settlement area with some crime reports.",
+      "coords": [
+        14.539,
+        14.551,
+        121.045,
+        121.059
+      ]
+    },
+    {
+      "name": "bel-air",
+      "risk": "low",
+      "summary": "Upscale residential village with low crime.",
+      "coords": [
+        14.559,
+        14.574,
+        121.017,
+        121.031
+      ],
+      "aliases": [
+        "bel air village"
+      ]
+    },
+    {
+      "name": "forbes park",
+      "risk": "low",
+      "summary": "High-security exclusive village.",
+      "coords": [
+        14.549,
+        14.563,
+        121.01,
+        121.025
+      ]
+    },
+    {
+      "name": "shaw boulevard",
+      "risk": "moderate",
+      "summary": "Busy commercial strip with some petty theft reported.",
+      "coords": [
+        14.588,
+        14.594,
+        121.023,
+        121.059
+      ],
+      "aliases": [
+        "shaw blvd"
+      ]
+    },
+    {
+      "name": "edsa mandaluyong",
+      "risk": "moderate",
+      "summary": "Busy highway corridor; watch bags at bus stops.",
+      "coords": [
+        14.573,
+        14.601,
+        121.021,
+        121.04
+      ],
+      "aliases": [
+        "edsa"
+      ]
+    },
+    {
+      "name": "hulo",
+      "risk": "moderate",
+      "summary": "Dense residential area with moderate crime risk.",
+      "coords": [
+        14.578,
+        14.59,
+        121.033,
+        121.049
+      ]
+    },
+    {
+      "name": "ortigas center",
+      "risk": "low",
+      "summary": "Well-secured business district.",
+      "coords": [
+        14.584,
+        14.599,
+        121.052,
+        121.072
+      ],
+      "aliases": [
+        "ortigas",
+        "ortigas pasig"
+      ]
+    },
+    {
+      "name": "kapitolyo",
+      "risk": "low",
+      "summary": "Commercial and restaurant district with low crime.",
+      "coords": [
+        14.571,
+        14.584,
+        121.052,
+        121.064
+      ]
+    },
+    {
+      "name": "pinagbuhatan",
+      "risk": "moderate",
+      "summary": "Some crime activity in residential zone near river.",
+      "coords": [
+        14.555,
+        14.569,
+        121.087,
+        121.103
+      ]
+    },
+    {
+      "name": "manggahan pasig",
+      "risk": "moderate",
+      "summary": "Flood-prone area with some crime reports.",
+      "coords": [
+        14.574,
+        14.594,
+        121.088,
+        121.108
+      ],
+      "aliases": [
+        "manggahan"
+      ]
+    },
+    {
+      "name": "greenhills",
+      "risk": "low",
+      "summary": "Well-secured commercial and residential area.",
+      "coords": [
+        14.599,
+        14.616,
+        121.028,
+        121.048
+      ],
+      "aliases": [
+        "greenhills shopping center",
+        "san juan greenhills"
+      ]
+    },
+    {
+      "name": "little baguio san juan",
+      "risk": "low",
+      "summary": "Upscale residential area in San Juan.",
+      "coords": [
+        14.599,
+        14.609,
+        121.017,
+        121.031
+      ],
+      "aliases": [
+        "little baguio"
+      ]
+    },
+    {
+      "name": "baclaran",
+      "risk": "moderate",
+      "summary": "Busy market and transport hub; watch for pickpockets.",
+      "coords": [
+        14.529,
+        14.544,
+        120.993,
+        121.006
+      ],
+      "aliases": [
+        "baclaran market",
+        "baclaran church area"
+      ]
+    },
+    {
+      "name": "naia airport",
+      "risk": "moderate",
+      "summary": "Airport area with bag-snatching and taxi scam incidents.",
+      "coords": [
+        14.506,
+        14.525,
+        121.005,
+        121.029
+      ],
+      "aliases": [
+        "naia",
+        "ninoy aquino international",
+        "airport road"
+      ]
+    },
+    {
+      "name": "libertad pasay",
+      "risk": "moderate",
+      "summary": "Market area with moderate crime risk.",
+      "coords": [
+        14.536,
+        14.554,
+        120.989,
+        121.007
+      ],
+      "aliases": [
+        "libertad"
+      ]
+    },
+    {
+      "name": "moa complex",
+      "risk": "low",
+      "summary": "Well-secured Mall of Asia complex area.",
+      "coords": [
+        14.531,
+        14.551,
+        120.979,
+        120.998
+      ],
+      "aliases": [
+        "mall of asia",
+        "moa",
+        "sea residences area"
+      ]
+    },
+    {
+      "name": "tramo pasay",
+      "risk": "moderate",
+      "summary": "Busy road with moderate crime reports.",
+      "coords": [
+        14.528,
+        14.545,
+        121.001,
+        121.018
+      ],
+      "aliases": [
+        "tramo"
+      ]
+    },
+    {
+      "name": "bf homes paranaque",
+      "risk": "low",
+      "summary": "Well-secured residential subdivision.",
+      "coords": [
+        14.468,
+        14.492,
+        121.006,
+        121.026
+      ],
+      "aliases": [
+        "bf homes",
+        "bf paranaque"
+      ]
+    },
+    {
+      "name": "sucat paranaque",
+      "risk": "low",
+      "summary": "Commercial area with low crime incidence.",
+      "coords": [
+        14.481,
+        14.506,
+        121.008,
+        121.034
+      ],
+      "aliases": [
+        "sucat"
+      ]
+    },
+    {
+      "name": "pitx",
+      "risk": "low",
+      "summary": "Modern transport terminal with good security.",
+      "coords": [
+        14.472,
+        14.485,
+        120.998,
+        121.012
+      ],
+      "aliases": [
+        "paranaque integrated terminal exchange"
+      ]
+    },
+    {
+      "name": "alabang",
+      "risk": "low",
+      "summary": "Commercial hub with well-patrolled areas.",
+      "coords": [
+        14.411,
+        14.443,
+        121.036,
+        121.062
+      ],
+      "aliases": [
+        "alabang muntinlupa",
+        "ayala alabang"
+      ]
+    },
+    {
+      "name": "muntinlupa poblacion",
+      "risk": "moderate",
+      "summary": "Town center area with some petty crime reports.",
+      "coords": [
+        14.402,
+        14.427,
+        121.042,
+        121.066
+      ],
+      "aliases": [
+        "poblacion muntinlupa"
+      ]
+    },
+    {
+      "name": "zapote las pinas",
+      "risk": "low",
+      "summary": "Suburban area with low crime reports.",
+      "coords": [
+        14.433,
+        14.462,
+        120.99,
+        121.018
+      ],
+      "aliases": [
+        "zapote",
+        "zapote road"
+      ]
+    },
+    {
+      "name": "talon las pinas",
+      "risk": "low",
+      "summary": "Suburban area with low crime incidence.",
+      "coords": [
+        14.418,
+        14.45,
+        120.987,
+        121.02
+      ],
+      "aliases": [
+        "talon"
+      ]
+    },
+    {
+      "name": "pilar village",
+      "risk": "low",
+      "summary": "Residential village with low crime.",
+      "coords": [
+        14.435,
+        14.455,
+        120.976,
+        120.997
+      ]
+    },
+    {
+      "name": "malinta valenzuela",
+      "risk": "moderate",
+      "summary": "Moderate crime in mixed industrial-residential area.",
+      "coords": [
+        14.676,
+        14.699,
+        120.954,
+        120.975
+      ],
+      "aliases": [
+        "malinta"
+      ]
+    },
+    {
+      "name": "karuhatan",
+      "risk": "moderate",
+      "summary": "Some crime reports in this densely populated area.",
+      "coords": [
+        14.696,
+        14.717,
+        120.956,
+        120.976
+      ]
+    },
+    {
+      "name": "lower bicutan",
+      "risk": "moderate",
+      "summary": "Dense residential area with some crime reports.",
+      "coords": [
+        14.506,
+        14.525,
+        121.047,
+        121.068
+      ],
+      "aliases": [
+        "bicutan"
+      ]
+    },
+    {
+      "name": "hagonoy taguig",
+      "risk": "moderate",
+      "summary": "Some crime reports in coastal settlement.",
+      "coords": [
+        14.502,
+        14.521,
+        121.024,
+        121.044
+      ],
+      "aliases": [
+        "hagonoy"
+      ]
+    },
+    {
+      "name": "central signal taguig",
+      "risk": "low",
+      "summary": "Residential area near AFP base; generally safe.",
+      "coords": [
+        14.517,
+        14.538,
+        121.037,
+        121.058
+      ],
+      "aliases": [
+        "signal village"
+      ]
+    },
+    {
+      "name": "roxas boulevard",
+      "risk": "moderate",
+      "summary": "Waterfront drive with some crime at night; stay on busy lit sections.",
+      "coords": [
+        14.544,
+        14.59,
+        120.977,
+        120.987
+      ],
+      "aliases": [
+        "roxas blvd"
+      ]
+    },
+    {
+      "name": "rizal park",
+      "risk": "moderate",
+      "summary": "Tourist landmark; moderate pickpocket and snatching risk.",
+      "coords": [
+        14.581,
+        14.592,
+        120.976,
+        120.989
+      ],
+      "aliases": [
+        "luneta",
+        "luneta park",
+        "rizal monument area"
+      ]
+    },
+    {
+      "name": "lawton manila",
+      "risk": "moderate",
+      "summary": "Busy Manila transport hub; moderate petty crime.",
+      "coords": [
+        14.588,
+        14.598,
+        120.977,
+        120.988
+      ],
+      "aliases": [
+        "lawton"
+      ]
+    },
+    {
+      "name": "marikina riverside",
+      "risk": "low",
+      "summary": "Well-maintained park and river walk area, generally safe.",
+      "coords": [
+        14.624,
+        14.65,
+        121.084,
+        121.103
+      ],
+      "aliases": [
+        "marikina river park",
+        "concepcion marikina"
+      ]
+    },
+    {
+      "name": "tumana marikina",
+      "risk": "moderate",
+      "summary": "Informal settlement area with some crime reports.",
+      "coords": [
+        14.63,
+        14.65,
+        121.058,
+        121.08
+      ],
+      "aliases": [
+        "tumana"
+      ]
+    },
+    {
+      "name": "malanday",
+      "risk": "moderate",
+      "summary": "Some crime activity near Marikina-Caloocan border.",
+      "coords": [
+        14.65,
+        14.668,
+        121.064,
+        121.084
+      ]
+    },
+    {
+      "name": "nangka marikina",
+      "risk": "low",
+      "summary": "Residential subdivision area, low crime.",
+      "coords": [
+        14.618,
+        14.638,
+        121.096,
+        121.12
+      ],
+      "aliases": [
+        "nangka"
+      ]
+    },
+    {
+      "name": "antipolo city",
+      "risk": "low",
+      "summary": "Growing city with generally low crime.",
+      "aliases": [
+        "antipolo"
+      ]
+    },
+    {
+      "name": "cainta",
+      "risk": "low",
+      "summary": "Suburban town with low crime."
+    },
+    {
+      "name": "taytay rizal",
+      "risk": "low",
+      "summary": "Suburban town with low crime.",
+      "aliases": [
+        "taytay"
+      ]
+    },
+    {
+      "name": "epifanio de los santos avenue",
+      "risk": "moderate",
+      "summary": "Major expressway; watch bags at bus stops and pedestrian overpasses.",
+      "coords": [
+        14.528,
+        14.718,
+        121.028,
+        121.035
+      ],
+      "aliases": [
+        "edsa",
+        "epifanio avenue",
+        "edsa highway"
+      ]
+    },
+    {
+      "name": "c5 road",
+      "risk": "low",
+      "summary": "Expressway corridor; generally safe for motorists.",
+      "coords": [
+        14.502,
+        14.689,
+        121.063,
+        121.073
+      ],
+      "aliases": [
+        "c5",
+        "circumferential road 5"
+      ]
+    },
+    {
+      "name": "marcos highway",
+      "risk": "low",
+      "summary": "Main highway to Rizal; generally safe for commuters.",
+      "coords": [
+        14.622,
+        14.63,
+        121.087,
+        121.175
+      ],
+      "aliases": [
+        "marikina infanta highway"
+      ]
+    },
+    {
+      "name": "mcarthur highway north",
+      "risk": "moderate",
+      "summary": "McArthur Highway upper Caloocan toward Valenzuela; moderate crime risk.",
+      "coords": [
+        14.68,
+        14.748,
+        120.982,
+        120.988
+      ],
+      "aliases": [
+        "mcarthur caloocan",
+        "mac arthur caloocan"
+      ]
+    },
+    {
+      "name": "slex",
+      "risk": "low",
+      "summary": "South Luzon Expressway; generally safe toll road.",
+      "coords": [
+        14.38,
+        14.521,
+        121.038,
+        121.048
+      ],
+      "aliases": [
+        "south luzon expressway",
+        "south expressway"
+      ]
+    },
+    {
+      "name": "nlex",
+      "risk": "low",
+      "summary": "North Luzon Expressway; generally safe toll road.",
+      "aliases": [
+        "north luzon expressway",
+        "north expressway"
+      ]
+    },
+    {
+      "name": "cubao bus terminal",
+      "risk": "moderate",
+      "summary": "Major bus terminal area; pickpockets and snatching frequently reported.",
+      "coords": [
+        14.617,
+        14.629,
+        121.049,
+        121.064
+      ],
+      "aliases": [
+        "araneta center",
+        "gateway cubao",
+        "farmers cubao",
+        "ali mall"
+      ]
+    },
+    {
+      "name": "pasay bus terminal",
+      "risk": "moderate",
+      "summary": "Large terminal cluster; bag theft and taxi scams reported.",
+      "coords": [
+        14.537,
+        14.557,
+        121.0,
+        121.018
+      ],
+      "aliases": [
+        "buendia terminal",
+        "edsa-taft terminal",
+        "five star pasay"
+      ]
+    },
+    {
+      "name": "lrt1 bambang station area",
+      "risk": "high",
+      "summary": "Station area in University Belt; snatching frequently reported.",
+      "coords": [
+        14.602,
+        14.61,
+        120.984,
+        120.991
+      ],
+      "aliases": [
+        "bambang lrt",
+        "bambang station"
+      ]
+    },
+    {
+      "name": "lrt1 blumentritt station area",
+      "risk": "high",
+      "summary": "High-crime station area near market; watch bags.",
+      "coords": [
+        14.614,
+        14.622,
+        120.979,
+        120.987
+      ],
+      "aliases": [
+        "blumentritt lrt",
+        "blumentritt station"
+      ]
+    },
+    {
+      "name": "lrt2 recto station area",
+      "risk": "high",
+      "summary": "Recto area is a known crime hotspot; stay alert.",
+      "coords": [
+        14.599,
+        14.606,
+        120.982,
+        120.992
+      ],
+      "aliases": [
+        "recto lrt2",
+        "recto station"
+      ]
+    },
+    {
+      "name": "mrt bodega station area",
+      "risk": "moderate",
+      "summary": "Peripheral MRT station area; some pickpocket reports.",
+      "coords": [
+        14.656,
+        14.666,
+        121.015,
+        121.027
+      ],
+      "aliases": [
+        "north avenue mrt",
+        "north edsa mrt"
+      ]
+    },
+    {
+      "name": "meycauayan",
+      "risk": "low",
+      "summary": "Industrial town; generally low crime."
+    },
+    {
+      "name": "marilao",
+      "risk": "low",
+      "summary": "Suburban town with low crime."
+    },
+    {
+      "name": "san jose del monte",
+      "risk": "low",
+      "summary": "Growing suburban city with low crime.",
+      "aliases": [
+        "sjdm",
+        "city of san jose del monte"
+      ]
+    },
+    {
+      "name": "bacoor",
+      "risk": "low",
+      "summary": "Suburban city with generally low crime.",
+      "aliases": [
+        "bacoor cavite"
+      ]
+    },
+    {
+      "name": "imus",
+      "risk": "low",
+      "summary": "Suburban city with low crime incidence.",
+      "aliases": [
+        "imus cavite"
+      ]
+    },
+    {
+      "name": "dasmarinas",
+      "risk": "low",
+      "summary": "Suburban city with generally low crime.",
+      "aliases": [
+        "dasmariñas",
+        "dasmarinas cavite"
+      ]
+    },
+    {
+      "name": "manila",
+      "risk": "moderate",
+      "summary": "Mixed city; risk varies by district — check specific barangay."
+    },
+    {
+      "name": "quezon city",
+      "risk": "low",
+      "summary": "Large city; generally safer suburban areas; watch inner-city zones."
+    },
+    {
+      "name": "caloocan",
+      "risk": "moderate",
+      "summary": "Mixed city; northern barangays near Monumento have high crime."
+    },
+    {
+      "name": "makati",
+      "risk": "low",
+      "summary": "Business district is safe; watch Rembo and Poblacion areas."
+    },
+    {
+      "name": "pasay",
+      "risk": "moderate",
+      "summary": "Near airport; Baclaran and Libertad have moderate crime."
+    },
+    {
+      "name": "taguig",
+      "risk": "low",
+      "summary": "Generally safe; BGC is well-secured."
+    },
+    {
+      "name": "mandaluyong",
+      "risk": "low",
+      "summary": "Mixed city; EDSA corridor has moderate risk."
+    },
+    {
+      "name": "marikina",
+      "risk": "low",
+      "summary": "Generally safe residential city."
+    },
+    {
+      "name": "pasig",
+      "risk": "low",
+      "summary": "Mixed city; Ortigas is safe, outer barangays have some reports."
+    },
+    {
+      "name": "paranaque",
+      "risk": "low",
+      "summary": "Suburban city; generally safe outside airport areas."
+    },
+    {
+      "name": "las pinas",
+      "risk": "low",
+      "summary": "Suburban city with generally low crime."
+    },
+    {
+      "name": "muntinlupa",
+      "risk": "low",
+      "summary": "Suburban city; Alabang is safe, town proper has some reports."
+    },
+    {
+      "name": "san juan",
+      "risk": "low",
+      "summary": "Small city with generally low crime."
+    },
+    {
+      "name": "navotas",
+      "risk": "high",
+      "summary": "Fishing port city; crime density is one of Metro Manila's highest.",
+      "coords": [
+        14.645,
+        14.678,
+        120.934,
+        120.956
+      ]
+    },
+    {
+      "name": "malabon",
+      "risk": "moderate",
+      "summary": "Coastal city; waterfront barangays have higher crime."
+    },
+    {
+      "name": "valenzuela",
+      "risk": "low",
+      "summary": "Industrial city with generally low crime."
+    },
+    {
+      "name": "pateros",
+      "risk": "low",
+      "summary": "Small municipality with low crime."
+    },
+    {
+      "name": "metro manila",
+      "risk": "low",
+      "summary": "Broad Metro Manila area — check specific city or barangay for accuracy."
+    },
+    {
+      "name": "leveriza",
+      "risk": "moderate",
+      "summary": "Some crime reports near busy transport hubs and markets.",
+      "coords": [
+        14.562,
+        14.57,
+        120.991,
+        121.002
+      ]
+    },
+    {
+      "name": "singalong",
+      "risk": "moderate",
+      "summary": "Petty theft reported in market and residential areas.",
+      "coords": [
+        14.568,
+        14.576,
+        120.994,
+        121.005
+      ]
+    },
+    {
+      "name": "balic-balic",
+      "risk": "moderate",
+      "summary": "Moderate crime activity in dense residential zone.",
+      "coords": [
+        14.608,
+        14.616,
+        120.998,
+        121.008
+      ]
+    },
+    {
+      "name": "san nicolas manila",
+      "risk": "moderate",
+      "summary": "Market-adjacent area with petty theft and snatching reports.",
+      "coords": [
+        14.598,
+        14.605,
+        120.97,
+        120.979
+      ],
+      "aliases": [
+        "san nicolas"
+      ]
+    },
+    {
+      "name": "tondo i",
+      "risk": "high",
+      "summary": "High-density residential area with frequent street crime.",
+      "coords": [
+        14.605,
+        14.613,
+        120.96,
+        120.97
+      ]
+    },
+    {
+      "name": "tondo ii",
+      "risk": "high",
+      "summary": "Frequent street crime, part of high-risk Tondo district.",
+      "coords": [
+        14.613,
+        14.622,
+        120.964,
+        120.976
+      ]
+    },
+    {
+      "name": "via españa",
+      "risk": "high",
+      "summary": "Extension of España corridor with snatching and phone theft.",
+      "coords": [
+        14.608,
+        14.616,
+        121.0,
+        121.012
+      ],
+      "aliases": [
+        "via espana"
+      ]
+    },
+    {
+      "name": "lacson avenue",
+      "risk": "moderate",
+      "summary": "Busy road with some theft and snatching incidents.",
+      "coords": [
+        14.604,
+        14.618,
+        120.994,
+        121.004
+      ],
+      "aliases": [
+        "gen. lacson",
+        "general lacson"
+      ]
+    },
+    {
+      "name": "nagtahan",
+      "risk": "moderate",
+      "summary": "Bridge area with some snatching incidents at night.",
+      "coords": [
+        14.596,
+        14.607,
+        121.007,
+        121.016
+      ],
+      "aliases": [
+        "nagtahan bridge"
+      ]
+    },
+    {
+      "name": "sta. ana manila",
+      "risk": "moderate",
+      "summary": "Some theft and motorcycle holdup reports.",
+      "coords": [
+        14.581,
+        14.595,
+        121.006,
+        121.02
+      ],
+      "aliases": [
+        "santa ana manila",
+        "sta ana"
+      ]
+    },
+    {
+      "name": "san andres manila",
+      "risk": "moderate",
+      "summary": "Market area with petty crime incidents.",
+      "coords": [
+        14.561,
+        14.57,
+        120.998,
+        121.009
+      ]
+    },
+    {
+      "name": "delpan",
+      "risk": "high",
+      "summary": "Near port area; snatching and holdup incidents reported.",
+      "coords": [
+        14.605,
+        14.613,
+        120.962,
+        120.972
+      ],
+      "aliases": [
+        "delpan bridge",
+        "delpan road"
+      ]
+    },
+    {
+      "name": "tayuman",
+      "risk": "high",
+      "summary": "High crime street near Tondo; snatching frequently reported.",
+      "coords": [
+        14.609,
+        14.617,
+        120.975,
+        120.985
+      ],
+      "aliases": [
+        "tayuman street"
+      ]
+    },
+    {
+      "name": "carlos palanca",
+      "risk": "moderate",
+      "summary": "Quiapo-adjacent road with moderate pickpocket risk.",
+      "coords": [
+        14.597,
+        14.603,
+        120.983,
+        120.991
+      ]
+    },
+    {
+      "name": "san miguel manila",
+      "risk": "low",
+      "summary": "Near Malacañang; generally well-patrolled area.",
+      "coords": [
+        14.593,
+        14.602,
+        120.992,
+        121.004
+      ],
+      "aliases": [
+        "san miguel manila"
+      ]
+    },
+    {
+      "name": "malacañang area",
+      "risk": "low",
+      "summary": "Well-secured area near the presidential palace.",
+      "coords": [
+        14.596,
+        14.604,
+        120.993,
+        121.003
+      ],
+      "aliases": [
+        "malacanang",
+        "malacañang palace"
+      ]
+    },
+    {
+      "name": "pedro gil street",
+      "risk": "moderate",
+      "summary": "Malate area street with moderate crime risk.",
+      "coords": [
+        14.574,
+        14.58,
+        120.989,
+        120.998
+      ],
+      "aliases": [
+        "pedro gil"
+      ]
+    },
+    {
+      "name": "quirino avenue manila",
+      "risk": "moderate",
+      "summary": "Moderate crime risk along this Manila corridor.",
+      "coords": [
+        14.561,
+        14.567,
+        120.986,
+        120.999
+      ],
+      "aliases": [
+        "quirino ave"
+      ]
+    },
+    {
+      "name": "un avenue",
+      "risk": "moderate",
+      "summary": "Near Paco area; some petty crime reports.",
+      "coords": [
+        14.58,
+        14.586,
+        120.991,
+        121.001
+      ],
+      "aliases": [
+        "united nations avenue"
+      ]
+    },
+    {
+      "name": "kalaw avenue",
+      "risk": "moderate",
+      "summary": "Rizal Park-adjacent area; some pickpocket reports.",
+      "coords": [
+        14.584,
+        14.59,
+        120.978,
+        120.987
+      ],
+      "aliases": [
+        "kalaw"
+      ]
+    },
+    {
+      "name": "a. mabini street",
+      "risk": "moderate",
+      "summary": "Tourist corridor in Ermita/Malate; petty theft at night.",
+      "coords": [
+        14.565,
+        14.587,
+        120.983,
+        120.992
+      ],
+      "aliases": [
+        "a mabini",
+        "mabini street"
+      ]
+    },
+    {
+      "name": "m.h. del pilar",
+      "risk": "moderate",
+      "summary": "Nightlife strip in Malate; theft and snatching at night.",
+      "coords": [
+        14.565,
+        14.585,
+        120.982,
+        120.991
+      ],
+      "aliases": [
+        "m.h. del pilar street",
+        "mh del pilar"
+      ]
+    },
+    {
+      "name": "arroceros",
+      "risk": "moderate",
+      "summary": "Near Lawton; moderate crime risk.",
+      "coords": [
+        14.59,
+        14.598,
+        120.978,
+        120.987
+      ]
+    },
+    {
+      "name": "sauyo",
+      "risk": "low",
+      "summary": "Residential suburban area with low crime.",
+      "coords": [
+        14.7,
+        14.72,
+        121.005,
+        121.03
+      ]
+    },
+    {
+      "name": "bagong pag-asa",
+      "risk": "low",
+      "summary": "Low-crime residential community.",
+      "coords": [
+        14.656,
+        14.673,
+        121.002,
+        121.018
+      ]
+    },
+    {
+      "name": "bago bantay",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.66,
+        14.676,
+        121.01,
+        121.026
+      ]
+    },
+    {
+      "name": "phil-am",
+      "risk": "low",
+      "summary": "Quiet residential village; low crime.",
+      "coords": [
+        14.645,
+        14.658,
+        121.006,
+        121.022
+      ],
+      "aliases": [
+        "philam",
+        "phil am village"
+      ]
+    },
+    {
+      "name": "pinyahan",
+      "risk": "low",
+      "summary": "Government and residential zone; low crime.",
+      "coords": [
+        14.632,
+        14.648,
+        121.04,
+        121.057
+      ]
+    },
+    {
+      "name": "sikatuna village",
+      "risk": "low",
+      "summary": "Residential-commercial area with low crime.",
+      "coords": [
+        14.638,
+        14.651,
+        121.048,
+        121.064
+      ],
+      "aliases": [
+        "sikatuna"
+      ]
+    },
+    {
+      "name": "teachers village",
+      "risk": "low",
+      "summary": "Safe residential village near UP.",
+      "coords": [
+        14.645,
+        14.66,
+        121.058,
+        121.075
+      ]
+    },
+    {
+      "name": "west triangle",
+      "risk": "low",
+      "summary": "Low-crime residential area in QC.",
+      "coords": [
+        14.638,
+        14.652,
+        121.025,
+        121.042
+      ]
+    },
+    {
+      "name": "south triangle",
+      "risk": "low",
+      "summary": "Mixed use area with low crime incidence.",
+      "coords": [
+        14.63,
+        14.644,
+        121.027,
+        121.043
+      ]
+    },
+    {
+      "name": "sacred heart qc",
+      "risk": "low",
+      "summary": "Quiet residential area with low crime reports.",
+      "coords": [
+        14.642,
+        14.656,
+        121.032,
+        121.049
+      ],
+      "aliases": [
+        "sacred heart quezon city"
+      ]
+    },
+    {
+      "name": "kamias",
+      "risk": "low",
+      "summary": "Low-crime residential and commercial area.",
+      "coords": [
+        14.622,
+        14.639,
+        121.042,
+        121.059
+      ]
+    },
+    {
+      "name": "krus na ligas",
+      "risk": "low",
+      "summary": "Residential area near UP; generally safe.",
+      "coords": [
+        14.65,
+        14.664,
+        121.056,
+        121.07
+      ]
+    },
+    {
+      "name": "bagong silangan qc",
+      "risk": "moderate",
+      "summary": "Distant residential area with some crime reports.",
+      "coords": [
+        14.688,
+        14.72,
+        121.105,
+        121.14
+      ],
+      "aliases": [
+        "bagong silangan"
+      ]
+    },
+    {
+      "name": "holy spirit qc",
+      "risk": "low",
+      "summary": "Residential subdivision with low crime.",
+      "coords": [
+        14.705,
+        14.728,
+        121.07,
+        121.1
+      ],
+      "aliases": [
+        "holy spirit"
+      ]
+    },
+    {
+      "name": "new era qc",
+      "risk": "low",
+      "summary": "Residential area with low crime reports.",
+      "coords": [
+        14.682,
+        14.705,
+        121.026,
+        121.052
+      ],
+      "aliases": [
+        "new era"
+      ]
+    },
+    {
+      "name": "cloverleaf quezon city",
+      "risk": "moderate",
+      "summary": "Busy interchange; snatching and theft reports.",
+      "coords": [
+        14.657,
+        14.672,
+        120.995,
+        121.011
+      ],
+      "aliases": [
+        "cloverleaf",
+        "cloverleaf interchange"
+      ]
+    },
+    {
+      "name": "agham road",
+      "risk": "moderate",
+      "summary": "Some crime reports near industrial corridor.",
+      "coords": [
+        14.638,
+        14.655,
+        121.028,
+        121.034
+      ],
+      "aliases": [
+        "agham"
+      ]
+    },
+    {
+      "name": "tuazon",
+      "risk": "moderate",
+      "summary": "Moderate crime in busy commercial area.",
+      "coords": [
+        14.628,
+        14.642,
+        121.031,
+        121.047
+      ],
+      "aliases": [
+        "p. tuazon",
+        "p tuazon"
+      ]
+    },
+    {
+      "name": "new manila",
+      "risk": "low",
+      "summary": "Relatively safe residential district.",
+      "coords": [
+        14.613,
+        14.63,
+        121.036,
+        121.058
+      ]
+    },
+    {
+      "name": "san francisco del monte",
+      "risk": "moderate",
+      "summary": "Some crime incidents in dense residential area.",
+      "coords": [
+        14.633,
+        14.657,
+        120.998,
+        121.02
+      ],
+      "aliases": [
+        "sfdm",
+        "san francisco del monte qc"
+      ]
+    },
+    {
+      "name": "project 2",
+      "risk": "low",
+      "summary": "Low-crime residential neighborhood.",
+      "coords": [
+        14.62,
+        14.636,
+        121.059,
+        121.076
+      ]
+    },
+    {
+      "name": "project 3",
+      "risk": "low",
+      "summary": "Low-crime residential neighborhood.",
+      "coords": [
+        14.615,
+        14.631,
+        121.071,
+        121.088
+      ]
+    },
+    {
+      "name": "project 4",
+      "risk": "low",
+      "summary": "Low-crime residential neighborhood.",
+      "coords": [
+        14.61,
+        14.625,
+        121.085,
+        121.102
+      ]
+    },
+    {
+      "name": "don antonio",
+      "risk": "low",
+      "summary": "Residential area in QC; low crime.",
+      "coords": [
+        14.69,
+        14.713,
+        121.088,
+        121.115
+      ]
+    },
+    {
+      "name": "batasan complex",
+      "risk": "low",
+      "summary": "Government complex area; well-patrolled.",
+      "coords": [
+        14.685,
+        14.71,
+        121.102,
+        121.133
+      ],
+      "aliases": [
+        "batasan"
+      ]
+    },
+    {
+      "name": "filinvest 2",
+      "risk": "low",
+      "summary": "Upscale residential subdivision; low crime.",
+      "coords": [
+        14.705,
+        14.728,
+        121.072,
+        121.097
+      ],
+      "aliases": [
+        "filinvest"
+      ]
+    },
+    {
+      "name": "matandang balara",
+      "risk": "moderate",
+      "summary": "Some crime reports in dense residential community.",
+      "coords": [
+        14.672,
+        14.695,
+        121.07,
+        121.096
+      ],
+      "aliases": [
+        "old balara",
+        "balara"
+      ]
+    },
+    {
+      "name": "apolonio samson",
+      "risk": "moderate",
+      "summary": "Moderate crime risk near market area.",
+      "coords": [
+        14.662,
+        14.68,
+        120.992,
+        121.011
+      ]
+    },
+    {
+      "name": "culiat",
+      "risk": "moderate",
+      "summary": "Some crime reports in residential area.",
+      "coords": [
+        14.683,
+        14.708,
+        121.04,
+        121.067
+      ]
+    },
+    {
+      "name": "luzon avenue",
+      "risk": "moderate",
+      "summary": "Some snatching incidents along this corridor.",
+      "coords": [
+        14.677,
+        14.71,
+        121.039,
+        121.047
+      ],
+      "aliases": [
+        "luzon ave"
+      ]
+    },
+    {
+      "name": "mindanao avenue",
+      "risk": "low",
+      "summary": "Major QC road; generally safe.",
+      "coords": [
+        14.672,
+        14.75,
+        121.035,
+        121.042
+      ],
+      "aliases": [
+        "mindanao ave"
+      ]
+    },
+    {
+      "name": "visayas avenue",
+      "risk": "low",
+      "summary": "QC commercial road; generally safe.",
+      "coords": [
+        14.638,
+        14.688,
+        121.036,
+        121.043
+      ],
+      "aliases": [
+        "visayas ave"
+      ]
+    },
+    {
+      "name": "5th avenue caloocan",
+      "risk": "moderate",
+      "summary": "Some crime incidents along main commercial avenue.",
+      "coords": [
+        14.631,
+        14.641,
+        120.965,
+        120.972
+      ],
+      "aliases": [
+        "5th avenue"
+      ]
+    },
+    {
+      "name": "7th avenue caloocan",
+      "risk": "moderate",
+      "summary": "Moderate crime risk near commercial areas.",
+      "coords": [
+        14.638,
+        14.648,
+        120.967,
+        120.974
+      ],
+      "aliases": [
+        "7th avenue"
+      ]
+    },
+    {
+      "name": "caloocan public market",
+      "risk": "high",
+      "summary": "High foot-traffic market; pickpocketing and snatching frequently reported.",
+      "coords": [
+        14.648,
+        14.658,
+        120.968,
+        120.978
+      ]
+    },
+    {
+      "name": "university hills caloocan",
+      "risk": "moderate",
+      "summary": "Residential area near Caloocan-QC border; some crime reports.",
+      "coords": [
+        14.67,
+        14.688,
+        121.01,
+        121.031
+      ],
+      "aliases": [
+        "university hills"
+      ]
+    },
+    {
+      "name": "amparo caloocan",
+      "risk": "moderate",
+      "summary": "Moderate crime risk in residential area.",
+      "coords": [
+        14.705,
+        14.735,
+        120.97,
+        120.995
+      ],
+      "aliases": [
+        "amparo"
+      ]
+    },
+    {
+      "name": "llano caloocan",
+      "risk": "moderate",
+      "summary": "Some crime reports in border community.",
+      "coords": [
+        14.71,
+        14.738,
+        120.958,
+        120.978
+      ],
+      "aliases": [
+        "llano"
+      ]
+    },
+    {
+      "name": "catmon malabon",
+      "risk": "moderate",
+      "summary": "Moderate crime risk near market areas.",
+      "coords": [
+        14.66,
+        14.678,
+        120.959,
+        120.975
+      ],
+      "aliases": [
+        "catmon"
+      ]
+    },
+    {
+      "name": "panghulo malabon",
+      "risk": "moderate",
+      "summary": "Waterfront area with moderate crime risk.",
+      "coords": [
+        14.675,
+        14.69,
+        120.951,
+        120.966
+      ],
+      "aliases": [
+        "panghulo"
+      ]
+    },
+    {
+      "name": "acacia malabon",
+      "risk": "low",
+      "summary": "Relatively quiet residential area.",
+      "coords": [
+        14.65,
+        14.666,
+        120.956,
+        120.972
+      ],
+      "aliases": [
+        "acacia"
+      ]
+    },
+    {
+      "name": "malabon public market area",
+      "risk": "moderate",
+      "summary": "Market area with typical petty theft risk.",
+      "coords": [
+        14.659,
+        14.674,
+        120.954,
+        120.968
+      ]
+    },
+    {
+      "name": "tanong malabon",
+      "risk": "moderate",
+      "summary": "Some snatching reports in residential area.",
+      "coords": [
+        14.646,
+        14.66,
+        120.952,
+        120.966
+      ],
+      "aliases": [
+        "tanong"
+      ]
+    },
+    {
+      "name": "paso de blas",
+      "risk": "low",
+      "summary": "Low-crime residential and commercial zone.",
+      "coords": [
+        14.69,
+        14.71,
+        120.964,
+        120.981
+      ]
+    },
+    {
+      "name": "marulas valenzuela",
+      "risk": "low",
+      "summary": "Mostly safe residential area.",
+      "coords": [
+        14.697,
+        14.72,
+        120.978,
+        120.999
+      ],
+      "aliases": [
+        "marulas"
+      ]
+    },
+    {
+      "name": "polo valenzuela",
+      "risk": "low",
+      "summary": "Low-crime residential area.",
+      "coords": [
+        14.708,
+        14.736,
+        120.96,
+        120.982
+      ],
+      "aliases": [
+        "polo"
+      ]
+    },
+    {
+      "name": "punturin",
+      "risk": "low",
+      "summary": "Quiet residential zone with low crime.",
+      "coords": [
+        14.72,
+        14.75,
+        120.956,
+        120.979
+      ]
+    },
+    {
+      "name": "valenzuela public market",
+      "risk": "moderate",
+      "summary": "Market area with typical petty theft risk.",
+      "coords": [
+        14.7,
+        14.716,
+        120.962,
+        120.978
+      ]
+    },
+    {
+      "name": "sto. nino marikina",
+      "risk": "low",
+      "summary": "Quiet residential barangay in Marikina.",
+      "coords": [
+        14.62,
+        14.638,
+        121.101,
+        121.12
+      ],
+      "aliases": [
+        "santo nino marikina"
+      ]
+    },
+    {
+      "name": "parang marikina",
+      "risk": "low",
+      "summary": "Low-crime residential zone in Marikina.",
+      "coords": [
+        14.627,
+        14.649,
+        121.087,
+        121.106
+      ],
+      "aliases": [
+        "parang"
+      ]
+    },
+    {
+      "name": "calumpang marikina",
+      "risk": "low",
+      "summary": "Safe riverside residential area.",
+      "coords": [
+        14.631,
+        14.652,
+        121.1,
+        121.123
+      ],
+      "aliases": [
+        "calumpang"
+      ]
+    },
+    {
+      "name": "marikina heights",
+      "risk": "low",
+      "summary": "Elevated residential area with low crime.",
+      "coords": [
+        14.645,
+        14.67,
+        121.11,
+        121.14
+      ]
+    },
+    {
+      "name": "shoe avenue marikina",
+      "risk": "low",
+      "summary": "Commercial corridor with low crime.",
+      "coords": [
+        14.63,
+        14.635,
+        121.084,
+        121.106
+      ],
+      "aliases": [
+        "shoe ave",
+        "marikina shoe district"
+      ]
+    },
+    {
+      "name": "fortune marikina",
+      "risk": "low",
+      "summary": "Subdivision area with low crime incidence.",
+      "coords": [
+        14.648,
+        14.672,
+        121.083,
+        121.108
+      ],
+      "aliases": [
+        "fortune"
+      ]
+    },
+    {
+      "name": "kabayanan san juan",
+      "risk": "low",
+      "summary": "Quiet residential area.",
+      "coords": [
+        14.6,
+        14.615,
+        121.02,
+        121.038
+      ],
+      "aliases": [
+        "kabayanan"
+      ]
+    },
+    {
+      "name": "addition hills",
+      "risk": "low",
+      "summary": "Residential area with low crime reports.",
+      "coords": [
+        14.588,
+        14.603,
+        121.034,
+        121.052
+      ]
+    },
+    {
+      "name": "corazon de jesus",
+      "risk": "low",
+      "summary": "Safe residential barangay in San Juan.",
+      "coords": [
+        14.597,
+        14.611,
+        121.025,
+        121.042
+      ]
+    },
+    {
+      "name": "salapan",
+      "risk": "low",
+      "summary": "Low-crime residential area in San Juan.",
+      "coords": [
+        14.601,
+        14.616,
+        121.015,
+        121.032
+      ]
+    },
+    {
+      "name": "st joseph san juan",
+      "risk": "low",
+      "summary": "Low-crime residential barangay.",
+      "coords": [
+        14.595,
+        14.609,
+        121.037,
+        121.053
+      ],
+      "aliases": [
+        "st joseph",
+        "saint joseph san juan"
+      ]
+    },
+    {
+      "name": "pinaglabanan",
+      "risk": "low",
+      "summary": "Residential area in San Juan; low crime.",
+      "coords": [
+        14.593,
+        14.606,
+        121.02,
+        121.036
+      ]
+    },
+    {
+      "name": "isabelita",
+      "risk": "low",
+      "summary": "Quiet residential zone in San Juan.",
+      "coords": [
+        14.589,
+        14.602,
+        121.028,
+        121.043
+      ]
+    },
+    {
+      "name": "barangka mandaluyong",
+      "risk": "moderate",
+      "summary": "Some crime reports in residential area.",
+      "coords": [
+        14.584,
+        14.598,
+        121.044,
+        121.062
+      ],
+      "aliases": [
+        "barangka"
+      ]
+    },
+    {
+      "name": "wack wack mandaluyong",
+      "risk": "low",
+      "summary": "Upscale residential/golf area; low crime.",
+      "coords": [
+        14.582,
+        14.598,
+        121.049,
+        121.066
+      ],
+      "aliases": [
+        "wack-wack",
+        "wack wack"
+      ]
+    },
+    {
+      "name": "plainview mandaluyong",
+      "risk": "low",
+      "summary": "Residential area with generally low crime.",
+      "coords": [
+        14.576,
+        14.592,
+        121.056,
+        121.073
+      ],
+      "aliases": [
+        "plainview"
+      ]
+    },
+    {
+      "name": "highway hills",
+      "risk": "low",
+      "summary": "Commercial corridor with low crime reports.",
+      "coords": [
+        14.585,
+        14.592,
+        121.037,
+        121.052
+      ]
+    },
+    {
+      "name": "bagong nayon mandaluyong",
+      "risk": "moderate",
+      "summary": "Some crime activity in dense residential area.",
+      "coords": [
+        14.576,
+        14.59,
+        121.043,
+        121.06
+      ],
+      "aliases": [
+        "bagong nayon ii"
+      ]
+    },
+    {
+      "name": "boni avenue",
+      "risk": "moderate",
+      "summary": "Busy commercial street with moderate crime.",
+      "coords": [
+        14.579,
+        14.585,
+        121.029,
+        121.044
+      ],
+      "aliases": [
+        "boni"
+      ]
+    },
+    {
+      "name": "mauway mandaluyong",
+      "risk": "low",
+      "summary": "Low-crime residential zone.",
+      "coords": [
+        14.588,
+        14.603,
+        121.049,
+        121.066
+      ],
+      "aliases": [
+        "mauway"
+      ]
+    },
+    {
+      "name": "pag-asa mandaluyong",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.579,
+        14.594,
+        121.031,
+        121.049
+      ],
+      "aliases": [
+        "pag-asa"
+      ]
+    },
+    {
+      "name": "ugong pasig",
+      "risk": "low",
+      "summary": "Low-crime residential-industrial area.",
+      "coords": [
+        14.568,
+        14.586,
+        121.062,
+        121.083
+      ],
+      "aliases": [
+        "ugong"
+      ]
+    },
+    {
+      "name": "rosario pasig",
+      "risk": "moderate",
+      "summary": "Some crime reports near market area.",
+      "coords": [
+        14.575,
+        14.595,
+        121.076,
+        121.098
+      ],
+      "aliases": [
+        "rosario"
+      ]
+    },
+    {
+      "name": "santolan pasig",
+      "risk": "low",
+      "summary": "Low-crime residential area.",
+      "coords": [
+        14.6,
+        14.619,
+        121.074,
+        121.097
+      ],
+      "aliases": [
+        "santolan"
+      ]
+    },
+    {
+      "name": "dela paz pasig",
+      "risk": "low",
+      "summary": "Generally safe residential area.",
+      "coords": [
+        14.582,
+        14.601,
+        121.082,
+        121.106
+      ],
+      "aliases": [
+        "dela paz"
+      ]
+    },
+    {
+      "name": "maybunga",
+      "risk": "low",
+      "summary": "Low-crime residential area in Pasig.",
+      "coords": [
+        14.577,
+        14.597,
+        121.096,
+        121.12
+      ]
+    },
+    {
+      "name": "caniogan pasig",
+      "risk": "low",
+      "summary": "Quiet residential community.",
+      "coords": [
+        14.585,
+        14.605,
+        121.068,
+        121.09
+      ],
+      "aliases": [
+        "caniogan"
+      ]
+    },
+    {
+      "name": "san antonio pasig",
+      "risk": "low",
+      "summary": "Low-crime residential and commercial area.",
+      "coords": [
+        14.562,
+        14.581,
+        121.049,
+        121.071
+      ]
+    },
+    {
+      "name": "san joaquin pasig",
+      "risk": "low",
+      "summary": "Low-crime residential zone.",
+      "coords": [
+        14.557,
+        14.575,
+        121.069,
+        121.092
+      ],
+      "aliases": [
+        "san joaquin"
+      ]
+    },
+    {
+      "name": "manggahan pasig",
+      "risk": "moderate",
+      "summary": "Flood-prone area with some crime reports.",
+      "coords": [
+        14.573,
+        14.596,
+        121.088,
+        121.113
+      ],
+      "aliases": [
+        "manggahan"
+      ]
+    },
+    {
+      "name": "san antonio makati",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.556,
+        14.57,
+        121.029,
+        121.045
+      ]
+    },
+    {
+      "name": "palanan makati",
+      "risk": "low",
+      "summary": "Quiet residential area in Makati.",
+      "coords": [
+        14.547,
+        14.562,
+        121.0,
+        121.016
+      ],
+      "aliases": [
+        "palanan"
+      ]
+    },
+    {
+      "name": "pio del pilar",
+      "risk": "low",
+      "summary": "Residential area with low crime incidence.",
+      "coords": [
+        14.554,
+        14.568,
+        121.01,
+        121.027
+      ]
+    },
+    {
+      "name": "olympia makati",
+      "risk": "low",
+      "summary": "Low-crime residential zone.",
+      "coords": [
+        14.562,
+        14.577,
+        121.008,
+        121.025
+      ],
+      "aliases": [
+        "olympia"
+      ]
+    },
+    {
+      "name": "bangkal makati",
+      "risk": "low",
+      "summary": "Low-crime residential and commercial area.",
+      "coords": [
+        14.536,
+        14.552,
+        121.012,
+        121.029
+      ],
+      "aliases": [
+        "bangkal"
+      ]
+    },
+    {
+      "name": "pitogo makati",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.547,
+        14.562,
+        121.025,
+        121.042
+      ],
+      "aliases": [
+        "pitogo"
+      ]
+    },
+    {
+      "name": "san isidro makati",
+      "risk": "low",
+      "summary": "Residential zone with low crime.",
+      "coords": [
+        14.569,
+        14.584,
+        121.023,
+        121.041
+      ]
+    },
+    {
+      "name": "guadalupe nuevo",
+      "risk": "low",
+      "summary": "Low-crime residential zone.",
+      "coords": [
+        14.558,
+        14.573,
+        121.045,
+        121.062
+      ]
+    },
+    {
+      "name": "guadalupe viejo",
+      "risk": "low",
+      "summary": "Low-crime residential zone.",
+      "coords": [
+        14.562,
+        14.578,
+        121.043,
+        121.059
+      ]
+    },
+    {
+      "name": "rizal makati area",
+      "risk": "moderate",
+      "summary": "Dense residential area with some crime reports.",
+      "coords": [
+        14.541,
+        14.557,
+        121.037,
+        121.056
+      ]
+    },
+    {
+      "name": "pasong tamo",
+      "risk": "low",
+      "summary": "Commercial street in Makati; low crime.",
+      "coords": [
+        14.549,
+        14.566,
+        121.005,
+        121.024
+      ],
+      "aliases": [
+        "pasong tamo extension"
+      ]
+    },
+    {
+      "name": "chino roces avenue",
+      "risk": "low",
+      "summary": "Business area in Makati; low crime.",
+      "coords": [
+        14.555,
+        14.561,
+        121.013,
+        121.028
+      ],
+      "aliases": [
+        "chino roces",
+        "pasay road"
+      ]
+    },
+    {
+      "name": "magallanes makati",
+      "risk": "low",
+      "summary": "Residential village with low crime.",
+      "coords": [
+        14.523,
+        14.54,
+        121.007,
+        121.028
+      ],
+      "aliases": [
+        "magallanes village"
+      ]
+    },
+    {
+      "name": "urdaneta village",
+      "risk": "low",
+      "summary": "Upscale residential village in Makati.",
+      "coords": [
+        14.553,
+        14.568,
+        121.015,
+        121.032
+      ],
+      "aliases": [
+        "urdaneta"
+      ]
+    },
+    {
+      "name": "la paz makati",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.546,
+        14.561,
+        121.022,
+        121.04
+      ],
+      "aliases": [
+        "la paz"
+      ]
+    },
+    {
+      "name": "ususan taguig",
+      "risk": "low",
+      "summary": "Low-crime residential area.",
+      "coords": [
+        14.496,
+        14.517,
+        121.068,
+        121.095
+      ],
+      "aliases": [
+        "ususan"
+      ]
+    },
+    {
+      "name": "napindan taguig",
+      "risk": "low",
+      "summary": "Low-crime waterfront residential area.",
+      "coords": [
+        14.523,
+        14.548,
+        121.082,
+        121.107
+      ],
+      "aliases": [
+        "napindan"
+      ]
+    },
+    {
+      "name": "ibayo tipas",
+      "risk": "low",
+      "summary": "Quiet residential zone in Taguig.",
+      "coords": [
+        14.508,
+        14.528,
+        121.062,
+        121.084
+      ]
+    },
+    {
+      "name": "ligid tipas",
+      "risk": "low",
+      "summary": "Quiet residential community.",
+      "coords": [
+        14.503,
+        14.523,
+        121.073,
+        121.098
+      ],
+      "aliases": [
+        "ligid-tipas"
+      ]
+    },
+    {
+      "name": "wawa taguig",
+      "risk": "low",
+      "summary": "Low-crime residential area in Taguig.",
+      "coords": [
+        14.528,
+        14.551,
+        121.047,
+        121.071
+      ]
+    },
+    {
+      "name": "tuktukan taguig",
+      "risk": "low",
+      "summary": "Low-crime residential zone.",
+      "coords": [
+        14.51,
+        14.533,
+        121.043,
+        121.068
+      ],
+      "aliases": [
+        "tuktukan"
+      ]
+    },
+    {
+      "name": "upper bicutan",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.491,
+        14.513,
+        121.048,
+        121.072
+      ]
+    },
+    {
+      "name": "western bicutan",
+      "risk": "low",
+      "summary": "Low-crime residential zone.",
+      "coords": [
+        14.485,
+        14.507,
+        121.033,
+        121.058
+      ]
+    },
+    {
+      "name": "central bicutan",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.488,
+        14.51,
+        121.05,
+        121.074
+      ]
+    },
+    {
+      "name": "mckinley hill",
+      "risk": "low",
+      "summary": "Upscale mixed-use development; low crime.",
+      "coords": [
+        14.539,
+        14.555,
+        121.045,
+        121.063
+      ],
+      "aliases": [
+        "mckinley",
+        "mckinley road"
+      ]
+    },
+    {
+      "name": "san dionisio paranaque",
+      "risk": "low",
+      "summary": "Suburban residential area; generally safe.",
+      "coords": [
+        14.473,
+        14.497,
+        120.998,
+        121.023
+      ],
+      "aliases": [
+        "san dionisio"
+      ]
+    },
+    {
+      "name": "san antonio paranaque",
+      "risk": "low",
+      "summary": "Low-crime residential area.",
+      "coords": [
+        14.453,
+        14.478,
+        121.004,
+        121.029
+      ]
+    },
+    {
+      "name": "don galo",
+      "risk": "low",
+      "summary": "Coastal residential zone; generally safe.",
+      "coords": [
+        14.484,
+        14.51,
+        120.995,
+        121.02
+      ]
+    },
+    {
+      "name": "moonwalk paranaque",
+      "risk": "low",
+      "summary": "Subdivision area with low crime.",
+      "coords": [
+        14.462,
+        14.487,
+        121.015,
+        121.04
+      ],
+      "aliases": [
+        "moonwalk"
+      ]
+    },
+    {
+      "name": "marcelo green",
+      "risk": "low",
+      "summary": "Subdivision area with low crime.",
+      "coords": [
+        14.478,
+        14.502,
+        121.01,
+        121.035
+      ]
+    },
+    {
+      "name": "san isidro paranaque",
+      "risk": "low",
+      "summary": "Suburban residential area; generally safe.",
+      "coords": [
+        14.458,
+        14.482,
+        121.026,
+        121.052
+      ]
+    },
+    {
+      "name": "la huerta",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.471,
+        14.494,
+        121.024,
+        121.048
+      ]
+    },
+    {
+      "name": "sto nino paranaque",
+      "risk": "low",
+      "summary": "Residential zone with low crime.",
+      "coords": [
+        14.466,
+        14.49,
+        121.03,
+        121.055
+      ],
+      "aliases": [
+        "sto. nino paranaque",
+        "santo nino paranaque"
+      ]
+    },
+    {
+      "name": "almanza las pinas",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.418,
+        14.447,
+        120.995,
+        121.025
+      ],
+      "aliases": [
+        "almanza uno",
+        "almanza dos",
+        "almanza"
+      ]
+    },
+    {
+      "name": "pamplona las pinas",
+      "risk": "low",
+      "summary": "Suburban residential zone with low crime.",
+      "coords": [
+        14.435,
+        14.465,
+        120.993,
+        121.023
+      ],
+      "aliases": [
+        "pamplona",
+        "pamplona tres"
+      ]
+    },
+    {
+      "name": "pulang lupa",
+      "risk": "low",
+      "summary": "Residential zone with low crime.",
+      "coords": [
+        14.425,
+        14.454,
+        120.987,
+        121.017
+      ]
+    },
+    {
+      "name": "bf resort village",
+      "risk": "low",
+      "summary": "Residential subdivision; generally safe.",
+      "coords": [
+        14.448,
+        14.473,
+        120.998,
+        121.026
+      ],
+      "aliases": [
+        "bf resort"
+      ]
+    },
+    {
+      "name": "camella las pinas",
+      "risk": "low",
+      "summary": "Gated community with low crime.",
+      "coords": [
+        14.437,
+        14.463,
+        120.99,
+        121.018
+      ],
+      "aliases": [
+        "camella"
+      ]
+    },
+    {
+      "name": "buli muntinlupa",
+      "risk": "low",
+      "summary": "Low-crime residential zone.",
+      "coords": [
+        14.398,
+        14.427,
+        121.034,
+        121.064
+      ],
+      "aliases": [
+        "buli"
+      ]
+    },
+    {
+      "name": "cupang muntinlupa",
+      "risk": "low",
+      "summary": "Residential area with low crime incidence.",
+      "coords": [
+        14.425,
+        14.455,
+        121.028,
+        121.058
+      ],
+      "aliases": [
+        "cupang"
+      ]
+    },
+    {
+      "name": "tunasan muntinlupa",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.4,
+        14.431,
+        121.041,
+        121.071
+      ],
+      "aliases": [
+        "tunasan"
+      ]
+    },
+    {
+      "name": "new alabang village",
+      "risk": "low",
+      "summary": "Upscale residential area with low crime.",
+      "coords": [
+        14.41,
+        14.44,
+        121.045,
+        121.075
+      ],
+      "aliases": [
+        "new alabang"
+      ]
+    },
+    {
+      "name": "sucat muntinlupa",
+      "risk": "low",
+      "summary": "Residential zone with low crime.",
+      "coords": [
+        14.452,
+        14.482,
+        121.035,
+        121.066
+      ],
+      "aliases": [
+        "sucat road"
+      ]
+    },
+    {
+      "name": "ayala alabang village",
+      "risk": "low",
+      "summary": "Well-secured upscale village.",
+      "coords": [
+        14.408,
+        14.437,
+        121.035,
+        121.066
+      ],
+      "aliases": [
+        "ayala alabang"
+      ]
+    },
+    {
+      "name": "nbp area",
+      "risk": "moderate",
+      "summary": "Area near national bilibid prison; some crime reports.",
+      "coords": [
+        14.408,
+        14.437,
+        121.053,
+        121.082
+      ],
+      "aliases": [
+        "new bilibid prison area",
+        "bilibid"
+      ]
+    },
+    {
+      "name": "malibay pasay",
+      "risk": "moderate",
+      "summary": "Some crime reports near market area.",
+      "coords": [
+        14.535,
+        14.553,
+        121.005,
+        121.024
+      ],
+      "aliases": [
+        "malibay"
+      ]
+    },
+    {
+      "name": "dongalo pasay",
+      "risk": "moderate",
+      "summary": "Moderate crime risk area.",
+      "coords": [
+        14.525,
+        14.543,
+        121.003,
+        121.022
+      ],
+      "aliases": [
+        "dongalo"
+      ]
+    },
+    {
+      "name": "maytubig pasay",
+      "risk": "moderate",
+      "summary": "Some crime reports in dense residential area.",
+      "coords": [
+        14.542,
+        14.56,
+        121.005,
+        121.024
+      ],
+      "aliases": [
+        "maytubig"
+      ]
+    },
+    {
+      "name": "santos pasay",
+      "risk": "moderate",
+      "summary": "Dense residential area with moderate crime reports.",
+      "coords": [
+        14.545,
+        14.563,
+        121.007,
+        121.025
+      ]
+    },
+    {
+      "name": "san rafael pasay",
+      "risk": "moderate",
+      "summary": "Some snatching and theft reports.",
+      "coords": [
+        14.548,
+        14.567,
+        121.0,
+        121.019
+      ]
+    },
+    {
+      "name": "harrison pasay",
+      "risk": "moderate",
+      "summary": "Near entertainment district; some petty theft.",
+      "coords": [
+        14.551,
+        14.57,
+        120.994,
+        121.014
+      ],
+      "aliases": [
+        "harrison road",
+        "harrison street"
+      ]
+    },
+    {
+      "name": "binangonan",
+      "risk": "low",
+      "summary": "Lakeside town with low crime."
+    },
+    {
+      "name": "angono rizal",
+      "risk": "low",
+      "summary": "Peaceful lakeside town.",
+      "aliases": [
+        "angono"
+      ]
+    },
+    {
+      "name": "san mateo rizal",
+      "risk": "low",
+      "summary": "Suburban town with low crime incidence.",
+      "aliases": [
+        "san mateo"
+      ]
+    },
+    {
+      "name": "rodriguez rizal",
+      "risk": "low",
+      "summary": "Suburban municipality with low crime.",
+      "aliases": [
+        "rodriguez",
+        "montalban"
+      ]
+    },
+    {
+      "name": "tanay rizal",
+      "risk": "low",
+      "summary": "Mountain/lakeside town with low crime.",
+      "aliases": [
+        "tanay"
+      ]
+    },
+    {
+      "name": "morong rizal",
+      "risk": "low",
+      "summary": "Lakeside town with low crime.",
+      "aliases": [
+        "morong"
+      ]
+    },
+    {
+      "name": "bocaue",
+      "risk": "low",
+      "summary": "Suburban town; generally safe."
+    },
+    {
+      "name": "balagtas bulacan",
+      "risk": "low",
+      "summary": "Low-crime suburban municipality.",
+      "aliases": [
+        "balagtas"
+      ]
+    },
+    {
+      "name": "malolos bulacan",
+      "risk": "low",
+      "summary": "Provincial capital; generally low crime.",
+      "aliases": [
+        "malolos city"
+      ]
+    },
+    {
+      "name": "guiguinto bulacan",
+      "risk": "low",
+      "summary": "Low-crime industrial-residential town.",
+      "aliases": [
+        "guiguinto"
+      ]
+    },
+    {
+      "name": "sta maria bulacan",
+      "risk": "low",
+      "summary": "Suburban town with low crime.",
+      "aliases": [
+        "santa maria bulacan"
+      ]
+    },
+    {
+      "name": "bulacan town",
+      "risk": "low",
+      "summary": "Old town area; generally low crime.",
+      "aliases": [
+        "bulacan municipality"
+      ]
+    },
+    {
+      "name": "general trias cavite",
+      "risk": "low",
+      "summary": "Growing suburban city with low crime.",
+      "aliases": [
+        "gen trias",
+        "general trias"
+      ]
+    },
+    {
+      "name": "trece martires",
+      "risk": "low",
+      "summary": "Suburban city with low crime incidence.",
+      "aliases": [
+        "trece martires city"
+      ]
+    },
+    {
+      "name": "silang cavite",
+      "risk": "low",
+      "summary": "Suburban town with generally low crime.",
+      "aliases": [
+        "silang"
+      ]
+    },
+    {
+      "name": "kawit cavite",
+      "risk": "low",
+      "summary": "Historical town with low crime.",
+      "aliases": [
+        "kawit"
+      ]
+    },
+    {
+      "name": "noveleta cavite",
+      "risk": "low",
+      "summary": "Coastal town with low crime.",
+      "aliases": [
+        "noveleta"
+      ]
+    },
+    {
+      "name": "rosario cavite",
+      "risk": "low",
+      "summary": "Suburban town with low crime incidence.",
+      "aliases": [
+        "rosario"
+      ]
+    },
+    {
+      "name": "san pedro laguna",
+      "risk": "low",
+      "summary": "Suburban city bordering Metro Manila; low crime.",
+      "aliases": [
+        "san pedro"
+      ]
+    },
+    {
+      "name": "binan laguna",
+      "risk": "low",
+      "summary": "Industrial city with generally low crime.",
+      "aliases": [
+        "binan city",
+        "biñan"
+      ]
+    },
+    {
+      "name": "santa rosa laguna",
+      "risk": "low",
+      "summary": "Planned city with low crime; good security in subdivisions.",
+      "aliases": [
+        "santa rosa",
+        "sta rosa laguna",
+        "nuvali area"
+      ]
+    },
+    {
+      "name": "cabuyao laguna",
+      "risk": "low",
+      "summary": "Industrial city with generally low crime.",
+      "aliases": [
+        "cabuyao"
+      ]
+    },
+    {
+      "name": "calamba laguna",
+      "risk": "low",
+      "summary": "Major city; generally safe in commercial areas.",
+      "aliases": [
+        "calamba city"
+      ]
+    },
+    {
+      "name": "los banos laguna",
+      "risk": "low",
+      "summary": "University town with low crime.",
+      "aliases": [
+        "los baños",
+        "los banos"
+      ]
+    },
+    {
+      "name": "slex alabang viaduct",
+      "risk": "low",
+      "summary": "Elevated expressway section; generally safe.",
+      "coords": [
+        14.413,
+        14.456,
+        121.034,
+        121.068
+      ],
+      "aliases": [
+        "alabang viaduct"
+      ]
+    },
+    {
+      "name": "skyway",
+      "risk": "low",
+      "summary": "Elevated expressway; safe for motorists.",
+      "coords": [
+        14.455,
+        14.585,
+        121.014,
+        121.024
+      ],
+      "aliases": [
+        "metro skyway",
+        "skywayg3"
+      ]
+    },
+    {
+      "name": "nlex harbor link",
+      "risk": "low",
+      "summary": "Expressway connector; generally safe.",
+      "coords": [
+        14.608,
+        14.655,
+        120.981,
+        120.988
+      ],
+      "aliases": [
+        "harbor link",
+        "harbor link expressway"
+      ]
+    },
+    {
+      "name": "mrt3 line",
+      "risk": "moderate",
+      "summary": "MRT corridor; watch for pickpockets especially at peak hours.",
+      "coords": [
+        14.557,
+        14.705,
+        121.028,
+        121.035
+      ],
+      "aliases": [
+        "mrt line 3",
+        "mrt edsa"
+      ]
+    },
+    {
+      "name": "lrt1 line",
+      "risk": "moderate",
+      "summary": "LRT-1 corridor; crowded stations have pickpocket reports.",
+      "coords": [
+        14.521,
+        14.656,
+        120.983,
+        120.989
+      ],
+      "aliases": [
+        "lrt line 1",
+        "lrt 1"
+      ]
+    },
+    {
+      "name": "lrt2 line",
+      "risk": "moderate",
+      "summary": "LRT-2 corridor; Recto and Legarda stations are higher risk.",
+      "coords": [
+        14.606,
+        14.614,
+        120.982,
+        121.08
+      ],
+      "aliases": [
+        "lrt line 2",
+        "lrt 2"
+      ]
+    },
+    {
+      "name": "commonwealth market area",
+      "risk": "moderate",
+      "summary": "Market along Commonwealth Ave; moderate pickpocket risk.",
+      "coords": [
+        14.674,
+        14.693,
+        121.053,
+        121.072
+      ],
+      "aliases": [
+        "commonwealth market"
+      ]
+    },
+    {
+      "name": "novaliches proper",
+      "risk": "low",
+      "summary": "Suburban town center with low crime.",
+      "coords": [
+        14.745,
+        14.775,
+        121.042,
+        121.078
+      ],
+      "aliases": [
+        "novaliches town proper"
+      ]
+    },
+    {
+      "name": "san bartolome",
+      "risk": "low",
+      "summary": "Residential area in Novaliches; low crime.",
+      "coords": [
+        14.728,
+        14.753,
+        121.03,
+        121.062
+      ]
+    },
+    {
+      "name": "gulod novaliches",
+      "risk": "low",
+      "summary": "Suburban residential area with low crime.",
+      "coords": [
+        14.738,
+        14.768,
+        121.048,
+        121.083
+      ],
+      "aliases": [
+        "gulod"
+      ]
+    },
+    {
+      "name": "sta lucia mall area",
+      "risk": "low",
+      "summary": "Mall complex with active security.",
+      "coords": [
+        14.595,
+        14.611,
+        121.078,
+        121.098
+      ],
+      "aliases": [
+        "sta lucia",
+        "sta. lucia"
+      ]
+    },
+    {
+      "name": "cainta junction",
+      "risk": "low",
+      "summary": "Suburban junction area; generally safe.",
+      "coords": [
+        14.565,
+        14.589,
+        121.105,
+        121.135
+      ],
+      "aliases": [
+        "cainta rotonda"
+      ]
+    },
+    {
+      "name": "imelda avenue",
+      "risk": "moderate",
+      "summary": "Some crime reports along this corridor.",
+      "coords": [
+        14.601,
+        14.609,
+        121.086,
+        121.115
+      ],
+      "aliases": [
+        "imelda blvd",
+        "corona ave"
+      ]
+    },
+    {
+      "name": "sumulong highway",
+      "risk": "low",
+      "summary": "Antipolo highway; generally safe.",
+      "coords": [
+        14.617,
+        14.625,
+        121.11,
+        121.21
+      ],
+      "aliases": [
+        "sumulong"
+      ]
+    },
+    {
+      "name": "ortigas avenue extension",
+      "risk": "low",
+      "summary": "Road toward Antipolo; generally safe.",
+      "coords": [
+        14.591,
+        14.598,
+        121.084,
+        121.164
+      ],
+      "aliases": [
+        "ortigas ext",
+        "ortigas extension"
+      ]
+    },
+    {
+      "name": "sucat road paranaque",
+      "risk": "low",
+      "summary": "Commercial road with generally low crime.",
+      "coords": [
+        14.484,
+        14.491,
+        120.997,
+        121.042
+      ],
+      "aliases": [
+        "dr. a. santos avenue",
+        "dr a santos"
+      ]
+    },
+    {
+      "name": "alabang-zapote road",
+      "risk": "low",
+      "summary": "Suburban connector road; generally safe.",
+      "coords": [
+        14.406,
+        14.47,
+        121.01,
+        121.018
+      ],
+      "aliases": [
+        "alabang zapote"
+      ]
+    },
+    {
+      "name": "juan luna street tondo",
+      "risk": "high",
+      "summary": "Frequent snatching and motorcycle holdup along this main Tondo artery.",
+      "coords": [
+        14.604,
+        14.617,
+        120.963,
+        120.974
+      ],
+      "aliases": [
+        "juan luna tondo",
+        "calle juan luna"
+      ]
+    },
+    {
+      "name": "padre rada street tondo",
+      "risk": "high",
+      "summary": "Narrow street in Tondo known for gang activity and snatching.",
+      "coords": [
+        14.609,
+        14.617,
+        120.964,
+        120.97
+      ],
+      "aliases": [
+        "padre rada"
+      ]
+    },
+    {
+      "name": "folgueras street tondo",
+      "risk": "high",
+      "summary": "Dense residential street with frequent petty crime and snatching.",
+      "coords": [
+        14.605,
+        14.612,
+        120.966,
+        120.972
+      ]
+    },
+    {
+      "name": "de leon street tondo",
+      "risk": "high",
+      "summary": "Snatching and drug-related incidents reported along this corridor.",
+      "coords": [
+        14.607,
+        14.614,
+        120.967,
+        120.973
+      ]
+    },
+    {
+      "name": "narra street tondo",
+      "risk": "high",
+      "summary": "Snatching hotspot near informal settlements.",
+      "coords": [
+        14.606,
+        14.612,
+        120.971,
+        120.977
+      ]
+    },
+    {
+      "name": "bambang tondo",
+      "risk": "high",
+      "summary": "Street crime and holdup incidents near market stalls.",
+      "coords": [
+        14.61,
+        14.618,
+        120.972,
+        120.978
+      ],
+      "aliases": [
+        "bambang street tondo"
+      ]
+    },
+    {
+      "name": "claro street tondo",
+      "risk": "high",
+      "summary": "Narrow street with reported gang loitering and snatching at night.",
+      "coords": [
+        14.607,
+        14.613,
+        120.96,
+        120.967
+      ]
+    },
+    {
+      "name": "reina regente street tondo",
+      "risk": "high",
+      "summary": "Near port; frequent holdup reports, poorly lit at night.",
+      "coords": [
+        14.611,
+        14.619,
+        120.963,
+        120.969
+      ],
+      "aliases": [
+        "reina regente"
+      ]
+    },
+    {
+      "name": "tondo market area",
+      "risk": "high",
+      "summary": "Pickpocketing and bag-snatching extremely common in tondo public market.",
+      "coords": [
+        14.608,
+        14.616,
+        120.968,
+        120.975
+      ],
+      "aliases": [
+        "tondo public market",
+        "mercado tondo"
+      ]
+    },
+    {
+      "name": "brgy 105 tondo",
+      "risk": "high",
+      "summary": "Dense barangay with frequent street crime near waterfront.",
+      "coords": [
+        14.616,
+        14.622,
+        120.962,
+        120.968
+      ]
+    },
+    {
+      "name": "brgy 125 tondo",
+      "risk": "high",
+      "summary": "High crime density near Vitas/North Harbor.",
+      "coords": [
+        14.624,
+        14.631,
+        120.96,
+        120.966
+      ]
+    },
+    {
+      "name": "isla puting bato purok 1",
+      "risk": "high",
+      "summary": "Waterfront informal settlement; robbery and theft frequently reported.",
+      "coords": [
+        14.625,
+        14.629,
+        120.958,
+        120.962
+      ]
+    },
+    {
+      "name": "isla puting bato purok 2",
+      "risk": "high",
+      "summary": "Isolated coastal area; holdup incidents at night.",
+      "coords": [
+        14.627,
+        14.631,
+        120.96,
+        120.964
+      ]
+    },
+    {
+      "name": "angeles street tondo",
+      "risk": "high",
+      "summary": "Snatching and physical assault reported near this narrow alley.",
+      "coords": [
+        14.609,
+        14.616,
+        120.973,
+        120.979
+      ]
+    },
+    {
+      "name": "abad santos avenue tondo",
+      "risk": "high",
+      "summary": "Busy road with frequent motorcycle snatching and robbery.",
+      "coords": [
+        14.61,
+        14.622,
+        120.974,
+        120.982
+      ],
+      "aliases": [
+        "abad santos ave",
+        "abad santos"
+      ]
+    },
+    {
+      "name": "estero de san lazaro tondo",
+      "risk": "high",
+      "summary": "Riverside shanties; robbery and assault at night.",
+      "coords": [
+        14.605,
+        14.612,
+        120.976,
+        120.982
+      ],
+      "aliases": [
+        "estero san lazaro"
+      ]
+    },
+    {
+      "name": "vitas port area",
+      "risk": "high",
+      "summary": "Isolated port road; holdup and robbery frequently reported at night.",
+      "coords": [
+        14.628,
+        14.637,
+        120.958,
+        120.963
+      ],
+      "aliases": [
+        "vitas road"
+      ]
+    },
+    {
+      "name": "parola tondo",
+      "risk": "high",
+      "summary": "Waterfront area near lighthouse; street crime and holdup reports.",
+      "coords": [
+        14.625,
+        14.633,
+        120.956,
+        120.962
+      ],
+      "aliases": [
+        "parola compound",
+        "lighthouse tondo"
+      ]
+    },
+    {
+      "name": "rajah sulayman tondo",
+      "risk": "high",
+      "summary": "Dense community; robbery and drug-related incidents reported.",
+      "coords": [
+        14.611,
+        14.618,
+        120.962,
+        120.968
+      ],
+      "aliases": [
+        "rajah sulayman street"
+      ]
+    },
+    {
+      "name": "tabora street tondo",
+      "risk": "high",
+      "summary": "Busy street near market; pickpocketing and snatching common.",
+      "coords": [
+        14.598,
+        14.605,
+        120.967,
+        120.973
+      ],
+      "aliases": [
+        "tabora"
+      ]
+    },
+    {
+      "name": "ilaya street tondo",
+      "risk": "high",
+      "summary": "Street crime and holdups; poorly lit at night.",
+      "coords": [
+        14.6,
+        14.607,
+        120.963,
+        120.969
+      ],
+      "aliases": [
+        "ilaya"
+      ]
+    },
+    {
+      "name": "balut tondo north",
+      "risk": "high",
+      "summary": "Northern Balut near Maypajo; robbery and snatching hotspot.",
+      "coords": [
+        14.622,
+        14.628,
+        120.966,
+        120.972
+      ]
+    },
+    {
+      "name": "balut tondo south",
+      "risk": "high",
+      "summary": "Dense residential pocket with street crime reports.",
+      "coords": [
+        14.617,
+        14.623,
+        120.963,
+        120.969
+      ]
+    },
+    {
+      "name": "maypajo creek area",
+      "risk": "high",
+      "summary": "Estero-side shanties; robbery and drug incidents near creek.",
+      "coords": [
+        14.625,
+        14.633,
+        120.968,
+        120.975
+      ],
+      "aliases": [
+        "maypajo estero"
+      ]
+    },
+    {
+      "name": "north harbor gate 1",
+      "risk": "high",
+      "summary": "Port gate area; isolated road with holdup incidents at night.",
+      "coords": [
+        14.631,
+        14.638,
+        120.956,
+        120.962
+      ]
+    },
+    {
+      "name": "north harbor gate 2",
+      "risk": "high",
+      "summary": "Frequently deserted at night; robbery incidents reported.",
+      "coords": [
+        14.635,
+        14.642,
+        120.959,
+        120.966
+      ]
+    },
+    {
+      "name": "muelle dela industria tondo",
+      "risk": "high",
+      "summary": "Port road; holdup and robbery at night.",
+      "coords": [
+        14.607,
+        14.614,
+        120.961,
+        120.967
+      ],
+      "aliases": [
+        "muelle dela industria"
+      ]
+    },
+    {
+      "name": "hermosa street tondo",
+      "risk": "high",
+      "summary": "Street crime; snatching and robbery reported.",
+      "coords": [
+        14.603,
+        14.61,
+        120.965,
+        120.971
+      ]
+    },
+    {
+      "name": "palomar street tondo",
+      "risk": "high",
+      "summary": "Frequent robbery and snatching incidents.",
+      "coords": [
+        14.605,
+        14.612,
+        120.969,
+        120.975
+      ]
+    },
+    {
+      "name": "libertad street tondo",
+      "risk": "high",
+      "summary": "Dense residential street; snatching hotspot near market.",
+      "coords": [
+        14.608,
+        14.615,
+        120.975,
+        120.981
+      ]
+    },
+    {
+      "name": "oroquieta street tondo sampaloc",
+      "risk": "high",
+      "summary": "Border road with frequent snatching reports.",
+      "coords": [
+        14.61,
+        14.618,
+        120.977,
+        120.984
+      ],
+      "aliases": [
+        "oroquieta street"
+      ]
+    },
+    {
+      "name": "delpan bridge approach tondo",
+      "risk": "high",
+      "summary": "Bridge approach; snatch theft and holdups frequently reported.",
+      "coords": [
+        14.605,
+        14.611,
+        120.963,
+        120.969
+      ]
+    },
+    {
+      "name": "tayuman market strip",
+      "risk": "high",
+      "summary": "Market zone; pickpocketing and snatching active.",
+      "coords": [
+        14.607,
+        14.615,
+        120.977,
+        120.984
+      ]
+    },
+    {
+      "name": "brgy 119 tondo",
+      "risk": "high",
+      "summary": "Reported snatching and holdup incidents in dense barangay.",
+      "coords": [
+        14.618,
+        14.625,
+        120.965,
+        120.971
+      ]
+    },
+    {
+      "name": "catmon street tondo",
+      "risk": "high",
+      "summary": "Narrow street with drug-related loitering and petty crime.",
+      "coords": [
+        14.612,
+        14.618,
+        120.97,
+        120.976
+      ]
+    },
+    {
+      "name": "vitas fishport road",
+      "risk": "high",
+      "summary": "Isolated fish port access road; robbery at night.",
+      "coords": [
+        14.63,
+        14.638,
+        120.96,
+        120.966
+      ]
+    },
+    {
+      "name": "gagalangin purok 1",
+      "risk": "high",
+      "summary": "Densely populated purok with frequent snatching and drug activity.",
+      "coords": [
+        14.616,
+        14.62,
+        120.962,
+        120.966
+      ]
+    },
+    {
+      "name": "gagalangin purok 3",
+      "risk": "high",
+      "summary": "High crime density; robbery and theft reported.",
+      "coords": [
+        14.619,
+        14.623,
+        120.965,
+        120.969
+      ]
+    },
+    {
+      "name": "P. Noval street sampaloc",
+      "risk": "high",
+      "summary": "University belt; frequent phone snatching from students.",
+      "coords": [
+        14.607,
+        14.614,
+        120.988,
+        120.994
+      ],
+      "aliases": [
+        "p noval",
+        "pedro noval street"
+      ]
+    },
+    {
+      "name": "Earnshaw street sampaloc",
+      "risk": "high",
+      "summary": "Snatching incidents near UST area; stay alert.",
+      "coords": [
+        14.608,
+        14.614,
+        120.985,
+        120.991
+      ],
+      "aliases": [
+        "earnshaw"
+      ]
+    },
+    {
+      "name": "nicanor reyes street sampaloc",
+      "risk": "high",
+      "summary": "Frequent pickpocketing and phone theft near university buildings.",
+      "coords": [
+        14.604,
+        14.61,
+        120.988,
+        120.994
+      ],
+      "aliases": [
+        "nicanor reyes",
+        "morayta street"
+      ]
+    },
+    {
+      "name": "UST area",
+      "risk": "high",
+      "summary": "University of Santo Tomas perimeter; phone snatching and bag theft from students.",
+      "coords": [
+        14.609,
+        14.616,
+        120.988,
+        120.998
+      ],
+      "aliases": [
+        "university of santo tomas",
+        "ust manila"
+      ]
+    },
+    {
+      "name": "dapitan street sampaloc",
+      "risk": "moderate",
+      "summary": "Some snatching incidents; stay aware of surroundings.",
+      "coords": [
+        14.614,
+        14.622,
+        120.999,
+        121.009
+      ],
+      "aliases": [
+        "dapitan"
+      ]
+    },
+    {
+      "name": "nagtahan bridge sampaloc side",
+      "risk": "high",
+      "summary": "Bridge approach; isolated spots used for holdups at night.",
+      "coords": [
+        14.601,
+        14.607,
+        121.007,
+        121.014
+      ]
+    },
+    {
+      "name": "FEU area sampaloc",
+      "risk": "high",
+      "summary": "Far Eastern University vicinity; bag and phone snatching from students.",
+      "coords": [
+        14.602,
+        14.607,
+        120.986,
+        120.993
+      ],
+      "aliases": [
+        "far eastern university area",
+        "feu manila"
+      ]
+    },
+    {
+      "name": "jhocson street sampaloc",
+      "risk": "moderate",
+      "summary": "Moderate crime near busy commercial zone.",
+      "coords": [
+        14.616,
+        14.624,
+        120.993,
+        121.002
+      ],
+      "aliases": [
+        "jhocson"
+      ]
+    },
+    {
+      "name": "Legarda street sampaloc",
+      "risk": "high",
+      "summary": "Near LRT2 Legarda; frequent snatching and pickpocketing.",
+      "coords": [
+        14.601,
+        14.608,
+        120.984,
+        120.993
+      ],
+      "aliases": [
+        "legarda",
+        "lrt2 legarda area"
+      ]
+    },
+    {
+      "name": "sampaloc lake area",
+      "risk": "moderate",
+      "summary": "Lakeside stretch with some crime reports at night.",
+      "coords": [
+        14.611,
+        14.619,
+        121.002,
+        121.012
+      ],
+      "aliases": [
+        "lawa ng sampaloc"
+      ]
+    },
+    {
+      "name": "dimasalang road sampaloc",
+      "risk": "moderate",
+      "summary": "Some snatching and theft incidents.",
+      "coords": [
+        14.614,
+        14.622,
+        120.995,
+        121.003
+      ],
+      "aliases": [
+        "dimasalang"
+      ]
+    },
+    {
+      "name": "laong laan street sampaloc",
+      "risk": "high",
+      "summary": "Snatching and drug-related incidents; stay alert at night.",
+      "coords": [
+        14.607,
+        14.615,
+        120.982,
+        120.99
+      ],
+      "aliases": [
+        "laong laan"
+      ]
+    },
+    {
+      "name": "quiapo church area",
+      "risk": "high",
+      "summary": "Extreme pickpocket and snatching risk around Black Nazarene church; crowded daily.",
+      "coords": [
+        14.598,
+        14.602,
+        120.983,
+        120.988
+      ],
+      "aliases": [
+        "minor basilica quiapo",
+        "black nazarene area"
+      ]
+    },
+    {
+      "name": "quiapo underpass",
+      "risk": "high",
+      "summary": "Underpass market; very high pickpocket and snatching risk.",
+      "coords": [
+        14.599,
+        14.603,
+        120.983,
+        120.987
+      ],
+      "aliases": [
+        "quiapo lrt underpass"
+      ]
+    },
+    {
+      "name": "globo de oro street quiapo",
+      "risk": "high",
+      "summary": "Dense street market with active snatch thieves.",
+      "coords": [
+        14.599,
+        14.604,
+        120.985,
+        120.99
+      ],
+      "aliases": [
+        "globo de oro"
+      ]
+    },
+    {
+      "name": "hidalgo street quiapo",
+      "risk": "high",
+      "summary": "Camera shops area; theft and con operations reported.",
+      "coords": [
+        14.598,
+        14.603,
+        120.983,
+        120.989
+      ],
+      "aliases": [
+        "hidalgo",
+        "hidalgo photo district"
+      ]
+    },
+    {
+      "name": "carriedo street quiapo",
+      "risk": "high",
+      "summary": "Market street; pickpockets and bag snatchers highly active.",
+      "coords": [
+        14.598,
+        14.602,
+        120.979,
+        120.984
+      ],
+      "aliases": [
+        "carriedo",
+        "carriedo market"
+      ]
+    },
+    {
+      "name": "quinta market quiapo",
+      "risk": "high",
+      "summary": "High foot traffic; extremely active pickpockets and snatchers.",
+      "coords": [
+        14.597,
+        14.601,
+        120.978,
+        120.982
+      ],
+      "aliases": [
+        "quinta market"
+      ]
+    },
+    {
+      "name": "quezon bridge area quiapo",
+      "risk": "high",
+      "summary": "Bridge approach area; robbery and assault incidents reported.",
+      "coords": [
+        14.597,
+        14.601,
+        120.98,
+        120.985
+      ],
+      "aliases": [
+        "quezon bridge quiapo"
+      ]
+    },
+    {
+      "name": "bautista street quiapo",
+      "risk": "high",
+      "summary": "Crowded area near Quiapo; snatch theft common.",
+      "coords": [
+        14.601,
+        14.606,
+        120.986,
+        120.992
+      ]
+    },
+    {
+      "name": "divisoria market stalls",
+      "risk": "high",
+      "summary": "Inside market; extreme pickpocket risk, avoid carrying valuables.",
+      "coords": [
+        14.6,
+        14.606,
+        120.972,
+        120.978
+      ]
+    },
+    {
+      "name": "tutuban center divisoria",
+      "risk": "high",
+      "summary": "Mall perimeter with heavy foot traffic; bag snatching outside.",
+      "coords": [
+        14.601,
+        14.608,
+        120.974,
+        120.981
+      ],
+      "aliases": [
+        "tutuban mall"
+      ]
+    },
+    {
+      "name": "commerce street divisoria",
+      "risk": "high",
+      "summary": "Extremely busy commercial street; snatching and pickpocketing active.",
+      "coords": [
+        14.599,
+        14.605,
+        120.97,
+        120.976
+      ],
+      "aliases": [
+        "calle commerce"
+      ]
+    },
+    {
+      "name": "barter trade area divisoria",
+      "risk": "high",
+      "summary": "Crowded barter zone; extremely active pickpockets.",
+      "coords": [
+        14.598,
+        14.603,
+        120.968,
+        120.974
+      ]
+    },
+    {
+      "name": "blumentritt market",
+      "risk": "high",
+      "summary": "Market inside; pickpocketing and bag theft very active.",
+      "coords": [
+        14.615,
+        14.62,
+        120.979,
+        120.984
+      ]
+    },
+    {
+      "name": "blumentritt pnr station area",
+      "risk": "high",
+      "summary": "PNR station vicinity; snatching and robbery near platforms.",
+      "coords": [
+        14.614,
+        14.62,
+        120.98,
+        120.986
+      ],
+      "aliases": [
+        "pnr blumentritt"
+      ]
+    },
+    {
+      "name": "avenida rizal sta cruz",
+      "risk": "high",
+      "summary": "Major Manila avenue; frequent snatching and pickpocketing.",
+      "coords": [
+        14.6,
+        14.608,
+        120.978,
+        120.986
+      ],
+      "aliases": [
+        "rizal avenue",
+        "avenida"
+      ]
+    },
+    {
+      "name": "raon street sta cruz",
+      "risk": "high",
+      "summary": "Electronics market; scams, theft, and phone snatching active.",
+      "coords": [
+        14.601,
+        14.606,
+        120.978,
+        120.984
+      ],
+      "aliases": [
+        "raon",
+        "raon electronics"
+      ]
+    },
+    {
+      "name": "nueva street sta cruz",
+      "risk": "high",
+      "summary": "Busy market strip; high pickpocket and snatch activity.",
+      "coords": [
+        14.599,
+        14.604,
+        120.977,
+        120.983
+      ],
+      "aliases": [
+        "nueva"
+      ]
+    },
+    {
+      "name": "ylaya street sta cruz",
+      "risk": "high",
+      "summary": "Snatching and robbery near market stalls.",
+      "coords": [
+        14.6,
+        14.605,
+        120.975,
+        120.981
+      ],
+      "aliases": [
+        "ylaya"
+      ]
+    },
+    {
+      "name": "plateria sta cruz",
+      "risk": "high",
+      "summary": "Jewelry row; theft and robbery incidents reported.",
+      "coords": [
+        14.599,
+        14.604,
+        120.973,
+        120.979
+      ],
+      "aliases": [
+        "plateria street"
+      ]
+    },
+    {
+      "name": "escolta street",
+      "risk": "moderate",
+      "summary": "Historic street; petty theft and snatching reported.",
+      "coords": [
+        14.596,
+        14.601,
+        120.977,
+        120.984
+      ],
+      "aliases": [
+        "escolta"
+      ]
+    },
+    {
+      "name": "soler street sta cruz",
+      "risk": "high",
+      "summary": "Chinatown-adjacent; pickpocket risk in crowded stretch.",
+      "coords": [
+        14.6,
+        14.605,
+        120.977,
+        120.982
+      ],
+      "aliases": [
+        "soler"
+      ]
+    },
+    {
+      "name": "ongpin street binondo",
+      "risk": "moderate",
+      "summary": "Chinatown main street; watch for pickpockets in crowds.",
+      "coords": [
+        14.598,
+        14.603,
+        120.972,
+        120.979
+      ],
+      "aliases": [
+        "ongpin",
+        "ongpin chinatown"
+      ]
+    },
+    {
+      "name": "grace park west caloocan",
+      "risk": "high",
+      "summary": "Western side; snatching and holdup incidents frequently reported.",
+      "coords": [
+        14.648,
+        14.66,
+        120.968,
+        120.976
+      ]
+    },
+    {
+      "name": "grace park east caloocan",
+      "risk": "high",
+      "summary": "Eastern side; robbery and drug-related crime reported.",
+      "coords": [
+        14.648,
+        14.66,
+        120.976,
+        120.985
+      ]
+    },
+    {
+      "name": "11th avenue caloocan",
+      "risk": "high",
+      "summary": "High crime corridor near Grace Park; robbery reports.",
+      "coords": [
+        14.651,
+        14.66,
+        120.97,
+        120.978
+      ],
+      "aliases": [
+        "11th avenue"
+      ]
+    },
+    {
+      "name": "12th avenue caloocan",
+      "risk": "high",
+      "summary": "Snatching and holdup incidents along this stretch.",
+      "coords": [
+        14.653,
+        14.662,
+        120.969,
+        120.977
+      ],
+      "aliases": [
+        "12th avenue"
+      ]
+    },
+    {
+      "name": "samson road caloocan",
+      "risk": "high",
+      "summary": "Busy road with frequent snatching; stay alert near jeepney stops.",
+      "coords": [
+        14.648,
+        14.66,
+        120.977,
+        120.987
+      ],
+      "aliases": [
+        "samson road"
+      ]
+    },
+    {
+      "name": "reparo road caloocan",
+      "risk": "high",
+      "summary": "Snatching and robbery reported especially at night.",
+      "coords": [
+        14.66,
+        14.671,
+        120.971,
+        120.98
+      ],
+      "aliases": [
+        "reparo"
+      ]
+    },
+    {
+      "name": "dagupan street caloocan",
+      "risk": "high",
+      "summary": "Busy road; snatching from motorcycles and on foot.",
+      "coords": [
+        14.655,
+        14.665,
+        120.969,
+        120.977
+      ],
+      "aliases": [
+        "dagupan caloocan"
+      ]
+    },
+    {
+      "name": "rizal avenue extension caloocan",
+      "risk": "high",
+      "summary": "Extension from Manila; frequent snatching along this route.",
+      "coords": [
+        14.63,
+        14.657,
+        120.963,
+        120.972
+      ],
+      "aliases": [
+        "rizal ave extension",
+        "rizal extension caloocan"
+      ]
+    },
+    {
+      "name": "maypayo caloocan",
+      "risk": "high",
+      "summary": "Boundary area; snatching and drug activity reported.",
+      "coords": [
+        14.624,
+        14.634,
+        120.965,
+        120.975
+      ],
+      "aliases": [
+        "maypayo"
+      ]
+    },
+    {
+      "name": "bagumbong caloocan",
+      "risk": "moderate",
+      "summary": "Some crime reports in residential area.",
+      "coords": [
+        14.72,
+        14.745,
+        120.98,
+        121.001
+      ],
+      "aliases": [
+        "bagumbong"
+      ]
+    },
+    {
+      "name": "caloocan cemetery area",
+      "risk": "moderate",
+      "summary": "Cemetery surroundings; crime incidents especially at night.",
+      "coords": [
+        14.655,
+        14.666,
+        120.973,
+        120.983
+      ]
+    },
+    {
+      "name": "navotas fish market",
+      "risk": "high",
+      "summary": "Active fish market; robbery and snatching from vendors and buyers.",
+      "coords": [
+        14.654,
+        14.661,
+        120.939,
+        120.946
+      ],
+      "aliases": [
+        "navotas wet market"
+      ]
+    },
+    {
+      "name": "navotas pier area",
+      "risk": "high",
+      "summary": "Isolated pier roads; holdup and robbery at night.",
+      "coords": [
+        14.656,
+        14.665,
+        120.936,
+        120.943
+      ]
+    },
+    {
+      "name": "daang bakal navotas",
+      "risk": "high",
+      "summary": "Railroad-adjacent informal settlement; high crime rate.",
+      "coords": [
+        14.648,
+        14.657,
+        120.94,
+        120.95
+      ],
+      "aliases": [
+        "daang bakal"
+      ]
+    },
+    {
+      "name": "north bay blvd south navotas",
+      "risk": "high",
+      "summary": "Coastal road near informal settlements; snatching and holdup incidents.",
+      "coords": [
+        14.645,
+        14.656,
+        120.936,
+        120.947
+      ],
+      "aliases": [
+        "nbbs navotas"
+      ]
+    },
+    {
+      "name": "sipat navotas",
+      "risk": "high",
+      "summary": "Dense residential zone with frequent crime reports.",
+      "coords": [
+        14.66,
+        14.669,
+        120.941,
+        120.95
+      ],
+      "aliases": [
+        "sipat"
+      ]
+    },
+    {
+      "name": "san jose navotas brgy",
+      "risk": "high",
+      "summary": "Waterfront barangay; robbery and drug incidents.",
+      "coords": [
+        14.669,
+        14.677,
+        120.942,
+        120.951
+      ],
+      "aliases": [
+        "san jose navotas"
+      ]
+    },
+    {
+      "name": "nbbs phase 1 navotas",
+      "risk": "high",
+      "summary": "Resettlement area with high crime density.",
+      "coords": [
+        14.668,
+        14.675,
+        120.941,
+        120.948
+      ]
+    },
+    {
+      "name": "nbbs phase 2 navotas",
+      "risk": "high",
+      "summary": "Reported snatching and drug activity in resettlement area.",
+      "coords": [
+        14.671,
+        14.678,
+        120.942,
+        120.949
+      ]
+    },
+    {
+      "name": "muzon malabon",
+      "risk": "moderate",
+      "summary": "Dense residential-commercial; moderate crime risk.",
+      "coords": [
+        14.671,
+        14.683,
+        120.955,
+        120.966
+      ],
+      "aliases": [
+        "muzon"
+      ]
+    },
+    {
+      "name": "concepcion malabon",
+      "risk": "moderate",
+      "summary": "Waterfront barangay; moderate crime risk.",
+      "coords": [
+        14.676,
+        14.688,
+        120.95,
+        120.96
+      ],
+      "aliases": [
+        "concepcion malabon"
+      ]
+    },
+    {
+      "name": "tugatog malabon",
+      "risk": "moderate",
+      "summary": "Some crime activity in this area.",
+      "coords": [
+        14.681,
+        14.694,
+        120.952,
+        120.963
+      ],
+      "aliases": [
+        "tugatog"
+      ]
+    },
+    {
+      "name": "maysilo malabon",
+      "risk": "moderate",
+      "summary": "Dense barangay with moderate crime risk.",
+      "coords": [
+        14.666,
+        14.679,
+        120.962,
+        120.974
+      ],
+      "aliases": [
+        "maysilo"
+      ]
+    },
+    {
+      "name": "malabon cemetery area",
+      "risk": "moderate",
+      "summary": "Cemetery surroundings; crime incidents especially at night.",
+      "coords": [
+        14.657,
+        14.668,
+        120.961,
+        120.971
+      ]
+    },
+    {
+      "name": "tinajeros east malabon",
+      "risk": "moderate",
+      "summary": "Some crime reports near busy commercial area.",
+      "coords": [
+        14.663,
+        14.675,
+        120.953,
+        120.963
+      ]
+    },
+    {
+      "name": "pandacan market",
+      "risk": "high",
+      "summary": "Local market; snatching and holdup incidents reported.",
+      "coords": [
+        14.583,
+        14.59,
+        120.999,
+        121.007
+      ]
+    },
+    {
+      "name": "south superhighway manila",
+      "risk": "moderate",
+      "summary": "Highway approach; some snatching incidents at overpasses.",
+      "coords": [
+        14.566,
+        14.583,
+        121.001,
+        121.012
+      ],
+      "aliases": [
+        "south super highway",
+        "osmena highway"
+      ]
+    },
+    {
+      "name": "south harbor pier 1",
+      "risk": "high",
+      "summary": "Pier approach; isolated road with holdup incidents.",
+      "coords": [
+        14.586,
+        14.595,
+        120.968,
+        120.975
+      ]
+    },
+    {
+      "name": "south harbor pier 3 area",
+      "risk": "high",
+      "summary": "Dark access roads; robbery reported especially at night.",
+      "coords": [
+        14.584,
+        14.592,
+        120.97,
+        120.977
+      ]
+    },
+    {
+      "name": "sta mesa market",
+      "risk": "moderate",
+      "summary": "Market area; pickpocketing and bag theft reported.",
+      "coords": [
+        14.601,
+        14.608,
+        121.006,
+        121.013
+      ],
+      "aliases": [
+        "santa mesa market"
+      ]
+    },
+    {
+      "name": "PUP area sta mesa",
+      "risk": "moderate",
+      "summary": "Polytechnic University vicinity; phone snatching incidents.",
+      "coords": [
+        14.598,
+        14.604,
+        121.009,
+        121.016
+      ],
+      "aliases": [
+        "polytechnic university",
+        "pup manila"
+      ]
+    },
+    {
+      "name": "g. araneta avenue",
+      "risk": "moderate",
+      "summary": "Busy road; some theft and snatching near bus stops.",
+      "coords": [
+        14.614,
+        14.635,
+        121.004,
+        121.012
+      ],
+      "aliases": [
+        "g araneta ave",
+        "gregorio araneta"
+      ]
+    },
+    {
+      "name": "taft avenue manila",
+      "risk": "moderate",
+      "summary": "Busy university road; phone snatching and pickpocketing reported.",
+      "coords": [
+        14.556,
+        14.6,
+        120.99,
+        120.996
+      ],
+      "aliases": [
+        "taft ave"
+      ]
+    },
+    {
+      "name": "leon guinto street",
+      "risk": "moderate",
+      "summary": "Near DLSU; snatching incidents involving students.",
+      "coords": [
+        14.563,
+        14.572,
+        120.988,
+        120.996
+      ],
+      "aliases": [
+        "leon guinto"
+      ]
+    },
+    {
+      "name": "DLSU area",
+      "risk": "moderate",
+      "summary": "De La Salle University perimeter; bag and phone snatching of students.",
+      "coords": [
+        14.563,
+        14.57,
+        120.99,
+        120.997
+      ],
+      "aliases": [
+        "de la salle university",
+        "dlsu manila"
+      ]
+    },
+    {
+      "name": "paco market manila",
+      "risk": "moderate",
+      "summary": "Local market; petty theft and snatching near stalls.",
+      "coords": [
+        14.577,
+        14.584,
+        120.996,
+        121.005
+      ],
+      "aliases": [
+        "paco public market"
+      ]
+    },
+    {
+      "name": "manila city hall area",
+      "risk": "moderate",
+      "summary": "Busy government area; moderate pickpocket risk in crowds.",
+      "coords": [
+        14.592,
+        14.599,
+        120.978,
+        120.985
+      ],
+      "aliases": [
+        "manila city hall"
+      ]
+    },
+    {
+      "name": "san lazaro hospital area",
+      "risk": "moderate",
+      "summary": "Hospital perimeter; some theft and snatching reported.",
+      "coords": [
+        14.606,
+        14.614,
+        120.978,
+        120.986
+      ],
+      "aliases": [
+        "san lazaro hospital"
+      ]
+    },
+    {
+      "name": "manila zoo luneta area",
+      "risk": "moderate",
+      "summary": "Park boundary; snatching incidents near entrance.",
+      "coords": [
+        14.576,
+        14.584,
+        120.986,
+        120.994
+      ],
+      "aliases": [
+        "manila zoo"
+      ]
+    },
+    {
+      "name": "manila hotel area",
+      "risk": "low",
+      "summary": "Tourist-oriented area with good security; minor pickpocket risk outside.",
+      "coords": [
+        14.584,
+        14.59,
+        120.975,
+        120.981
+      ],
+      "aliases": [
+        "manila hotel"
+      ]
+    },
+    {
+      "name": "intramuros walls night area",
+      "risk": "moderate",
+      "summary": "Dark stretches of old city walls; snatching at night reported.",
+      "coords": [
+        14.589,
+        14.598,
+        120.971,
+        120.981
+      ]
+    },
+    {
+      "name": "fort santiago intramuros",
+      "risk": "low",
+      "summary": "Tourist site; generally safe during day, avoid at night.",
+      "coords": [
+        14.592,
+        14.598,
+        120.97,
+        120.978
+      ],
+      "aliases": [
+        "fort santiago"
+      ]
+    },
+    {
+      "name": "benavides street binondo",
+      "risk": "moderate",
+      "summary": "Dense commercial street; watch for pickpockets.",
+      "coords": [
+        14.596,
+        14.6,
+        120.977,
+        120.982
+      ]
+    },
+    {
+      "name": "cubao terminal area",
+      "risk": "high",
+      "summary": "Bus and jeep terminal; pickpocketing and snatching highly active.",
+      "coords": [
+        14.617,
+        14.626,
+        121.05,
+        121.063
+      ],
+      "aliases": [
+        "cubao bus terminal area"
+      ]
+    },
+    {
+      "name": "farmers market cubao",
+      "risk": "moderate",
+      "summary": "Market; pickpocketing inside crowded sections.",
+      "coords": [
+        14.618,
+        14.625,
+        121.05,
+        121.059
+      ],
+      "aliases": [
+        "farmers market"
+      ]
+    },
+    {
+      "name": "araneta coliseum area",
+      "risk": "moderate",
+      "summary": "Event venue; snatching in crowds during events.",
+      "coords": [
+        14.62,
+        14.628,
+        121.051,
+        121.06
+      ],
+      "aliases": [
+        "smart araneta coliseum",
+        "big dome area"
+      ]
+    },
+    {
+      "name": "aurora blvd cubao section",
+      "risk": "moderate",
+      "summary": "Busy section near Cubao; pickpocketing at bus stops.",
+      "coords": [
+        14.617,
+        14.626,
+        121.03,
+        121.05
+      ]
+    },
+    {
+      "name": "murphy QC",
+      "risk": "moderate",
+      "summary": "Dense residential near Cubao; some crime reports.",
+      "coords": [
+        14.62,
+        14.63,
+        121.04,
+        121.053
+      ],
+      "aliases": [
+        "murphy"
+      ]
+    },
+    {
+      "name": "roxas boulevard ermita stretch",
+      "risk": "moderate",
+      "summary": "Moderate crime; robbery near dark bay area spots at night.",
+      "coords": [
+        14.562,
+        14.581,
+        120.977,
+        120.986
+      ]
+    },
+    {
+      "name": "manila bay sunset area",
+      "risk": "moderate",
+      "summary": "Tourist spot; snatching from crowds at sunset.",
+      "coords": [
+        14.573,
+        14.585,
+        120.974,
+        120.982
+      ],
+      "aliases": [
+        "manila bay boardwalk"
+      ]
+    },
+    {
+      "name": "CCP complex area",
+      "risk": "low",
+      "summary": "Cultural Center of the Philippines; relatively safe but isolated at night.",
+      "coords": [
+        14.556,
+        14.57,
+        120.977,
+        120.985
+      ],
+      "aliases": [
+        "cultural center philippines",
+        "CCP"
+      ]
+    },
+    {
+      "name": "taft-edsa intersection pasay",
+      "risk": "high",
+      "summary": "High foot traffic intersection; pickpocketing and snatching active.",
+      "coords": [
+        14.536,
+        14.544,
+        120.994,
+        121.002
+      ]
+    },
+    {
+      "name": "naia terminal 1 approach road",
+      "risk": "moderate",
+      "summary": "Airport terminal road; scams and bag theft near drops.",
+      "coords": [
+        14.506,
+        14.516,
+        121.006,
+        121.016
+      ],
+      "aliases": [
+        "naia t1"
+      ]
+    },
+    {
+      "name": "naia terminal 3 area",
+      "risk": "moderate",
+      "summary": "Airport area; luggage theft and transport scams reported.",
+      "coords": [
+        14.51,
+        14.521,
+        121.014,
+        121.025
+      ],
+      "aliases": [
+        "naia t3",
+        "terminal 3 naia"
+      ]
+    },
+    {
+      "name": "baclaran market stalls",
+      "risk": "high",
+      "summary": "Inside market; extreme pickpocket and snatch risk.",
+      "coords": [
+        14.53,
+        14.54,
+        120.994,
+        121.001
+      ]
+    },
+    {
+      "name": "baclaran lrt station area",
+      "risk": "high",
+      "summary": "LRT terminus; heavily active pickpockets and snatchers.",
+      "coords": [
+        14.529,
+        14.537,
+        120.995,
+        121.002
+      ],
+      "aliases": [
+        "lrt1 baclaran station"
+      ]
+    },
+    {
+      "name": "redemptorist church baclaran",
+      "risk": "high",
+      "summary": "Church vicinity; extremely crowded on Wednesdays - peak pickpocket risk.",
+      "coords": [
+        14.53,
+        14.538,
+        120.996,
+        121.002
+      ],
+      "aliases": [
+        "baclaran church"
+      ]
+    },
+    {
+      "name": "f.b. harrison street pasay",
+      "risk": "moderate",
+      "summary": "Entertainment strip; theft and robbery at night.",
+      "coords": [
+        14.54,
+        14.558,
+        120.996,
+        121.01
+      ],
+      "aliases": [
+        "fb harrison"
+      ]
+    },
+    {
+      "name": "san isidro pasay",
+      "risk": "moderate",
+      "summary": "Dense residential area with moderate crime reports.",
+      "coords": [
+        14.538,
+        14.556,
+        121.001,
+        121.018
+      ]
+    },
+    {
+      "name": "guadalupe mrt station area",
+      "risk": "moderate",
+      "summary": "Station area; pickpocketing and bag snatching reported.",
+      "coords": [
+        14.56,
+        14.568,
+        121.045,
+        121.053
+      ],
+      "aliases": [
+        "guadalupe mrt"
+      ]
+    },
+    {
+      "name": "buendia avenue makati",
+      "risk": "moderate",
+      "summary": "Busy avenue; some snatching and theft incidents.",
+      "coords": [
+        14.551,
+        14.558,
+        121.019,
+        121.043
+      ],
+      "aliases": [
+        "buendia",
+        "sen. gil puyat avenue"
+      ]
+    },
+    {
+      "name": "rockwell makati",
+      "risk": "low",
+      "summary": "Well-secured premium residential and commercial area.",
+      "coords": [
+        14.563,
+        14.572,
+        121.039,
+        121.05
+      ],
+      "aliases": [
+        "rockwell center",
+        "power plant mall area"
+      ]
+    },
+    {
+      "name": "makati avenue",
+      "risk": "moderate",
+      "summary": "Nightlife corridor; snatching and theft incidents at night.",
+      "coords": [
+        14.556,
+        14.572,
+        121.025,
+        121.039
+      ],
+      "aliases": [
+        "makati ave"
+      ]
+    },
+    {
+      "name": "kalayaan avenue makati",
+      "risk": "moderate",
+      "summary": "Near Poblacion; moderate crime especially at night.",
+      "coords": [
+        14.568,
+        14.576,
+        121.032,
+        121.044
+      ],
+      "aliases": [
+        "kalayaan ave"
+      ]
+    },
+    {
+      "name": "shaw blvd boni intersection",
+      "risk": "moderate",
+      "summary": "Busy intersection; pickpocketing and snatching active.",
+      "coords": [
+        14.582,
+        14.589,
+        121.028,
+        121.036
+      ]
+    },
+    {
+      "name": "edsa mrt boni station",
+      "risk": "moderate",
+      "summary": "MRT station surroundings; pickpocket risk.",
+      "coords": [
+        14.58,
+        14.587,
+        121.031,
+        121.039
+      ],
+      "aliases": [
+        "boni mrt station"
+      ]
+    },
+    {
+      "name": "hulo bridge mandaluyong",
+      "risk": "moderate",
+      "summary": "Bridge area; snatching incidents reported.",
+      "coords": [
+        14.578,
+        14.585,
+        121.032,
+        121.042
+      ],
+      "aliases": [
+        "hulo bridge"
+      ]
+    },
+    {
+      "name": "boni avenue mandaluyong",
+      "risk": "moderate",
+      "summary": "Busy commercial street with moderate crime.",
+      "coords": [
+        14.579,
+        14.585,
+        121.029,
+        121.044
+      ],
+      "aliases": [
+        "boni avenue"
+      ]
+    },
+    {
+      "name": "QC circle area",
+      "risk": "low",
+      "summary": "Elliptical road and Quezon Memorial; generally safe.",
+      "coords": [
+        14.647,
+        14.659,
+        121.032,
+        121.05
+      ],
+      "aliases": [
+        "quezon memorial circle",
+        "elliptical road"
+      ]
+    },
+    {
+      "name": "philcoa QC",
+      "risk": "moderate",
+      "summary": "Busy intersection with moderate crime risk.",
+      "coords": [
+        14.647,
+        14.655,
+        121.053,
+        121.062
+      ],
+      "aliases": [
+        "philcoa intersection"
+      ]
+    },
+    {
+      "name": "congressional avenue QC",
+      "risk": "moderate",
+      "summary": "Some snatching incidents along this road.",
+      "coords": [
+        14.67,
+        14.7,
+        121.034,
+        121.048
+      ],
+      "aliases": [
+        "congressional ave"
+      ]
+    },
+    {
+      "name": "novaliches market QC",
+      "risk": "moderate",
+      "summary": "Market area; pickpocketing and snatching in crowds.",
+      "coords": [
+        14.744,
+        14.756,
+        121.044,
+        121.06
+      ],
+      "aliases": [
+        "novaliches market"
+      ]
+    },
+    {
+      "name": "galas QC",
+      "risk": "moderate",
+      "summary": "Dense residential area; some crime reports.",
+      "coords": [
+        14.624,
+        14.634,
+        121.011,
+        121.023
+      ],
+      "aliases": [
+        "galas"
+      ]
+    },
+    {
+      "name": "banawe street QC",
+      "risk": "moderate",
+      "summary": "Car parts street; some theft and scam reports.",
+      "coords": [
+        14.631,
+        14.643,
+        121.004,
+        121.014
+      ],
+      "aliases": [
+        "banawe"
+      ]
+    },
+    {
+      "name": "camp aguinaldo area",
+      "risk": "low",
+      "summary": "Military camp vicinity; heavily secured.",
+      "coords": [
+        14.614,
+        14.622,
+        121.051,
+        121.063
+      ],
+      "aliases": [
+        "camp aguinaldo",
+        "GHQ area"
+      ]
+    },
+    {
+      "name": "SM North EDSA area",
+      "risk": "low",
+      "summary": "Large mall complex with active security.",
+      "coords": [
+        14.655,
+        14.664,
+        121.027,
+        121.038
+      ],
+      "aliases": [
+        "sm north edsa",
+        "trinoma area"
+      ]
+    },
+    {
+      "name": "talayan QC",
+      "risk": "moderate",
+      "summary": "Some crime reports in residential area.",
+      "coords": [
+        14.637,
+        14.648,
+        120.997,
+        121.009
+      ]
+    },
+    {
+      "name": "horseshoe village QC",
+      "risk": "low",
+      "summary": "Residential village; low crime.",
+      "coords": [
+        14.623,
+        14.635,
+        121.04,
+        121.055
+      ],
+      "aliases": [
+        "horseshoe"
+      ]
+    },
+    {
+      "name": "ugong norte QC",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.637,
+        14.651,
+        121.071,
+        121.09
+      ],
+      "aliases": [
+        "ugong norte"
+      ]
+    },
+    {
+      "name": "ugong valenzuela",
+      "risk": "moderate",
+      "summary": "Industrial-residential border; some crime reports.",
+      "coords": [
+        14.68,
+        14.698,
+        120.958,
+        120.974
+      ]
+    },
+    {
+      "name": "lawang bato valenzuela",
+      "risk": "moderate",
+      "summary": "Some crime activity in dense residential zone.",
+      "coords": [
+        14.718,
+        14.74,
+        120.964,
+        120.982
+      ],
+      "aliases": [
+        "lawang bato"
+      ]
+    },
+    {
+      "name": "dalandanan valenzuela",
+      "risk": "low",
+      "summary": "Low-crime residential area.",
+      "coords": [
+        14.73,
+        14.758,
+        120.97,
+        120.99
+      ],
+      "aliases": [
+        "dalandanan"
+      ]
+    },
+    {
+      "name": "rincon valenzuela",
+      "risk": "moderate",
+      "summary": "Some crime reports in residential area.",
+      "coords": [
+        14.713,
+        14.731,
+        120.965,
+        120.98
+      ],
+      "aliases": [
+        "rincon"
+      ]
+    },
+    {
+      "name": "pinagsama village taguig",
+      "risk": "low",
+      "summary": "Residential subdivision; generally low crime.",
+      "coords": [
+        14.525,
+        14.542,
+        121.048,
+        121.066
+      ],
+      "aliases": [
+        "pinagsama"
+      ]
+    },
+    {
+      "name": "pembo makati-taguig border",
+      "risk": "moderate",
+      "summary": "Dense area; some crime reports at border zone.",
+      "coords": [
+        14.534,
+        14.548,
+        121.059,
+        121.074
+      ],
+      "aliases": [
+        "pembo"
+      ]
+    },
+    {
+      "name": "hagonoy east taguig",
+      "risk": "moderate",
+      "summary": "Some crime reports in residential zone.",
+      "coords": [
+        14.503,
+        14.522,
+        121.027,
+        121.045
+      ]
+    },
+    {
+      "name": "tambo paranaque",
+      "risk": "moderate",
+      "summary": "Some crime reports near port and market.",
+      "coords": [
+        14.507,
+        14.523,
+        120.992,
+        121.008
+      ],
+      "aliases": [
+        "tambo"
+      ]
+    },
+    {
+      "name": "paranaque market area",
+      "risk": "moderate",
+      "summary": "Market; pickpocketing risk.",
+      "coords": [
+        14.482,
+        14.497,
+        121.013,
+        121.03
+      ],
+      "aliases": [
+        "paranaque palengke"
+      ]
+    },
+    {
+      "name": "baclaran paranaque border",
+      "risk": "high",
+      "summary": "Border area; moderate to high snatching.",
+      "coords": [
+        14.525,
+        14.533,
+        120.99,
+        121.004
+      ]
+    },
+    {
+      "name": "san dionisio paranaque north",
+      "risk": "low",
+      "summary": "Residential area; generally safe.",
+      "coords": [
+        14.484,
+        14.5,
+        121.002,
+        121.02
+      ]
+    },
+    {
+      "name": "filinvest alabang",
+      "risk": "low",
+      "summary": "Planned commercial development; well-secured.",
+      "coords": [
+        14.413,
+        14.428,
+        121.049,
+        121.065
+      ],
+      "aliases": [
+        "filinvest city"
+      ]
+    },
+    {
+      "name": "putatan muntinlupa",
+      "risk": "low",
+      "summary": "Residential area; generally low crime.",
+      "coords": [
+        14.388,
+        14.41,
+        121.043,
+        121.07
+      ],
+      "aliases": [
+        "putatan"
+      ]
+    },
+    {
+      "name": "bayanan muntinlupa",
+      "risk": "low",
+      "summary": "Residential area with low crime.",
+      "coords": [
+        14.397,
+        14.42,
+        121.049,
+        121.073
+      ],
+      "aliases": [
+        "bayanan"
+      ]
+    },
+    {
+      "name": "nbp area muntinlupa",
+      "risk": "moderate",
+      "summary": "Area near national bilibid prison; some crime reports.",
+      "coords": [
+        14.414,
+        14.437,
+        121.056,
+        121.082
+      ],
+      "aliases": [
+        "bilibid area"
+      ]
+    },
+    {
+      "name": "pasig market area",
+      "risk": "moderate",
+      "summary": "Pasig city market; pickpocketing in crowds.",
+      "coords": [
+        14.569,
+        14.577,
+        121.084,
+        121.094
+      ],
+      "aliases": [
+        "palengke pasig"
+      ]
+    },
+    {
+      "name": "pineda pasig",
+      "risk": "moderate",
+      "summary": "Dense residential; moderate crime risk.",
+      "coords": [
+        14.56,
+        14.572,
+        121.075,
+        121.09
+      ],
+      "aliases": [
+        "pineda"
+      ]
+    },
+    {
+      "name": "SM megamall area",
+      "risk": "low",
+      "summary": "Mall complex with security; generally safe.",
+      "coords": [
+        14.585,
+        14.593,
+        121.056,
+        121.064
+      ],
+      "aliases": [
+        "megamall",
+        "sm megamall"
+      ]
+    },
+    {
+      "name": "zapote market las pinas",
+      "risk": "low",
+      "summary": "Market area; some petty theft.",
+      "coords": [
+        14.438,
+        14.453,
+        120.993,
+        121.01
+      ],
+      "aliases": [
+        "zapote palengke"
+      ]
+    },
+    {
+      "name": "alabang-zapote road las pinas stretch",
+      "risk": "low",
+      "summary": "Suburban road; generally safe.",
+      "coords": [
+        14.426,
+        14.455,
+        121.005,
+        121.02
+      ]
+    },
+    {
+      "name": "EDSA Shaw MRT station area",
+      "risk": "moderate",
+      "summary": "MRT station; active pickpockets during rush hour.",
+      "coords": [
+        14.586,
+        14.593,
+        121.052,
+        121.06
+      ],
+      "aliases": [
+        "shaw mrt",
+        "mrt shaw"
+      ]
+    },
+    {
+      "name": "EDSA Guadalupe MRT station area",
+      "risk": "moderate",
+      "summary": "Station area; snatching and pickpocketing at peak hours.",
+      "coords": [
+        14.56,
+        14.568,
+        121.046,
+        121.054
+      ],
+      "aliases": [
+        "guadalupe mrt station"
+      ]
+    },
+    {
+      "name": "EDSA Buendia MRT station area",
+      "risk": "moderate",
+      "summary": "MRT station; active pickpockets.",
+      "coords": [
+        14.553,
+        14.56,
+        121.032,
+        121.04
+      ],
+      "aliases": [
+        "buendia mrt"
+      ]
+    },
+    {
+      "name": "LRT1 Roosevelt station area",
+      "risk": "moderate",
+      "summary": "LRT terminal area; pickpockets and snatching.",
+      "coords": [
+        14.672,
+        14.681,
+        121.004,
+        121.014
+      ],
+      "aliases": [
+        "roosevelt lrt",
+        "lrt1 roosevelt"
+      ]
+    },
+    {
+      "name": "LRT1 Monumento station area",
+      "risk": "high",
+      "summary": "Very high crime around LRT Monumento terminus; stay alert.",
+      "coords": [
+        14.655,
+        14.663,
+        120.984,
+        120.993
+      ],
+      "aliases": [
+        "lrt monumento",
+        "monumento lrt"
+      ]
+    },
+    {
+      "name": "LRT2 Cubao station area",
+      "risk": "moderate",
+      "summary": "LRT2 station; pickpocketing risk at platform exits.",
+      "coords": [
+        14.618,
+        14.625,
+        121.053,
+        121.061
+      ],
+      "aliases": [
+        "lrt2 cubao",
+        "cubao lrt2"
+      ]
+    },
+    {
+      "name": "LRT1 Carriedo station area",
+      "risk": "high",
+      "summary": "Station near Quiapo; extremely active pickpockets.",
+      "coords": [
+        14.597,
+        14.604,
+        120.978,
+        120.986
+      ],
+      "aliases": [
+        "carriedo lrt",
+        "lrt1 carriedo"
+      ]
+    },
+    {
+      "name": "LRT1 Central station area",
+      "risk": "high",
+      "summary": "Station near Divisoria; active snatchers and pickpockets.",
+      "coords": [
+        14.6,
+        14.607,
+        120.975,
+        120.983
+      ],
+      "aliases": [
+        "central lrt",
+        "lrt1 central terminal"
+      ]
+    },
+    {
+      "name": "LRT1 Gil Puyat station area",
+      "risk": "moderate",
+      "summary": "Station area; moderate pickpocket risk.",
+      "coords": [
+        14.55,
+        14.558,
+        120.993,
+        121.001
+      ],
+      "aliases": [
+        "lrt1 gil puyat",
+        "gil puyat lrt"
+      ]
+    },
+    {
+      "name": "LRT1 Vito Cruz station area",
+      "risk": "moderate",
+      "summary": "Station area near DLSU; moderate crime.",
+      "coords": [
+        14.563,
+        14.571,
+        120.99,
+        120.998
+      ],
+      "aliases": [
+        "vito cruz lrt"
+      ]
+    },
+    {
+      "name": "PNR Paco station area",
+      "risk": "moderate",
+      "summary": "PNR station near cemetery; moderate crime risk.",
+      "coords": [
+        14.573,
+        14.581,
+        120.997,
+        121.005
+      ],
+      "aliases": [
+        "pnr paco"
+      ]
+    },
+    {
+      "name": "PNR Espana station area",
+      "risk": "high",
+      "summary": "PNR station in high-crime corridor; snatching frequently reported.",
+      "coords": [
+        14.605,
+        14.612,
+        120.987,
+        120.994
+      ],
+      "aliases": [
+        "pnr espana"
+      ]
+    },
+    {
+      "name": "PNR Caloocan station area",
+      "risk": "high",
+      "summary": "PNR station in high-crime zone; robbery and snatching.",
+      "coords": [
+        14.639,
+        14.647,
+        120.968,
+        120.978
+      ],
+      "aliases": [
+        "pnr caloocan"
+      ]
+    },
+    {
+      "name": "españa blvd UST to welcome",
+      "risk": "high",
+      "summary": "Stretch from UST toward Welcome Rotonda; high snatching corridor.",
+      "coords": [
+        14.61,
+        14.618,
+        120.993,
+        121.003
+      ]
+    },
+    {
+      "name": "G. Tuazon street cubao",
+      "risk": "moderate",
+      "summary": "Busy commercial area; moderate theft risk.",
+      "coords": [
+        14.622,
+        14.632,
+        121.04,
+        121.052
+      ]
+    },
+    {
+      "name": "E. Rodriguez Jr. avenue QC",
+      "risk": "moderate",
+      "summary": "Some snatching and theft incidents.",
+      "coords": [
+        14.614,
+        14.628,
+        121.058,
+        121.078
+      ],
+      "aliases": [
+        "e rodriguez jr",
+        "libis road"
+      ]
+    },
+    {
+      "name": "felix huertas st manila",
+      "risk": "high",
+      "summary": "Near LRT Bambang; snatching and robbery incidents.",
+      "coords": [
+        14.603,
+        14.609,
+        120.983,
+        120.989
+      ],
+      "aliases": [
+        "felix huertas"
+      ]
+    },
+    {
+      "name": "del pan bridge manila",
+      "risk": "high",
+      "summary": "Bridge access road; holdup and snatching reported.",
+      "coords": [
+        14.604,
+        14.61,
+        120.962,
+        120.968
+      ],
+      "aliases": [
+        "del pan bridge"
+      ]
+    },
+    {
+      "name": "san juan bridge manila",
+      "risk": "moderate",
+      "summary": "Bridge vicinity; some crime reports at night.",
+      "coords": [
+        14.606,
+        14.612,
+        120.989,
+        120.995
+      ]
+    },
+    {
+      "name": "V. Mapa street sampaloc",
+      "risk": "moderate",
+      "summary": "Dense residential area; some theft and snatching.",
+      "coords": [
+        14.6,
+        14.608,
+        121.001,
+        121.01
+      ],
+      "aliases": [
+        "v mapa"
+      ]
+    },
+    {
+      "name": "Pedro Gil taft intersection",
+      "risk": "moderate",
+      "summary": "Busy intersection; pickpocket risk during rush hour.",
+      "coords": [
+        14.572,
+        14.579,
+        120.99,
+        120.997
+      ]
+    },
+    {
+      "name": "Evangelista street Makati",
+      "risk": "low",
+      "summary": "Residential street; generally safe.",
+      "coords": [
+        14.559,
+        14.567,
+        121.007,
+        121.017
+      ]
+    },
+    {
+      "name": "Amang Rodriguez avenue",
+      "risk": "moderate",
+      "summary": "Meycauayan/Marikina road; some crime reports.",
+      "coords": [
+        14.631,
+        14.65,
+        121.075,
+        121.096
+      ],
+      "aliases": [
+        "amang rodriguez"
+      ]
+    },
+    {
+      "name": "santolan road QC",
+      "risk": "low",
+      "summary": "Residential road with low crime.",
+      "coords": [
+        14.607,
+        14.622,
+        121.06,
+        121.079
+      ],
+      "aliases": [
+        "santolan road"
+      ]
+    },
+    {
+      "name": "east bank road cainta marikina",
+      "risk": "moderate",
+      "summary": "Riverside road; some crime reports at night.",
+      "coords": [
+        14.572,
+        14.608,
+        121.1,
+        121.13
+      ],
+      "aliases": [
+        "east bank road"
+      ]
+    },
+    {
+      "name": "circumferential road 3",
+      "risk": "moderate",
+      "summary": "CR3 corridor; some snatching near informal settlements.",
+      "coords": [
+        14.592,
+        14.625,
+        120.996,
+        121.01
+      ],
+      "aliases": [
+        "c3 road",
+        "cr3"
+      ]
+    },
+    {
+      "name": "catmon st to tondo border cr3",
+      "risk": "high",
+      "summary": "High crime stretch near Tondo border along C3.",
+      "coords": [
+        14.618,
+        14.628,
+        120.965,
+        120.975
+      ]
+    },
+    {
+      "name": "bulacan st manila",
+      "risk": "high",
+      "summary": "Near Divisoria; frequent snatching and robbery.",
+      "coords": [
+        14.597,
+        14.603,
+        120.971,
+        120.977
+      ],
+      "aliases": [
+        "bulacan street manila"
+      ]
+    },
+    {
+      "name": "3rd street grace park caloocan",
+      "risk": "high",
+      "summary": "High crime density in this grace park street.",
+      "coords": [
+        14.644,
+        14.652,
+        120.963,
+        120.971
+      ],
+      "aliases": [
+        "3rd street caloocan"
+      ]
+    },
+    {
+      "name": "malanday to balara QC marikina border",
+      "risk": "moderate",
+      "summary": "Border zone; some crime reports.",
+      "coords": [
+        14.652,
+        14.665,
+        121.067,
+        121.082
+      ]
+    },
+    {
+      "name": "marikina-infanta highway entry",
+      "risk": "low",
+      "summary": "Highway entry; generally safe for motorists.",
+      "coords": [
+        14.636,
+        14.644,
+        121.103,
+        121.12
+      ]
+    },
+    {
+      "name": "kamuning road extension",
+      "risk": "moderate",
+      "summary": "Extension toward EDSA; moderate petty crime.",
+      "coords": [
+        14.635,
+        14.643,
+        121.038,
+        121.05
+      ]
+    },
+    {
+      "name": "ermin garcia st cubao",
+      "risk": "moderate",
+      "summary": "Residential commercial street; moderate crime.",
+      "coords": [
+        14.62,
+        14.629,
+        121.04,
+        121.053
+      ],
+      "aliases": [
+        "ermin garcia"
+      ]
+    },
+    {
+      "name": "N. Domingo street san juan QC border",
+      "risk": "moderate",
+      "summary": "Some crime reports along this boundary road.",
+      "coords": [
+        14.61,
+        14.622,
+        121.032,
+        121.047
+      ],
+      "aliases": [
+        "n domingo street"
+      ]
+    },
+    {
+      "name": "san francisco del monte avenue",
+      "risk": "moderate",
+      "summary": "Some snatching and robbery along this QC road.",
+      "coords": [
+        14.64,
+        14.655,
+        120.998,
+        121.014
+      ],
+      "aliases": [
+        "sfdm avenue"
+      ]
+    },
+    {
+      "name": "kaingin road QC",
+      "risk": "moderate",
+      "summary": "Dense residential area; some crime activity.",
+      "coords": [
+        14.664,
+        14.68,
+        121.005,
+        121.02
+      ]
+    },
+    {
+      "name": "macarthur highway caloocan valenzuela",
+      "risk": "moderate",
+      "summary": "Highway corridor; moderate crime risk along transit stops.",
+      "coords": [
+        14.678,
+        14.73,
+        120.982,
+        120.99
+      ],
+      "aliases": [
+        "mac arthur highway"
+      ]
+    }
+  ]
+}

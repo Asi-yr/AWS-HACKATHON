@@ -1,0 +1,3027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SafeRouteAI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- MarkerCluster — groups overlapping safe spot markers automatically -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+</head>
+<body>
+<!-- ── Corner Alert Panel — modern notification cards instead of top banners ── -->
+<!-- Server-side alerts injected as data; JS renders them as corner cards        -->
+<div id="alert-panel" style="position:fixed;top:16px;right:16px;z-index:100000;pointer-events:none;
+  display:flex;flex-direction:column;gap:8px;max-width:300px;width:calc(100vw - 380px);">
+  <!-- Alert cards injected here by JS on page load + after each search -->
+</div>
+
+<!-- Hidden data elements so Jinja can pass server alerts to JS -->
+<script id="server-alerts-data" type="application/json">
+{
+  "typhoon_html":  {{ (typhoon_banner  | tojson) if typhoon_banner  else '""' }},
+  "night_html":    {{ (night_banner    | tojson) if night_banner    else '""' }},
+  "weather_html":  {{ (weather_banner  | tojson) if weather_banner  else '""' }},
+  "mmda_html":     {{ (mmda_banner     | tojson) if mmda_banner     else '""' }},
+  "seismic_html":  {{ (seismic_banner  | tojson) if seismic_banner  else '""' }}
+}
+</script>
+
+<div class="app-container">
+
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <!--  SIDEBAR                                                            -->
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <div class="sidebar">
+
+    <div class="header">
+      <h2>🛡️ SafeRouteAI</h2>
+      <div class="user-info">
+        Logged in as <strong>{{ username }}</strong> &nbsp;·&nbsp;
+        <a href="/settings">Settings</a> &nbsp;·&nbsp;
+        <a href="/community">Reports</a> &nbsp;·&nbsp;
+        <a href="/history">History</a> &nbsp;·&nbsp;
+        <a href="/rss" target="_blank" title="Subscribe to safety alerts RSS feed" style="color:#e67e22;font-weight:bold;">📡 RSS</a> &nbsp;·&nbsp;
+        <a href="/logout">Logout</a>
+      </div>
+    </div>
+
+    <!-- Flash messages -->
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        {% for msg in messages %}
+          <div class="flash-message">{{ msg }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="controls">
+
+      <!-- Origin -->
+      <label class="input-label">📍 Origin</label>
+      <div class="input-with-icon">
+        <input id="origin-input" type="text" placeholder="Starting point or address…" autocomplete="off" value="{{ prefill_origin | default('') }}" />
+        <button class="locate-me-btn" id="locate-origin-btn" title="Use my current location">📡</button>
+      </div>
+
+      <!-- Destination -->
+      <label class="input-label">🏁 Destination</label>
+      <div class="input-with-icon">
+        <input id="dest-input" type="text" placeholder="Where are you going?" autocomplete="off" value="{{ prefill_destination | default('') }}" />
+        <button class="locate-me-btn" id="locate-dest-btn" title="Pin destination on map">📌</button>
+      </div>
+
+      <!-- Transport Mode (4 tiles only) -->
+      <label class="input-label">🚦 Transport Mode</label>
+      <div class="mode-grid" id="mode-grid">
+        <div class="mode-tile" data-mode="car"        data-color="#e74c3c">
+          <span class="mode-icon">🚗</span>
+          <span class="mode-name">Car</span>
+        </div>
+        <div class="mode-tile" data-mode="motorcycle" data-color="#e67e22">
+          <span class="mode-icon">🏍️</span>
+          <span class="mode-name">Motorcycle</span>
+        </div>
+        <div class="mode-tile active" data-mode="transit" data-color="#2980b9" id="transit-tile">
+          <span class="mode-icon">🚌</span>
+          <span class="mode-name">Transit</span>
+        </div>
+        <div class="mode-tile" data-mode="walk" data-color="#27ae60">
+          <span class="mode-icon">🚶</span>
+          <span class="mode-name">Walk</span>
+        </div>
+      </div>
+
+      <!-- Sub-toggles: 3 independent ON/OFF switches shown under Transit -->
+      <div class="transit-subtoggle" id="transit-subtoggle">
+        <div class="sub-tile sub-train active"   id="sub-train"   title="LRT/MRT train">
+          <span class="sub-ico">🚇</span><span class="sub-lbl">Train</span>
+          <span class="sub-badge" id="badge-train">ON</span>
+        </div>
+        <div class="sub-tile sub-jeepney active" id="sub-jeepney" title="Jeepney routes">
+          <span class="sub-ico">🚌</span><span class="sub-lbl">Jeepney</span>
+          <span class="sub-badge" id="badge-jeepney">ON</span>
+        </div>
+        <div class="sub-tile sub-bus active"     id="sub-bus"     title="Bus routes">
+          <span class="sub-ico">🚍</span><span class="sub-lbl">Bus</span>
+          <span class="sub-badge" id="badge-bus">ON</span>
+        </div>
+      </div>
+      <div class="transit-hint" id="transit-hint"></div>
+      <br>
+
+      <!-- Safe Spots toggle — available before AND after searching -->
+      <label id="safe-spots-pre-toggle"
+        style="display:flex;align-items:center;gap:8px;cursor:pointer;
+          padding:8px 10px;margin-bottom:6px;
+          border:1.5px solid #2980b9;border-radius:8px;background:#f0f7ff;
+          font-size:13px;font-weight:600;color:#2980b9;user-select:none;"
+        title="Show police stations, hospitals, pharmacies and other safe spots along your route">
+        <input type="checkbox" id="safe-spots-checkbox"
+          style="width:16px;height:16px;accent-color:#2980b9;cursor:pointer;"
+          onchange="onSafeSpotCheckboxChange()" />
+        <span id="safe-spots-label-text">🏥 Include Safe Spots</span>
+        <span style="margin-left:auto;font-size:10px;font-weight:400;color:#777;white-space:nowrap;">
+          🚔 🏥 💊
+        </span>
+      </label>
+      <!-- Per-type filter — only visible when safe spots are ON -->
+      <div id="safe-spots-filter" style="display:none;margin:-2px 0 8px 0;padding:8px 10px;
+        background:#eaf4ff;border:1.5px solid #aecde8;border-top:none;border-radius:0 0 8px 8px;
+        font-size:12px;color:#2c3e50;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 6px;">
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="police" checked /> 👮 Police</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="hospital" checked /> 🏥 Hospital</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="fire_station" checked /> 🚒 Fire Station</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="clinic" checked /> 🏥 Clinic</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="pharmacy" checked /> 💊 Pharmacy</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="barangay_hall" checked /> 🏛️ Barangay Hall</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="community_centre" /> 🏛️ Community Ctr</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="evacuation_centre" checked /> ⛺ Evacuation Ctr</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="supermarket" /> 🛒 Supermarket</label>
+          <label class="ss-type-toggle"><input type="checkbox" name="ss-type" value="convenience" /> 🏪 7-Eleven etc.</label>
+        </div>
+      </div>
+
+      <button class="btn-primary" id="find-routes-btn" disabled>
+        🔍 Find Safe Routes
+      </button>
+
+      <!-- ── Vulnerable profile selector ──────────────────────────────── -->
+      <label class="input-label" style="margin-top:10px;">🧑‍🤝‍🧑 Commuter Profile <span style="font-size:10px;color:#888;">(optional)</span></label>
+      <select id="vulnerable-profile-select"
+        style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:7px;font-size:13px;background:#fff;color:#2c3e50;margin-bottom:6px;">
+        <option value="">— Standard commuter —</option>
+        {% for key, p in vulnerable_profiles.items() %}
+        <option value="{{ key }}">{{ p.icon }} {{ p.label }}</option>
+        {% endfor %}
+      </select>
+
+      <!-- ── Plate number (for MMDA coding check) ──────────────────────── -->
+      <label class="input-label">🚗 Plate Last Digit <span style="font-size:10px;color:#888;">(for coding check)</span></label>
+      <input id="plate-digit-input" type="number" min="0" max="9" placeholder="e.g. 3"
+        style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:7px;font-size:13px;margin-bottom:6px;" />
+    </div>
+
+    <!-- Route results -->
+    <div class="route-results" id="route-results"></div>
+
+    <!-- ── Data Sources Panel ───────────────────────────────────────────── -->
+    <div id="data-sources-panel" style="margin:12px 8px 8px;padding:10px 12px;background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;font-size:11px;color:#555;">
+        <div style="font-weight:bold;color:#2c3e50;margin-bottom:7px;font-size:12px;">📡 Live Data Sources</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;">
+            <a href="https://www.gdacs.org/" target="_blank" style="background:#1a5276;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">GDACS</a>
+            <a href="https://www.ndrrmc.gov.ph/" target="_blank" style="background:#922b21;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">NDRRMC</a>
+            <a href="https://reliefweb.int/" target="_blank" style="background:#1e8bc3;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">UN OCHA</a>
+            <a href="https://noah.up.edu.ph/" target="_blank" style="background:#117a65;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">NOAH Floods</a>
+            <a href="https://open-meteo.com/" target="_blank" style="background:#1f618d;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">Open-Meteo</a>
+            <a href="https://bagong.pagasa.dost.gov.ph/" target="_blank" style="background:#6c3483;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">PAGASA</a>
+            <a href="https://trafficnavigator.mmda.gov.ph/" target="_blank" style="background:#c0392b;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">MMDA</a>
+            <a href="https://www.phivolcs.dost.gov.ph/" target="_blank" style="background:#784212;color:#fff;padding:3px 8px;border-radius:4px;text-decoration:none;font-weight:bold;">PHIVOLCS</a>
+        </div>
+        <div style="color:#888;font-size:10px;line-height:1.5;">
+            Incidents refresh every 10 min · Weather every search · Crime zones from PNP data · Community reports peer-verified
+        </div>
+        <div id="incident-status" style="margin-top:6px;font-size:10px;color:#888;">🔄 Checking incident feeds…</div>
+        <div id="mmda-coding-status" style="margin-top:4px;font-size:10px;color:#888;">🚗 Checking number coding…</div>
+        <div id="seismic-status" style="margin-top:4px;font-size:10px;color:#888;">🌍 Checking seismic activity…</div>
+    </div>
+
+  </div><!-- /sidebar -->
+
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <!--  MAP AREA                                                           -->
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <div class="map-area" id="map-area">
+    <div id="map" style="width:100%;height:100%;"></div>
+
+    <!-- Overlay controls -->
+    <div class="map-overlay-controls">
+      <button id="pinpoint-btn" title="Pick location on map">📌</button>
+      <span class="pick-status-label" id="pick-status-label">Click map to set location</span>
+    </div>
+
+    <!-- Map status bar — bottom of map -->
+    <div id="map-status-bar">
+      <span id="map-status-text">Loading safety data…</span>
+    </div>
+  </div>
+
+</div><!-- /app-container -->
+
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+//  SafeRouteAI — Frontend JavaScript
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Map init ──────────────────────────────────────────────────────────────────
+const map = L.map('map').setView([14.5995, 120.9842], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors', maxZoom: 19
+}).addTo(map);
+
+// ── Custom Leaflet panes for guaranteed z-ordering ────────────────────────────
+// Leaflet default: overlayPane=400, shadowPane=500, markerPane=600, popupPane=700
+// We slot hazard circles BELOW all markers so they never block clicks on pins.
+//   hazardCircles  → z-index 350  (below markers, pointer-events:none so clicks pass through)
+//   hazardMarkers  → z-index 560  (emoji/pulse dots — visible but under endpoint pins)
+//   endpointPins   → z-index 650  (origin / destination — always clickable on top)
+map.createPane('hazardCircles');
+map.createPane('hazardMarkers');
+map.createPane('endpointPins');
+map.getPane('hazardCircles').style.zIndex  = '350';
+map.getPane('hazardMarkers').style.zIndex  = '560';
+map.getPane('endpointPins').style.zIndex   = '650';
+// Circles must NOT eat pointer events — let clicks fall through to markers/map
+map.getPane('hazardCircles').style.pointerEvents = 'none';
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let origCoords  = null;   // {lat, lon}
+let destCoords  = null;   // {lat, lon}
+let activeMode  = 'train';  // sub-toggle defaults to Train
+let pinTarget   = null;   // 'origin' | 'dest' | null
+let origMarker  = null;
+let destMarker  = null;
+let routeLayers = [];     // [{routeId, layers:[…]}, …]
+let activeRouteId = null;
+let allRoutes = [];           // full route list from last search
+let lastOrigCoords = null;    // orig coords from last search
+let lastDestCoords = null;    // dest coords from last search
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
+// SVG-based markers — no emoji, renders consistently on all platforms
+
+function mkPin(color, letter) {
+  // Compact teardrop pin — smaller than before so it doesn't dominate the map.
+  // Size reduced from 28×38 to 22×30. The stroke is white so it pops against
+  // any background without blending into hazard zone colors.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="30" viewBox="0 0 22 30">
+    <path d="M11 0C5.1 0 0 5.1 0 11c0 7.8 11 19 11 19S22 18.8 22 11C22 5.1 16.9 0 11 0z"
+          fill="${color}" stroke="white" stroke-width="2.5"/>
+    <circle cx="11" cy="11" r="4.5" fill="white" opacity="0.92"/>
+    <text x="11" y="15" text-anchor="middle" dominant-baseline="middle"
+          font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="${color}">${letter}</text>
+  </svg>`;
+  return L.divIcon({
+    className: '',
+    html: svg,
+    iconSize:    [22, 30],
+    iconAnchor:  [11, 30],
+    popupAnchor: [0, -32],
+  });
+}
+
+// Origin pin: bright cyan-blue — clearly "start", nothing like hazard red/orange
+const ORIGIN_COLOR = '#0984e3';   // vivid sky blue
+// Dest pin: deep violet — clearly "end", distinct from crime red/orange
+const DEST_COLOR   = '#6c5ce7';   // vivid purple
+
+function mkDot(color, letter) {
+  // Smaller round marker for transit stops / overlays
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 26 26">
+    <circle cx="13" cy="13" r="12" fill="${color}" stroke="white" stroke-width="2"/>
+    <text x="13" y="13" text-anchor="middle" dominant-baseline="middle"
+          font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="white">${letter}</text>
+  </svg>`;
+  return L.divIcon({
+    className: '',
+    html: svg,
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    popupAnchor: [0, -14],
+  });
+}
+
+// Legacy alias used elsewhere in the code
+const mkIcon = (color, sym) => mkDot(color, sym.replace(/[^A-Za-z0-9]/g, '').charAt(0) || '?');
+
+// Small transfer marker
+const transferIcon = (typeStr) => {
+  const letters = { train: 'T', jeepney: 'J', bus: 'B', walk: 'W' };
+  const colors  = { train: '#8e44ad', jeepney: '#e67e22', bus: '#16a085', walk: '#7f8c8d' };
+  const letter  = letters[typeStr] || '?';
+  const color   = colors[typeStr]  || '#555';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+    <circle cx="10" cy="10" r="9" fill="${color}" stroke="white" stroke-width="1.5"/>
+    <text x="10" y="10" text-anchor="middle" dominant-baseline="middle"
+          font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="white">${letter}</text>
+  </svg>`;
+  return L.divIcon({ className: '', html: svg, iconSize: [20, 20], iconAnchor: [10, 10] });
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+let nearbyLayers = [];
+
+async function fetchAndDrawNearby(lat, lon) {
+    try {
+        // Reduced radius to 1000m to avoid clutter
+        const resp = await fetch(`/api/nearby?lat=${lat}&lon=${lon}&radius=1000`);
+        const data = await resp.json();
+        
+        const circle = L.circle([lat, lon], {
+            color: '#0984e3',
+            fillColor: '#0984e3',
+            fillOpacity: 0.04,
+            radius: 800,           // reduced from 1000 — less visual clutter
+            dashArray: '5, 8',
+            weight: 1.5,
+            interactive: false,    // never blocks clicks on the map
+            pane: 'hazardCircles',
+        }).addTo(map);
+        nearbyLayers.push(circle);
+        
+        data.forEach(stop => {
+            const typeLetters = { jeepney: 'J', bus: 'B', train: 'T' };
+            const typeColors  = { jeepney: '#e67e22', bus: '#16a085', train: '#8e44ad' };
+            const letter = typeLetters[stop.type] || 'S';
+            const color  = typeColors[stop.type]  || stop.color || '#555';
+            
+            const marker = L.marker([stop.lat, stop.lon], {
+                icon: mkDot(color, letter)
+            }).addTo(map).bindTooltip(`<b>${stop.route_name}</b><br>${stop.name}<br>Distance: ${Math.round(stop.dist)}m`);
+            
+            nearbyLayers.push(marker);
+        });
+    } catch (e) { console.error("Failed to fetch nearby transit", e); }
+}
+
+function clearNearby() {
+    nearbyLayers.forEach(l => map.removeLayer(l));
+    nearbyLayers = [];
+}
+
+async function reverseGeocode(lat, lon) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, {
+      headers: { 'Accept-Language': 'en', 'User-Agent': 'SafeRouteAI/1.0' }
+    });
+    const data = await res.json();
+    if (data && data.address) {
+      const a = data.address;
+      const parts = [a.road || a.pedestrian || a.path, a.suburb || a.village || a.neighbourhood, a.city || a.town || a.municipality].filter(Boolean);
+      return parts.length >= 2 ? parts.join(', ') : data.display_name.split(',').slice(0,3).join(',').trim();
+    }
+  } catch(e) {}
+  return null;
+}
+
+async function setOrigin(lat, lon, label) {
+  origCoords = {lat, lon};
+  const input = document.getElementById('origin-input');
+  if (label) {
+    input.value = label;
+  } else {
+    input.value = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    reverseGeocode(lat, lon).then(name => { if (name) input.value = name; });
+  }
+  if (origMarker) map.removeLayer(origMarker);
+  origMarker = L.marker([lat, lon], {icon: mkPin(ORIGIN_COLOR, 'A'), pane: 'endpointPins'})
+    .addTo(map).bindPopup('Origin').openPopup();
+  
+  clearNearby();
+  fetchAndDrawNearby(lat, lon);
+  if (destCoords) fetchAndDrawNearby(destCoords.lat, destCoords.lon);
+  loadSafetyOverlay();
+  checkEnableButton();
+}
+
+async function setDest(lat, lon, label) {
+  destCoords = {lat, lon};
+  const input = document.getElementById('dest-input');
+  if (label) {
+    input.value = label;
+  } else {
+    input.value = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    reverseGeocode(lat, lon).then(name => { if (name) input.value = name; });
+  }
+  if (destMarker) map.removeLayer(destMarker);
+  destMarker = L.marker([lat, lon], {icon: mkPin(DEST_COLOR, 'B'), pane: 'endpointPins'})
+    .addTo(map).bindPopup('Destination').openPopup();
+    
+  clearNearby();
+  fetchAndDrawNearby(lat, lon);
+  if (origCoords) fetchAndDrawNearby(origCoords.lat, origCoords.lon);
+  loadSafetyOverlay();
+  checkEnableButton();
+}
+
+function checkEnableButton() {
+  const originFilled = origCoords || document.getElementById('origin-input').value.trim();
+  const destFilled   = destCoords || document.getElementById('dest-input').value.trim();
+  document.getElementById('find-routes-btn').disabled = !(originFilled && destFilled);
+}
+
+function clearRoutes() {
+  routeLayers.forEach(r => r.layers.forEach(l => map.removeLayer(l)));
+  routeLayers = [];
+  nearbyLayers.forEach(l => map.removeLayer(l));
+  nearbyLayers = [];
+  activeRouteId = null;
+  allRoutes = [];
+  hasActiveRoute = false;
+  _routePathPts = [];
+  ++_overlayGeneration;   // cancel any in-flight async safety fetch
+  clearCrimeOverlay();    // remove all crime/flood circles
+  clearSafeSpotMarkers(); // remove all safe spot markers on new search
+}
+
+// ── Mode selector ─────────────────────────────────────────────────────────────
+// Fixed colors per mode — never changes
+const MODE_COLORS = {
+  car:        '#e74c3c',
+  motorcycle: '#8e44ad',
+  transit:    '#2980b9',
+  train:      '#27ae60',
+  jeepney:    '#e67e22',
+  walk:       '#27ae60',
+};
+
+// ── Transit sub-toggles: 3 independent ON/OFF switches ──────────────────────
+let trainOn = true, jeepneyOn = true, busOn = true;
+
+function resolvedTransitMode() {
+  // Maps the 3 toggle states to an API mode string
+  const t = trainOn, j = jeepneyOn, b = busOn;
+  if (t && j && b) return 'transit';
+  if (t && j)      return 'train_jeepney';
+  if (t && b)      return 'train_bus';
+  if (j && b)      return 'jeepney_bus';
+  if (t)           return 'train';
+  if (j)           return 'jeepney';
+  if (b)           return 'bus';
+  return 'transit'; // fallback: all on
+}
+
+function updateSubToggles() {
+  const els = {
+    train:   document.getElementById('sub-train'),
+    jeepney: document.getElementById('sub-jeepney'),
+    bus:     document.getElementById('sub-bus'),
+  };
+  const badges = {
+    train:   document.getElementById('badge-train'),
+    jeepney: document.getElementById('badge-jeepney'),
+    bus:     document.getElementById('badge-bus'),
+  };
+  const states = { train: trainOn, jeepney: jeepneyOn, bus: busOn };
+  Object.keys(els).forEach(k => {
+    els[k].classList.toggle('active',   states[k]);
+    els[k].classList.toggle('inactive', !states[k]);
+    badges[k].textContent = states[k] ? 'ON' : 'OFF';
+  });
+
+  // Hint bar
+  const hint = document.getElementById('transit-hint');
+  const on = [trainOn&&'Train', jeepneyOn&&'Jeepney', busOn&&'Bus'].filter(Boolean);
+  if (on.length > 1) {
+    hint.textContent = '⚡ ' + on.join(' + ') + ' — combined multi-modal routing';
+    hint.classList.add('visible');
+  } else {
+    hint.classList.remove('visible');
+  }
+
+  // Sync activeMode if transit parent is active
+  if (document.getElementById('transit-tile').classList.contains('active')) {
+    activeMode = resolvedTransitMode();
+    const colors = { transit:'#2980b9', train:'#27ae60', jeepney:'#e67e22', bus:'#16a085',
+                     train_jeepney:'#27ae60', train_bus:'#16a085', jeepney_bus:'#e67e22' };
+    document.documentElement.style.setProperty('--mode-color', colors[activeMode] || '#2980b9');
+  }
+}
+
+function _toggleSub(key) {
+  const states = { train: trainOn, jeepney: jeepneyOn, bus: busOn };
+  const on = Object.values(states).filter(Boolean).length;
+  // Prevent turning off the last active toggle
+  if (states[key] && on === 1) return;
+  if (key === 'train')   trainOn   = !trainOn;
+  if (key === 'jeepney') jeepneyOn = !jeepneyOn;
+  if (key === 'bus')     busOn     = !busOn;
+  updateSubToggles();
+}
+
+document.getElementById('sub-train').addEventListener('click',   () => _toggleSub('train'));
+document.getElementById('sub-jeepney').addEventListener('click', () => _toggleSub('jeepney'));
+document.getElementById('sub-bus').addEventListener('click',     () => _toggleSub('bus'));
+
+document.querySelectorAll('.mode-tile').forEach(tile => {
+  tile.addEventListener('click', () => {
+    document.querySelectorAll('.mode-tile').forEach(t => t.classList.remove('active'));
+    tile.classList.add('active');
+    const base = tile.dataset.mode;
+    activeMode = (base === 'transit') ? resolvedTransitMode() : base;
+    const color = MODE_COLORS[base] || tile.dataset.color;
+    document.documentElement.style.setProperty('--mode-color', color);
+    const isTransit = base === 'transit';
+    document.getElementById('transit-subtoggle').classList.toggle('visible', isTransit);
+    const hint = document.getElementById('transit-hint');
+    const onCount = [trainOn,jeepneyOn,busOn].filter(Boolean).length;
+    if (isTransit && onCount > 1) hint.classList.add('visible');
+    else hint.classList.remove('visible');
+  });
+});
+
+// Show sub-toggle on load (Transit is default active)
+document.getElementById('transit-subtoggle').classList.add('visible');
+updateSubToggles();
+
+// ── Locate-me (origin) ────────────────────────────────────────────────────────
+document.getElementById('locate-origin-btn').addEventListener('click', () => {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(pos => {
+    setOrigin(pos.coords.latitude, pos.coords.longitude, 'My Location');
+    map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+  });
+});
+
+// ── Pinpoint button ───────────────────────────────────────────────────────────
+const pinBtn   = document.getElementById('pinpoint-btn');
+const pinLabel = document.getElementById('pick-status-label');
+
+document.getElementById('locate-dest-btn').addEventListener('click', () => {
+  startPinPick('dest');
+});
+
+function startPinPick(target) {
+  pinTarget = target;
+  pinBtn.classList.add('active');
+  pinLabel.style.display = 'block';
+  pinLabel.textContent = target === 'origin'
+    ? 'Click map to set origin…'
+    : 'Click map to set destination…';
+  map.getContainer().style.cursor = 'crosshair';
+}
+
+pinBtn.addEventListener('click', () => {
+  if (pinTarget) {
+    endPinPick();
+  } else {
+    startPinPick(origCoords ? 'dest' : 'origin');
+  }
+});
+
+function endPinPick() {
+  pinTarget = null;
+  pinBtn.classList.remove('active');
+  pinLabel.style.display = 'none';
+  map.getContainer().style.cursor = '';
+}
+
+map.on('click', e => {
+  const {lat, lng} = e.latlng;
+  // If pinpoint mode is active, set origin/dest
+  if (pinTarget) {
+    if (pinTarget === 'origin') setOrigin(lat, lng);
+    else                        setDest(lat, lng);
+    endPinPick();
+    return;
+  }
+  // Otherwise, if report mode button is active, open the report panel
+  if (typeof _reportModeActive !== 'undefined' && _reportModeActive) {
+    if (typeof openReportPanel === 'function') openReportPanel(lat, lng);
+  }
+});
+
+// ── Autocomplete (live location search + map flyTo) ──────────────────────────
+function setupAutocomplete(inputId, onSelect) {
+  const input = document.getElementById(inputId);
+  let dropdown = null, debounceTimer = null;
+
+  function removeDropdown() { if (dropdown) { dropdown.remove(); dropdown = null; } }
+
+  function showDropdown(items) {
+    removeDropdown();
+    if (!items.length) return;
+    dropdown = document.createElement('div');
+    dropdown.style.cssText = 'position:fixed;z-index:99999;background:#fff;border:1px solid #ddd;border-top:none;border-radius:0 0 8px 8px;box-shadow:0 6px 16px rgba(0,0,0,0.13);max-height:240px;overflow-y:auto;';
+    const rect = input.getBoundingClientRect();
+    dropdown.style.top   = rect.bottom + 'px';
+    dropdown.style.left  = rect.left + 'px';
+    dropdown.style.width = rect.width + 'px';
+    document.body.appendChild(dropdown);
+
+    items.forEach(item => {
+      const parts = item.display_name.split(',');
+      const short = parts.slice(0,3).join(',').trim();
+      const rest  = parts.length > 3 ? parts.slice(3).join(',').trim() : '';
+      const div   = document.createElement('div');
+      div.style.cssText = 'padding:10px 13px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0;line-height:1.35;display:flex;align-items:flex-start;gap:8px;';
+      div.innerHTML = `<span style="font-size:15px;flex-shrink:0">📍</span><div><div style="font-weight:600;color:#2c3e50">${escHtml(short)}</div>${rest ? `<div style="font-size:11px;color:#999">${escHtml(rest)}</div>` : ''}</div>`;
+      div.addEventListener('mouseenter', () => div.style.background = '#f0f7ff');
+      div.addEventListener('mouseleave', () => div.style.background = '');
+      div.addEventListener('mousedown', e => {
+        e.preventDefault();
+        input.value = short;
+        onSelect({ lat: parseFloat(item.lat), lon: parseFloat(item.lon), label: short });
+        removeDropdown();
+      });
+      dropdown.appendChild(div);
+    });
+  }
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (!q) { removeDropdown(); checkEnableButton(); return; }
+    checkEnableButton();
+    clearTimeout(debounceTimer);
+    if (q.length < 3) { removeDropdown(); return; }
+    debounceTimer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/suggest?q=${encodeURIComponent(q)}`);
+        showDropdown((await res.json()).slice(0, 6));
+      } catch(e) { removeDropdown(); }
+    }, 300);
+  });
+
+  input.addEventListener('keydown', e => {
+    if (!dropdown) return;
+    const items = Array.from(dropdown.children);
+    let idx = items.findIndex(d => d.dataset.active);
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (idx >= 0) { items[idx].style.background=''; delete items[idx].dataset.active; } idx = Math.min(idx+1, items.length-1); items[idx].style.background='#f0f7ff'; items[idx].dataset.active='1'; }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (idx >= 0) { items[idx].style.background=''; delete items[idx].dataset.active; } idx = Math.max(idx-1, 0); items[idx].style.background='#f0f7ff'; items[idx].dataset.active='1'; }
+    else if (e.key === 'Enter' && idx >= 0) { e.preventDefault(); items[idx].dispatchEvent(new MouseEvent('mousedown')); }
+    else if (e.key === 'Escape') removeDropdown();
+  });
+  input.addEventListener('blur', () => setTimeout(removeDropdown, 160));
+}
+
+setupAutocomplete('origin-input', result => {
+  if (result) {
+    origCoords = { lat: result.lat, lon: result.lon };
+    map.flyTo([result.lat, result.lon], 15, { animate: true, duration: 0.8 });
+    if (origMarker) map.removeLayer(origMarker);
+    origMarker = L.marker([result.lat, result.lon], {icon: mkPin(ORIGIN_COLOR, 'A'), pane: 'endpointPins'}).addTo(map).bindPopup('Origin').openPopup();
+    clearNearby(); fetchAndDrawNearby(result.lat, result.lon); loadSafetyOverlay();
+  } else { origCoords = null; if (origMarker) { map.removeLayer(origMarker); origMarker = null; } }
+  checkEnableButton();
+});
+
+setupAutocomplete('dest-input', result => {
+  if (result) {
+    destCoords = { lat: result.lat, lon: result.lon };
+    map.flyTo([result.lat, result.lon], 15, { animate: true, duration: 0.8 });
+    if (destMarker) map.removeLayer(destMarker);
+    destMarker = L.marker([result.lat, result.lon], {icon: mkPin(DEST_COLOR, 'B'), pane: 'endpointPins'}).addTo(map).bindPopup('Destination').openPopup();
+    clearNearby(); fetchAndDrawNearby(result.lat, result.lon); loadSafetyOverlay();
+  } else { destCoords = null; if (destMarker) { map.removeLayer(destMarker); destMarker = null; } }
+  checkEnableButton();
+});
+
+// ── Input change listeners ────────────────────────────────────────────────────
+document.getElementById('origin-input').addEventListener('input', () => {
+  const val = document.getElementById('origin-input').value.trim();
+  if (!val) {
+    origCoords = null;
+    if (origMarker) { map.removeLayer(origMarker); origMarker = null; }
+  }
+  checkEnableButton();
+});
+document.getElementById('dest-input').addEventListener('input', () => {
+  const val = document.getElementById('dest-input').value.trim();
+  if (!val) {
+    destCoords = null;
+    if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+  }
+  checkEnableButton();
+});
+
+// ── Find Routes button ────────────────────────────────────────────────────────
+document.getElementById('find-routes-btn').addEventListener('click', findRoutes);
+
+async function findRoutes() {
+  const btn = document.getElementById('find-routes-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Searching…';
+  clearRoutes();
+  document.getElementById('route-results').innerHTML =
+    '<div style="text-align:center;padding:20px;color:#7f8c8d">Fetching routes…</div>';
+
+  const body = {
+    mode:        activeMode,
+    origin:      document.getElementById('origin-input').value.trim(),
+    destination: document.getElementById('dest-input').value.trim(),
+  };
+  if (origCoords) body.orig_coords = origCoords;
+  if (destCoords) body.dest_coords = destCoords;
+
+  try {
+    const resp = await fetch('/api/route', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      showError(data.error);
+    } else if (data.routes && data.routes.length) {
+      allRoutes = data.routes;
+
+      // ── Always place A/B markers using server-resolved coordinates ──────
+      // This covers: manual text input, autocomplete, AND history "Use Again"
+      // (where origCoords/destCoords may still be null on page load)
+      if (data.orig_lat && data.orig_lon) {
+        origCoords = { lat: data.orig_lat, lon: data.orig_lon };
+        if (origMarker) map.removeLayer(origMarker);
+        origMarker = L.marker([data.orig_lat, data.orig_lon], { icon: mkPin(ORIGIN_COLOR, 'A'), pane: 'endpointPins' })
+          .addTo(map).bindPopup('Origin');
+        // Also update the input field if it was just a coordinate string
+        const origInput = document.getElementById('origin-input');
+        if (!origInput.value.trim() && data.orig_text) origInput.value = data.orig_text;
+      }
+      if (data.dest_lat && data.dest_lon) {
+        destCoords = { lat: data.dest_lat, lon: data.dest_lon };
+        if (destMarker) map.removeLayer(destMarker);
+        destMarker = L.marker([data.dest_lat, data.dest_lon], { icon: mkPin(DEST_COLOR, 'B'), pane: 'endpointPins' })
+          .addTo(map).bindPopup('Destination');
+        const destInput = document.getElementById('dest-input');
+        if (!destInput.value.trim() && data.dest_text) destInput.value = data.dest_text;
+      }
+
+      lastOrigCoords = origCoords;
+      lastDestCoords = destCoords;
+      renderRouteCards(data.routes);
+      drawAllRoutes(data.routes);
+      highlightRoute(data.routes[0].id);
+      // Draw safety overlays for the first (default selected) route
+      drawAreaSafetyOverlay(lastOrigCoords, lastDestCoords, data.routes[0]);
+      // Update live weather/flood banners from API response
+      updateLiveBanners(data);
+      // Auto-show safe spots if checkbox was already checked
+      _ssActive = !!(document.getElementById('safe-spots-checkbox') || {checked:false}).checked;
+      clearSafeSpotMarkers();
+      if (_ssActive) showSafeSpotsForRoute(data.routes[0]);
+      _ssUpdateLabel();
+    } else {
+      showError('No routes found.');
+    }
+  } catch (e) {
+    showError('Network error: ' + e.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🔍 Find Safe Routes';
+}
+
+function showError(msg) {
+  document.getElementById('route-results').innerHTML =
+    `<div class="flash-message">${msg}</div>`;
+}
+
+// ── Corner alert panel system ──────────────────────────────────────────────────
+// Replaces the old full-width banners with modern corner notification cards.
+// Cards auto-dismiss after 10 s unless the user hovers; persistent ones stay.
+
+const _alertPanel = () => document.getElementById('alert-panel');
+let _alertCards   = {};  // id → element
+
+function _riskIcon(type) {
+  return { typhoon:'🌀', night:'🌙', weather:'🌦️', flood:'🌊', crime:'🚨',
+           fire:'🔥', wind:'💨', storm:'⛈️' }[type] || '⚠️';
+}
+
+function _alertColor(type, level) {
+  if (type === 'typhoon') return '#6c3483';
+  if (type === 'night')   return '#2c3e50';
+  if (type === 'flood') {
+    return { high:'#c0392b', moderate:'#e67e22', low:'#f39c12' }[level] || '#1a5276';
+  }
+  if (type === 'weather') {
+    return { storm:'#6c3483', heavy_rain:'#c0392b', rain:'#1a5276',
+             light_rain:'#2980b9', fog:'#7f8c8d' }[level] || '#2980b9';
+  }
+  return '#e74c3c';
+}
+
+/**
+ * Show a corner alert card.
+ * @param {string} id        - Unique id (e.g. 'night', 'flood_high')
+ * @param {string} type      - Category: 'typhoon'|'night'|'weather'|'flood'|'crime'
+ * @param {string} title     - Bold header
+ * @param {string} body      - Detail text
+ * @param {string} [level]   - Risk sub-level for color
+ * @param {boolean} [persist]- If true, no auto-dismiss timer
+ */
+function showAlertCard(id, type, title, body, level = '', persist = false) {
+  const panel = _alertPanel();
+  if (!panel) return;
+
+  // Remove existing card with same id
+  const existing = document.getElementById('alert-card-' + id);
+  if (existing) existing.remove();
+
+  const color = _alertColor(type, level);
+  const icon  = _riskIcon(type);
+
+  const card = document.createElement('div');
+  card.id = 'alert-card-' + id;
+  card.className = 'map-alert-card';
+  card.style.cssText =
+    `border-left:4px solid ${color};pointer-events:auto;`;
+
+  card.innerHTML = `
+    <div class="mac-dot" style="background:${color};"></div>
+    <div class="mac-content">
+      <div class="mac-title">${icon} ${escHtml(title)}</div>
+      ${body ? `<div class="mac-body">${escHtml(body)}</div>` : ''}
+    </div>
+    <button class="mac-close" onclick="dismissAlertCard('${id}')" title="Dismiss">✕</button>
+  `;
+
+  panel.appendChild(card);
+  _alertCards[id] = card;
+
+  // Animate in
+  requestAnimationFrame(() => { card.classList.add('visible'); });
+
+  // Auto-dismiss after 10 s unless persistent or hovered
+  if (!persist) {
+    let timer = setTimeout(() => dismissAlertCard(id), 10000);
+    card.addEventListener('mouseenter', () => clearTimeout(timer));
+    card.addEventListener('mouseleave', () => {
+      timer = setTimeout(() => dismissAlertCard(id), 4000);
+    });
+  }
+}
+
+function dismissAlertCard(id) {
+  const card = document.getElementById('alert-card-' + id);
+  if (!card) return;
+  card.classList.remove('visible');
+  card.classList.add('dismissing');
+  setTimeout(() => card.remove(), 280);
+  delete _alertCards[id];
+}
+
+/** Parse and show server-rendered banners (from Jinja) as corner cards */
+function initServerAlertCards() {
+  try {
+    const raw  = document.getElementById('server-alerts-data');
+    if (!raw) return;
+    const data = JSON.parse(raw.textContent);
+
+    if (data.typhoon_html && data.typhoon_html.includes('Typhoon')) {
+      const text = data.typhoon_html.replace(/<[^>]+>/g, '').trim();
+      showAlertCard('typhoon', 'typhoon', 'Typhoon Warning', text, '', true);
+    }
+    if (data.night_html && data.night_html.includes('Night')) {
+      const text = data.night_html.replace(/<[^>]+>/g, '').trim();
+      showAlertCard('night', 'night', 'Night Travel', text, '', false);
+    }
+    if (data.weather_html && data.weather_html.trim()) {
+      const text = data.weather_html.replace(/<[^>]+>/g, '').trim();
+      const level = data.weather_html.includes('storm') ? 'storm'
+                  : data.weather_html.includes('heavy') ? 'heavy_rain'
+                  : data.weather_html.includes('rain')  ? 'rain' : 'light_rain';
+      showAlertCard('weather', 'weather', 'Weather Alert', text, level, false);
+    }
+  } catch(e) { /* no server alerts */ }
+}
+
+// ── Live banner updater — called after AJAX route search ──
+function updateLiveBanners(data) {
+  // Remove old dynamic cards
+  ['weather_live', 'flood_live'].forEach(id => dismissAlertCard(id));
+
+  if (data.weather_banner && data.weather_banner.trim()) {
+    const text  = data.weather_banner.replace(/<[^>]+>/g, '').trim();
+    const level = (data.weather && data.weather.risk_level) || 'rain';
+    showAlertCard('weather_live', 'weather', 'Live Weather', text, level, false);
+  }
+  if (data.flood_banner && data.flood_banner.trim()) {
+    const text  = data.flood_banner.replace(/<[^>]+>/g, '').trim();
+    const level = (data.flood && data.flood.risk_level) || 'moderate';
+    showAlertCard('flood_live', 'flood', 'Flood Zone Alert', text, level, true);
+  }
+}
+
+
+// ── Route card rendering ──────────────────────────────────────────────────────
+
+function safetyColor(score) {
+  if (score >= 80) return '#27ae60';
+  if (score >= 60) return '#f39c12';
+  return '#e74c3c';
+}
+
+function renderRouteCards(routes) {
+  const container = document.getElementById('route-results');
+  container.innerHTML = '';
+
+  routes.forEach((route, routeIdx) => {
+    const card = document.createElement('div');
+    card.className  = 'route-card';
+    card.dataset.id = route.id;
+    // Left border reflects safety score, not route line color
+    card.style.borderLeftColor = route.score_color || route.color;
+    // Use numbered display name instead of descriptive names like "Walking Route"
+    const displayName = `Route ${routeIdx + 1}`;
+
+    // ── Header row: colored line dot + name ──────────────────────────────
+    const isTransfer = (route.line || '').includes('+');
+    let headerHTML = '';
+
+    // Mode badge shown on every card regardless of route type
+    const modeBadge = route.mode_label ? `
+      <span style="
+        background:${route.mode_label_color || '#7f8c8d'};
+        color:white;font-size:10px;font-weight:700;
+        padding:2px 8px;border-radius:10px;
+        margin-left:6px;white-space:nowrap;
+        font-family:Arial,sans-serif;vertical-align:middle;">
+        ${escHtml(route.mode_label)}
+      </span>` : '';
+
+    if (route.type === 'transit') {
+      if (isTransfer) {
+        headerHTML = `
+          <div class="route-line-header">
+            <span class="line-dot" style="background:${route.color}"></span>
+            <span class="line-dot secondary" style="background:${route.secondary_color || '#999'}"></span>
+            <span class="route-title">${escHtml(displayName)}</span>
+            ${modeBadge}
+          </div>
+          <div class="route-subtitle">${escHtml(route.subtitle || '')}</div>`;
+      } else {
+        headerHTML = `
+          <div class="route-line-header">
+            <span class="line-dot" style="background:${route.color}"></span>
+            <span class="route-title">${escHtml(displayName)}</span>
+            <span class="line-subtitle-badge">${escHtml(route.subtitle || '')}</span>
+            ${modeBadge}
+          </div>`;
+      }
+    } else {
+      headerHTML = `
+        <div class="route-line-header">
+          <span class="line-dot" style="background:${route.color}"></span>
+          <span class="route-title">${escHtml(displayName)}</span>
+          ${modeBadge}
+        </div>`;
+    }
+
+    // ── Stats row ────────────────────────────────────────────────────────
+    const statsHTML = `
+      <div class="route-stats">
+        <span>⏱ ${escHtml(route.time)}</span>
+        <span>📏 ${escHtml(route.distance)}</span>
+      </div>`;
+
+    // ── Safety badge ─────────────────────────────────────────────────────
+    // ── Safety badge ─────────────────────────────────────────────────────────
+    const sc = route.safety_score || 0;
+    // Round to whole number for clean display — decimal precision served its
+    // purpose internally for differentiation; users just need the integer.
+    const scDisplay = (typeof sc === 'number') ? Math.round(sc) : sc;
+    let warningLines = '';
+    if (route.night_warning)    warningLines += `<div class="route-warning night-warning">🌙 ${escHtml(route.night_warning)}</div>`;
+    if (route.weather_warning)  warningLines += `<div class="route-warning weather-warning">🌦️ ${escHtml(route.weather_warning)}</div>`;
+    // Only show flood warning in sidebar if there are rain-active zones
+    const _activeFloodZones = (route.flood_zones || []).filter(z => z.rain_active !== false);
+    if (route.flood_warning && _activeFloodZones.length > 0) {
+        warningLines += `<div class="route-warning flood-warning" style="background:#e3f2fd;color:#0d47a1;border-left:3px solid #1565c0;">🌊 ${escHtml(route.flood_warning)}</div>`;
+    }
+    if (route.report_warnings && route.report_warnings.length) {
+        route.report_warnings.forEach(w => {
+            warningLines += `<div class="route-warning report-warning">⚠️ ${escHtml(w)}</div>`;
+        });
+    }
+    if (route.crime_warning) warningLines += `<div class="route-warning report-warning">🚨 ${escHtml(route.crime_warning)}</div>`;
+    if (route.fire_warning)  warningLines += `<div class="route-warning report-warning" style="background:#c0392b18;color:#7b241c;border-left:3px solid #c0392b;">🔥 ${escHtml(route.fire_warning)}</div>`;
+
+    // Real-time incident warnings from GDACS/NDRRMC
+    if (route.incident_warnings && route.incident_warnings.length) {
+        route.incident_warnings.forEach(w => {
+            warningLines += `<div class="route-warning report-warning" style="background:#f9ebea;color:#7b241c;border-left:3px solid #e74c3c;">${escHtml(w)}</div>`;
+        });
+    }
+    // Avoid recommended banner (active fire on route)
+    if (route.avoid_recommended) {
+        warningLines += `<div style="margin-top:6px;background:#c0392b;color:#fff;padding:6px 10px;border-radius:5px;font-size:12px;font-weight:bold;text-align:center;">
+            🔥 AVOID RECOMMENDED — Active incident on this route
+        </div>`;
+    }
+    const fareDisp = route.fare ? route.fare.display : '';
+    const safetyHTML = `
+  <div class="route-safety" style="color:${safetyColor(sc)}">
+    🛡️ Safety Score: ${scDisplay}/100
+    ${fareDisp ? `<span class="fare-badge">💸 ${escHtml(fareDisp)}</span>` : ''}
+  </div>
+  ${warningLines}
+  ${(() => {
+    // Only show flood section if there are zones where it is actively raining.
+    // Dry flood-prone zones are hidden — no rain, no warning.
+    const activeFloodZones = (route.flood_zones || []).filter(z => z.rain_active !== false);
+    if (!activeFloodZones.length) return '';
+    const riskOrder = { high: 0, moderate: 1, low: 2 };
+    const sorted = [...activeFloodZones].sort((a, b) => (riskOrder[a.risk] ?? 9) - (riskOrder[b.risk] ?? 9));
+    const worstRisk = sorted[0]?.risk || 'low';
+    const bgColor     = { high:'#0d2b6b', moderate:'#1565c0', low:'#1976d2' }[worstRisk] || '#1565c0';
+    const borderColor = { high:'#42a5f5', moderate:'#64b5f6', low:'#90caf9' }[worstRisk] || '#64b5f6';
+    const riskIcons   = { high:'🌊', moderate:'💧', low:'💦' };
+    return `
+    <div style="background:${bgColor};color:#fff;padding:8px 12px;border-radius:4px;margin:8px 0 4px 0;font-size:13px;border-left:3px solid ${borderColor};">
+      <strong>${riskIcons[worstRisk] || '💧'} Flooding Along Route:</strong> ${escHtml(route.flood_warning || activeFloodZones.length + ' flood zone(s) currently active')}
+      <details style="margin-top:6px;">
+        <summary style="cursor:pointer;font-size:12px;font-weight:normal;opacity:0.85;">
+          View ${activeFloodZones.length} active area${activeFloodZones.length !== 1 ? 's' : ''}
+        </summary>
+        <ul style="margin:6px 0 0 16px;font-size:11px;line-height:1.7;list-style:none;padding:0;">
+          ${sorted.slice(0, 5).map(zone => {
+            const ic = riskIcons[zone.risk] || '💧';
+            const rl = zone.risk.charAt(0).toUpperCase() + zone.risk.slice(1);
+            return `<li>${ic} <strong>${escHtml(rl)}</strong> flood risk — currently raining here</li>`;
+          }).join('')}
+          ${activeFloodZones.length > 5 ? `<li style="opacity:0.7;font-style:italic;">...and ${activeFloodZones.length - 5} more area(s)</li>` : ''}
+        </ul>
+      </details>
+    </div>`;
+  })()}`;
+
+    // ── Station count / hazards ───────────────────────────────────────────
+    const infoHTML = route.station_count
+      ? `<div class="route-stations-count">🚉 ${route.station_count} station(s) · ${escHtml(route.hazards_flagged || '')}</div>`
+      : `<div class="route-stations-count">${escHtml(route.hazards_flagged || '')}</div>`;
+
+    // ── Leg breakdown for transit ────────────────────────────────────────
+    let legsHTML = '';
+    if (route.type === 'transit' && route.segments) {
+      const legItems = route.segments.map(seg => {
+        if (seg.type === 'walk') {
+          return `<div class="leg-row walk-leg">
+            <span class="leg-icon">🚶</span>
+            <span class="leg-desc">${escHtml(seg.label || 'Walk')}</span>
+          </div>`;
+        } else if (seg.type === 'train') {
+          return `<div class="leg-row jeep-leg" style="color:${seg.color || '#333'}">
+            <span class="leg-icon">🚇</span>
+            <span class="leg-desc">${escHtml(seg.label || 'Train')}</span>
+          </div>`;
+        } else if (seg.type === 'jeepney') {
+          return `<div class="leg-row jeep-leg" style="color:#e67e22">
+            <span class="leg-icon">🚌</span>
+            <span class="leg-desc">${escHtml(seg.label || 'Jeepney')}</span>
+          </div>`;
+        } else if (seg.type === 'bus') {
+          return `<div class="leg-row jeep-leg" style="color:#16a085">
+            <span class="leg-icon">🚌</span>
+            <span class="leg-desc">${escHtml(seg.label || 'Bus')}</span>
+          </div>`;
+        }
+        return '';
+      }).join('');
+      if (legItems) {
+        legsHTML = `<div class="jeepney-legs">${legItems}</div>`;
+      }
+    }
+
+    card.innerHTML = headerHTML + statsHTML + safetyHTML + infoHTML + legsHTML;
+
+    // Hover: bring this route's layers to front, dim others
+    card.addEventListener('mouseenter', () => highlightRoute(route.id));
+    card.addEventListener('mouseleave', () => highlightRoute(activeRouteId));
+    card.addEventListener('click',      () => {
+      activeRouteId = route.id;
+      highlightRoute(route.id);
+      fitRoute(route.id);
+      document.querySelectorAll('.route-card').forEach(c =>
+        c.classList.toggle('selected', c.dataset.id == route.id));
+      // Instantly swap crime zone circles for the selected route — no async fetch
+      drawRouteZoneOverlay(route);
+      // Refresh safe spots for newly selected route if toggle is ON
+      if (typeof _ssActive !== 'undefined' && _ssActive) {
+        showSafeSpotsForRoute(route);
+      }
+    });
+
+    container.appendChild(card);
+  });
+}
+
+
+// ── Map drawing ───────────────────────────────────────────────────────────────
+
+// ── Safety color helper (mirrors backend) ─────────────────────────────────────
+function safetyLineColor(score) {
+  if (score >= 80) return '#27ae60';   // green  — safe
+  if (score >= 65) return '#f39c12';   // amber  — caution
+  if (score >= 50) return '#e67e22';   // orange — moderate risk
+  return '#e74c3c';                    // red    — high risk
+}
+
+function drawAllRoutes(routes) {
+  routes.forEach(route => {
+    const layers =[];
+    const safetyC = safetyLineColor(route.safety_score || 75);
+    const fallbackColor = route.color || safetyC;
+
+    if (route.type === 'transit' && route.segments) {
+      route.segments.forEach((seg, idx) => {
+        let scolor = seg.color || fallbackColor;
+        // Keep transit lines their original type coloring properly visually identified 
+        if (seg.type === 'train')        scolor = seg.color || '#27ae60';
+        else if (seg.type === 'jeepney') scolor = seg.color || '#e67e22';
+        else if (seg.type === 'bus')     scolor = seg.color || '#16a085';
+        else if (seg.type === 'walk')    scolor = '#555';
+        
+        // Draw the polyline for this segment
+        if (seg.type === 'train') {
+          const coordSets = Array.isArray(seg.coords[0]) && Array.isArray(seg.coords[0][0])
+            ? seg.coords : [seg.coords];
+          coordSets.forEach(cs => {
+            if (cs && cs.length >= 2) {
+              layers.push(L.polyline(cs, {
+                color: scolor, weight: 6, opacity: 0.9,
+                dashArray: '12, 5',
+              }).addTo(map));
+            }
+          });
+          // Station pins
+          (seg.stations ||[]).forEach((st, i) => {
+            const isEnd = (i === 0 || i === seg.stations.length - 1);
+            layers.push(L.circleMarker([st.lat, st.lon], {
+              radius: isEnd ? 8 : 5,
+              color: scolor,
+              fillColor: isEnd ? scolor : 'white',
+              fillOpacity: 1, weight: 2,
+            }).addTo(map).bindPopup(st.name));
+          });
+        } else if ((seg.type === 'jeepney' || seg.type === 'bus') && seg.coords && seg.coords.length >= 2) {
+          layers.push(L.polyline(seg.coords, {
+            color: scolor, weight: 5, opacity: 0.88,
+          }).addTo(map));
+          // Board/alight markers for surface transit
+          const stList = seg.stations ||[];
+          if (stList.length >= 2) {
+            [stList[0], stList[stList.length-1]].forEach((st, i) => {
+              if (!st || !st.lat) return;
+              layers.push(L.circleMarker([st.lat, st.lon], {
+                radius: 6, color: scolor, fillColor: i === 0 ? scolor : 'white',
+                fillOpacity: 1, weight: 2,
+              }).addTo(map).bindPopup((i===0?'Board: ':'Alight: ') + (st.name||'')));
+            });
+          }
+        } else if (seg.type === 'walk' && seg.coords && seg.coords.length >= 2) {
+          layers.push(L.polyline(seg.coords, {
+            color: '#555', weight: 4, opacity: 0.8,
+            dashArray: '10, 10',
+          }).addTo(map));
+        }
+
+        // ── ADD TRANSFER MARKERS ──
+        if (idx > 0 && seg.coords && seg.coords.length > 0) {
+            let startPt = seg.coords[0];
+            if (seg.type === 'train' && Array.isArray(startPt) && Array.isArray(startPt[0])) {
+                startPt = startPt[0];
+            }
+            layers.push(L.marker(startPt, {
+                icon: transferIcon(seg.type),
+                zIndexOffset: 1000
+            }).addTo(map).bindTooltip(seg.label || "Transfer"));
+        }
+      });
+    } else if (route.coords && route.coords.length >= 2) {
+      // Road/car/motorcycle route — use standard scoring visualization mapping path threat metrics
+      layers.push(L.polyline(route.coords, {
+        color: fallbackColor, weight: route.id === 0 ? 7 : 5, opacity: 0.85,
+      }).addTo(map));
+    }
+
+    routeLayers.push({routeId: route.id, layers});
+  });
+
+  // Fit map to all routes
+  const allCoords = routes.flatMap(r => r.coords ||[]);
+  if (allCoords.length) {
+    map.fitBounds(L.latLngBounds(allCoords), {padding: [40, 40]});
+  }
+
+  // Draw fire/incident overlays for all active reports on the routes
+  drawIncidentOverlays(routes);
+}
+
+
+// ── Route highlight on hover ──────────────────────────────────────────────────
+//  The hovered card's route layers are brought to the FRONT and fully opaque.
+//  All other routes are dimmed to 0.18 opacity (still visible, not hidden).
+
+function highlightRoute(routeId) {
+  routeLayers.forEach(group => {
+    const isActive = group.routeId === routeId || routeId === null;
+    group.layers.forEach(layer => {
+      if (layer.setStyle) {
+        layer.setStyle({opacity: isActive ? 0.9 : 0.18,
+                        fillOpacity: isActive ? 1 : 0.18});
+      }
+      if (isActive && layer.bringToFront) layer.bringToFront();
+    });
+  });
+
+  // Highlight the card
+  document.querySelectorAll('.route-card').forEach(c => {
+    c.classList.toggle('highlighted', c.dataset.id == routeId);
+  });
+}
+
+function fitRoute(routeId) {
+  const group = routeLayers.find(g => g.routeId === routeId);
+  if (!group) return;
+  const bounds = [];
+  group.layers.forEach(l => {
+    if (l.getLatLngs) {
+      const flat = l.getLatLngs();
+      (Array.isArray(flat[0]) ? flat.flat() : flat).forEach(p => {
+        if (p.lat) bounds.push([p.lat, p.lng]);
+      });
+    } else if (l.getLatLng) {
+      const p = l.getLatLng();
+      bounds.push([p.lat, p.lng]);
+    }
+  });
+  if (bounds.length) map.fitBounds(L.latLngBounds(bounds), {padding: [50, 50]});
+}
+
+function escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+// ══════════════════════════════════════════════════════════════════════════════
+//  REAL-TIME INCIDENT OVERLAYS (fire, road_closed, flooding, accident)
+//  These are drawn on top of routes and warn users to avoid the area.
+// ══════════════════════════════════════════════════════════════════════════════
+
+let incidentLayers = [];
+
+function clearIncidentOverlays() {
+    incidentLayers.forEach(l => { try { map.removeLayer(l); } catch(e) {} });
+    incidentLayers = [];
+}
+
+// Incident type config — covers both community reports and real-time sources
+const INCIDENT_CFG = {
+    fire:        { color: '#c0392b', icon: '🔥', radius: 500,  label: 'Active Fire' },
+    flood:       { color: '#1a5276', icon: '🌊', radius: 600,  label: 'Flooding' },
+    flooding:    { color: '#1a5276', icon: '🌊', radius: 600,  label: 'Flooding' },
+    earthquake:  { color: '#784212', icon: '🌍', radius: 4000, label: 'Earthquake' },
+    landslide:   { color: '#6e2f1a', icon: '⛰️', radius: 400,  label: 'Landslide' },
+    hazmat:      { color: '#7d3c98', icon: '☣️', radius: 450,  label: 'Hazmat' },
+    road_closed: { color: '#e67e22', icon: '🚧', radius: 180,  label: 'Road Closed' },
+    accident:    { color: '#e74c3c', icon: '💥', radius: 220,  label: 'Accident' },
+    other:       { color: '#7f8c8d', icon: '⚠️', radius: 300,  label: 'Incident' },
+};
+
+const SOURCE_BADGES = {
+    'GDACS':           { label: 'GDACS',          bg: '#1a5276', url: 'https://www.gdacs.org/' },
+    'NDRRMC':          { label: 'NDRRMC',          bg: '#922b21', url: 'https://www.ndrrmc.gov.ph/' },
+    'ReliefWeb / UN OCHA': { label: 'UN OCHA',    bg: '#1e8bc3', url: 'https://reliefweb.int/' },
+    'Community':       { label: 'Community Report',bg: '#d35400', url: '' },
+};
+
+function _sourceBadgeHtml(source) {
+    const s = SOURCE_BADGES[source] || { label: source || 'Report', bg: '#7f8c8d', url: '' };
+    const link = s.url ? `href="${s.url}" target="_blank"` : '';
+    return `<a ${link} style="display:inline-block;background:${s.bg};color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;text-decoration:none;font-weight:bold;">${s.label}</a>`;
+}
+
+async function drawIncidentOverlays(routes) {
+    clearIncidentOverlays();
+
+    // ── 1. Real-time incidents from GDACS / NDRRMC / ReliefWeb ────────────
+    try {
+        const incResp = await fetch('/api/incidents');
+        const realInc = await incResp.json();
+        if (Array.isArray(realInc)) {
+            realInc.forEach(inc => _drawOneIncident(inc, true));
+        }
+    } catch(e) { console.warn('Real-time incident fetch failed:', e); }
+
+    // ── 2. Community reports (fire, flooding, road_closed, accident) ───────
+    try {
+        const repResp = await fetch('/api/reports');
+        const reports = await repResp.json();
+        if (Array.isArray(reports)) {
+            reports.forEach(r => {
+                if (!INCIDENT_CFG[r.type]) return;
+                _drawOneIncident({
+                    id:          'community_' + (r.id || r.lat),
+                    type:        r.type,
+                    title:       INCIDENT_CFG[r.type].label,
+                    description: r.description || '',
+                    lat:         r.lat,
+                    lon:         r.lon,
+                    radius_m:    INCIDENT_CFG[r.type].radius,
+                    severity:    'moderate',
+                    color:       INCIDENT_CFG[r.type].color,
+                    source:      'Community',
+                    source_url:  '',
+                    reported_at: r.reported_at || '',
+                }, false);
+            });
+        }
+    } catch(e) { console.warn('Community report overlay failed:', e); }
+
+    // ── 3. Inline incidents attached to routes by the backend ─────────────
+    if (routes) {
+        routes.forEach(route => {
+            if (route.avoid_recommended && route.fire_warning) {
+                // Already rendered on the route card — no extra map pin needed
+            }
+        });
+    }
+}
+
+function _drawOneIncident(inc, isRealtime) {
+    if (!inc.lat || !inc.lon) return;
+    const cfg     = INCIDENT_CFG[inc.type] || INCIDENT_CFG.other;
+    const color   = inc.color || cfg.color;
+    const radius  = inc.radius_m || cfg.radius;
+    const icon    = cfg.icon;
+
+    const circle = L.circle([inc.lat, inc.lon], {
+        radius,
+        color,
+        weight:      isRealtime ? 2.5 : 2,
+        fillColor:   color,
+        fillOpacity: isRealtime ? 0.18 : 0.14,
+        dashArray:   isRealtime ? null : '6 4',
+        interactive: false,
+        pane:        'hazardCircles',
+    }).addTo(map);
+
+    const severityColors = { low:'#f39c12', moderate:'#e67e22', high:'#e74c3c', critical:'#6c1a1a' };
+    const sevColor = severityColors[inc.severity] || color;
+
+    const popupHtml = `
+        <div style="font-family:Arial,sans-serif;min-width:200px;max-width:260px;">
+            <div style="font-weight:bold;color:${color};font-size:14px;margin-bottom:4px;">
+                ${icon} ${escHtml(inc.title || cfg.label)}
+            </div>
+            ${inc.severity ? `<div style="display:inline-block;background:${sevColor};color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;margin-bottom:6px;font-weight:bold;">${inc.severity.toUpperCase()}</div>` : ''}
+            ${inc.description ? `<div style="font-size:12px;color:#444;margin-bottom:6px;">${escHtml(inc.description)}</div>` : ''}
+            <div style="margin-bottom:6px;">${_sourceBadgeHtml(inc.source)}</div>
+            ${inc.reported_at ? `<div style="font-size:10px;color:#aaa;">Reported: ${escHtml(inc.reported_at)}</div>` : ''}
+            <div style="margin-top:8px;background:#fdf2f2;padding:6px 8px;border-radius:4px;font-size:11px;color:#7b241c;font-weight:bold;border-left:3px solid ${color};">
+                ⚠️ Routes through this area may be affected. Check alternate options.
+            </div>
+        </div>`;
+
+    circle.bindPopup(popupHtml, { maxWidth: 270 });
+    circle.bindTooltip(`<span style="font-size:11px;font-weight:bold;">${icon} ${escHtml(inc.title || cfg.label)}</span>`,
+        { permanent: false, direction: 'top' });
+
+    incidentLayers.push(circle);
+}
+
+// ── Route safety legend ───────────────────────────────────────────────────────
+(function addSafetyLegend() {
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function() {
+        const div = L.DomUtil.create('div', '');
+        div.style.cssText = 'background:white;padding:8px 12px;border-radius:6px;'
+            + 'box-shadow:0 1px 5px rgba(0,0,0,0.3);font-size:11px;font-family:Arial,sans-serif;'
+            + 'line-height:1.8;min-width:140px;';
+        div.innerHTML = '<div style="font-weight:bold;margin-bottom:4px;color:#333;">🛡️ Route Safety</div>'
+            + '<span style="color:#27ae60;">●</span> Safe (80–100)<br>'
+            + '<span style="color:#f39c12;">●</span> Caution (65–79)<br>'
+            + '<span style="color:#e67e22;">●</span> Moderate Risk (50–64)<br>'
+            + '<span style="color:#e74c3c;">●</span> High Risk (&lt;50)';
+        return div;
+    };
+    legend.addTo(map);
+})();
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SAFETY RISK OVERLAY — colored circles for each active community report
+// ══════════════════════════════════════════════════════════════════════════════
+
+let safetyOverlayLayers = [];   // community reports — zoom-toggled
+let routeCrimeLayers    = [];   // flat list kept for legacy clearCrimeOverlay()
+let routeZoneObjects   = [];   // structured: [{circle, pulse, label, type}] for zoom control
+let _routePathPts       = [];   // flattened [lat,lon] points of active route for proximity checks
+
+// ── Zoom thresholds for zone LOD (level of detail) ────────────────────────
+//   zoom < ZOOM_FAR   → pulse dot only (no circle, no label)
+//   ZOOM_FAR ≤ zoom < ZOOM_NEAR → circle + pulse (no label)
+//   zoom ≥ ZOOM_NEAR  → full: circle + pulse + label
+const ZOOM_FAR  = 13;   // city overview
+const ZOOM_NEAR = 15;   // street level
+let hasActiveRoute      = false; // true after a route search
+
+/**
+ * Fetch all active reports from the server and draw danger zones on the map.
+ * Each report type gets:
+ *   - A filled circle (radius based on report type severity)
+ *   - A pulsing border for high-severity types
+ *   - A popup with report details + confirm button
+ */
+async function loadSafetyOverlay() {
+    try {
+        const resp = await fetch('/api/safety?lat=14.5995&lon=120.9842');
+        const data = await resp.json();
+        drawSafetyOverlay(data.reports || []);
+    } catch(e) {
+        console.warn('Safety overlay load failed:', e);
+    }
+}
+
+const OVERLAY_MIN_ZOOM = 14;  // reports only visible when zoomed in enough
+
+function drawSafetyOverlay(reports) {
+    // Clear old overlay
+    safetyOverlayLayers.forEach(l => map.removeLayer(l));
+    safetyOverlayLayers = [];
+
+    // Don't draw anything if zoomed too far out
+    if (map.getZoom() < OVERLAY_MIN_ZOOM) return;
+
+    // Severity radius map (meters)
+    const RADIUS = {
+        flooding:      350,
+        crime:         300,
+        harassment:    250,
+        accident:      200,
+        dark_area:     280,
+        road_damage:   150,
+        heavy_traffic: 200,
+        road_closed:   150,
+        construction:  180,
+        safe_spot:     200,
+        police_visible:200,
+    };
+    const FILL_OPACITY = {
+        flooding:      0.08,   // reduced — prevents stacking opacity blobs
+        crime:         0.09,
+        harassment:    0.08,
+        accident:      0.07,
+        dark_area:     0.06,
+        road_damage:   0.05,
+        heavy_traffic: 0.05,
+        road_closed:   0.07,
+        construction:  0.05,
+        safe_spot:     0.06,
+        police_visible:0.06,
+    };
+
+    reports.forEach(r => {
+        const radius     = RADIUS[r.type]  || 200;
+        const fillOp     = FILL_OPACITY[r.type] || 0.07;
+        const isPositive = (r.type === 'safe_spot' || r.type === 'police_visible');
+        const isHigh     = (r.type === 'flooding' || r.type === 'crime' || r.type === 'harassment');
+
+        // Thin-border circle — outline only to mark zones without obscuring the map
+        const circle = L.circle([r.lat, r.lon], {
+            radius:       radius,
+            color:        r.color,
+            weight:       isHigh ? 1.5 : 1,
+            fillColor:    r.color,
+            fillOpacity:  fillOp,
+            dashArray:    isPositive ? null : (isHigh ? null : '6 4'),
+            interactive:  false,
+            pane:         'hazardCircles',
+        });
+        if (map.getZoom() >= ZOOM_NEAR) circle.addTo(map);
+
+        // Popup with confirm/upvote button
+        const verifiedBadge = r.verified
+            ? `<span style="background:#27ae60;color:white;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:bold;">VERIFIED (${r.confirmations})</span>`
+            : `<span style="color:#888;font-size:11px;">${r.confirmations} report(s) — click Verify to confirm</span>`;
+        const popupHtml = `
+            <div style="min-width:190px;font-family:Arial,sans-serif;">
+              <div style="font-weight:700;font-size:13px;margin-bottom:4px;
+                          padding:4px 8px;background:${r.color}22;border-radius:4px;
+                          border-left:3px solid ${r.color};">
+                ${escHtml(r.label)}
+              </div>
+              ${r.description ? `<div style="font-size:12px;color:#555;margin-bottom:4px;">${escHtml(r.description)}</div>` : ''}
+              <div style="font-size:11px;color:#888;margin-bottom:6px;">${escHtml(r.reported_at)}</div>
+              <div style="margin-bottom:8px;">${verifiedBadge}</div>
+              <button onclick="confirmReport(${r.id})" style="
+                  background:${r.color};color:white;border:none;padding:6px 12px;
+                  border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;
+                  width:100%;">
+                Verify Report
+              </button>
+              <div id="conf-msg-${r.id}" style="font-size:11px;margin-top:5px;"></div>
+            </div>`;
+        circle.bindPopup(popupHtml, {maxWidth: 230});
+
+        // Pulsing dot + typed pill label
+        const _EMOJI_MAP = {
+            flooding:'🌊', flood:'🌊', crime:'🚨', harassment:'😨',
+            accident:'💥', fire:'🔥', dark_area:'🌑', road_damage:'🚧',
+            heavy_traffic:'🚦', road_closed:'⛔', construction:'🏗️',
+            safe_spot:'✅', police_visible:'👮',
+        };
+        const _em = _EMOJI_MAP[r.type] || '⚠️';
+        const pulseM = L.marker([r.lat, r.lon], {
+            icon: mkPulseIcon(r.color, isHigh ? 9 : 7, null, 1.0, false, _em),
+            interactive:true, zIndexOffset:490, pane:'hazardMarkers',
+        }).addTo(map);
+        const iconMarker = L.marker([r.lat, r.lon], {
+            icon: mkRiskIcon(_em, r.label || r.type || 'Incident', r.color, 'sm'),
+            interactive: true,
+            zIndexOffset: 500, pane:'hazardMarkers',
+        }).addTo(map);
+        pulseM.bindPopup(popupHtml, {maxWidth: 230});
+        iconMarker.bindPopup(popupHtml, {maxWidth: 230});
+
+        // Track circle separately so zoom LOD can show/hide it
+        routeZoneObjects.push({ circle, pulse: null, label: null, iconOnly: null });
+
+        safetyOverlayLayers.push(circle, pulseM, iconMarker);
+    });
+}
+
+async function confirmReport(reportId) {
+    const msgEl = document.getElementById('conf-msg-' + reportId);
+    try {
+        const resp = await fetch('/api/reports/confirm', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({report_id: reportId}),
+        });
+        const data = await resp.json();
+        if (msgEl) {
+            msgEl.textContent = data.ok ? 'Confirmed: ' + data.message : 'Error: ' + data.message;
+            msgEl.style.color = data.ok ? '#27ae60' : '#c0392b';
+        }
+        if (data.ok) setTimeout(loadSafetyOverlay, 1000);
+    } catch(e) {
+        if (msgEl) msgEl.textContent = '❌ Error confirming.';
+    }
+}
+// ── Crime/Flood/Safety zone overlay ──────────────────────────────────────────
+// Modern approach: minimal translucent zones with clean DivIcon markers
+// instead of stacking opaque circles. Each risk type gets a distinct icon
+// and a thin boundary only — no filled blobs piling up.
+
+let _overlayGeneration = 0;
+
+function clearCrimeOverlay() {
+    routeCrimeLayers.forEach(l => { try { map.removeLayer(l); } catch(e) {} });
+    routeCrimeLayers = [];
+    routeZoneObjects = [];
+}
+
+/**
+ * Apply zoom-based LOD (Level of Detail) to all route zone objects.
+ * Called on zoomend and once after drawRouteZoneOverlay completes.
+ *
+ * LOD tiers:
+ *   zoom < ZOOM_FAR  : pulse dot only — no circle, no label, no icon badge
+ *   ZOOM_FAR–ZOOM_NEAR: circle + pulse + icon badge (emoji circle, no text)
+ *   zoom >= ZOOM_NEAR : circle + pulse + full text label pill
+ */
+function applyZoneLOD() {
+    const zoom = map.getZoom();
+    const showCircle   = zoom >= ZOOM_NEAR;
+    const showLabel    = zoom >= ZOOM_NEAR;
+    const showIconOnly = showCircle && !showLabel;  // mid tier
+
+    routeZoneObjects.forEach(obj => {
+        // ── Ghost circle ─────────────────────────────────────────────────
+        if (obj.circle) {
+            if (showCircle) { if (!map.hasLayer(obj.circle))   obj.circle.addTo(map); }
+            else            { try { map.removeLayer(obj.circle); } catch(e){} }
+        }
+
+        // ── Pulse dot: always visible ─────────────────────────────────────
+        if (obj.pulse) {
+            if (!map.hasLayer(obj.pulse)) obj.pulse.addTo(map);
+        }
+
+        // ── Icon-only badge (mid zoom) ────────────────────────────────────
+        if (obj.iconOnly) {
+            if (showIconOnly) { if (!map.hasLayer(obj.iconOnly)) obj.iconOnly.addTo(map); }
+            else              { try { map.removeLayer(obj.iconOnly); } catch(e){} }
+        }
+
+        // ── Full text label (close zoom only) ────────────────────────────
+        if (obj.label) {
+            if (showLabel)  { if (!map.hasLayer(obj.label))    obj.label.addTo(map); }
+            else            { try { map.removeLayer(obj.label); } catch(e){} }
+        }
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TIME-OF-DAY RISK SYSTEM + SPECIFIC CRIME ICONS
+// High-risk zones that mention "night" in their summary get dimmer colors
+// during daytime (6AM-6PM PHT) and intensify after dark.
+// Zones also get specific emoji icons based on crime type keywords.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Is it currently nighttime in Philippine Standard Time? (UTC+8) */
+function _isNightPHT() {
+    const h = new Date(Date.now() + 8 * 3600 * 1000).getUTCHours();
+    return h >= 18 || h < 6;   // 6 PM – 6 AM PHT
+}
+
+/**
+ * Returns zone circle style based on risk level, summary content, and time.
+ * Goal: reduce the sea of red — use amber/ochre during day, warm red at night.
+ */
+function _zoneStyle(risk, summary, isNightOnly) {
+    const night = _isNightPHT();
+    const high  = risk === 'high';
+
+    if (isNightOnly && !night) {
+        // Night-specific zone shown in soft purple during daytime — still visible,
+        // not alarming. Pulses slowly to signal "check back at night."
+        return { color: '#7d3c98', fillOpacity: 0.04, weight: 1.2, alpha: 0.60, slow: true };
+    }
+    if (high) {
+        if (night) {
+            // At night, high-risk: deep rose-red — clearly dangerous but not garish
+            return { color: '#c0392b', fillOpacity: 0.09, weight: 2.0, alpha: 1.0, slow: false };
+        } else {
+            // Daytime, high-risk: warm burnt orange — less alarming, still prominent
+            return { color: '#cb4335', fillOpacity: 0.06, weight: 1.5, alpha: 0.88, slow: false };
+        }
+    } else {
+        // Moderate risk: always muted amber/ochre regardless of time
+        return { color: '#b7950b', fillOpacity: 0.045, weight: 1.2, alpha: 0.78, slow: false };
+    }
+}
+
+/**
+ * Pick a specific crime emoji based on keywords in name + summary.
+ * Falls back to ⚠️ for high and 🔶 for moderate.
+ */
+function _crimeIcon(name, summary, risk) {
+    const t = ((name || '') + ' ' + (summary || '')).toLowerCase();
+    if (/drug|shabu|narco|illegal substance/.test(t))     return '💊';
+    if (/snatch|grab|snatching/.test(t))                  return '🤏';
+    if (/pickpocket/.test(t))                             return '👜';
+    if (/holdup|hold-up|armed|robbery/.test(t))           return '🔫';
+    if (/assault|stab|bolo|violence/.test(t))             return '🔪';
+    if (/carnap|vehicle theft|car theft/.test(t))         return '🚗';
+    if (/port|terminal|dock|pier/.test(t))                return '⚓';
+    if (/market|palengke|tiangge/.test(t))                return '🛒';
+    if (/nightlife|entertainment|bar|club/.test(t))       return '🌃';
+    if (/tourist|intramuros|heritage/.test(t))            return '🏛️';
+    if (/theft|steal/.test(t))                            return '🕵️';
+    return risk === 'high' ? '⚠️' : '🔶';
+}
+
+/** Returns true if this zone is primarily dangerous at night */
+function _isNightRisk(summary) {
+    return /especially at night|at night|poorly lit|nightlife|night economy|after dark/i.test(summary || '');
+}
+
+// ── Pulsing circle marker (SVG-based, CSS-animated) ─────────────────────────
+// Creates a DivIcon with a static filled circle + animated expanding ring.
+// radius_px is the visual icon size (independent of L.circle geo-radius).
+// icon (optional) — emoji shown in the center dot for zoomed-out/mid-zoom ID.
+function mkPulseIcon(color, radius_px = 14, pulseColor = null, alpha = 1.0, slow = false, icon = null) {
+    const pc  = pulseColor || color;
+    const sz  = radius_px * 2 + 24;
+    const cx  = sz / 2;
+    const dur = slow ? '3.5s' : '2s';
+    // Center dot: if icon provided, show emoji; otherwise solid filled circle
+    const dotSize = radius_px * 2;
+    const centerDot = icon
+        ? `<div style="position:absolute;top:50%;left:50%;
+                width:${dotSize}px;height:${dotSize}px;
+                margin-top:-${dotSize/2}px;margin-left:-${dotSize/2}px;
+                border-radius:50%;background:${color};
+                border:2px solid rgba(255,255,255,0.88);
+                box-shadow:0 2px 6px rgba(0,0,0,0.35);
+                display:flex;align-items:center;justify-content:center;
+                font-size:${Math.max(8, Math.round(dotSize * 0.52))}px;line-height:1;">${icon}</div>`
+        : `<div style="position:absolute;top:50%;left:50%;
+                width:${radius_px}px;height:${radius_px}px;
+                margin-top:-${radius_px/2}px;margin-left:-${radius_px/2}px;
+                border-radius:50%;background:${color};
+                border:2px solid rgba(255,255,255,0.88);
+                box-shadow:0 2px 6px rgba(0,0,0,0.35);"></div>`;
+    return L.divIcon({
+        className: 'sr-pulse-icon',
+        html: `<div style="position:relative;width:${sz}px;height:${sz}px;opacity:${alpha};">
+            <div style="position:absolute;top:50%;left:50%;
+                width:${radius_px*2}px;height:${radius_px*2}px;
+                margin-top:-${radius_px}px;margin-left:-${radius_px}px;
+                border-radius:50%;border:2px solid ${pc};opacity:0;
+                animation:sr-pulse ${dur} ease-out infinite;"></div>
+            <div style="position:absolute;top:50%;left:50%;
+                width:${radius_px*2}px;height:${radius_px*2}px;
+                margin-top:-${radius_px}px;margin-left:-${radius_px}px;
+                border-radius:50%;border:1.5px solid ${pc};opacity:0;
+                animation:sr-pulse ${dur} ease-out 0.85s infinite;"></div>
+            ${centerDot}
+        </div>`,
+        iconSize:   [sz, sz],
+        iconAnchor: [cx, cx],
+    });
+}
+
+/** Icon-only compact badge — shown at mid-zoom (no name text) */
+function mkIconOnlyMarker(icon, color) {
+    return L.divIcon({
+        className: 'saferoute-risk-icon',
+        html: `<div style="
+            background:${color};color:#fff;
+            width:22px;height:22px;
+            border-radius:50%;
+            font-size:12px;
+            display:flex;align-items:center;justify-content:center;
+            box-shadow:0 2px 6px rgba(0,0,0,0.4);
+            border:2px solid rgba(255,255,255,0.85);
+        ">${icon}</div>`,
+        iconSize:   [22, 22],
+        iconAnchor: [11, 11],
+    });
+}
+
+/** Pill label icon — appears near the pulse dot */
+function mkRiskIcon(icon, label, color, size = 'md') {
+    const fs  = size === 'sm' ? 10 : 11;
+    const pad = size === 'sm' ? '2px 7px' : '3px 9px';
+    // Measure text roughly: ~6px per char at 10px font
+    const approxW = Math.max(70, label.length * (fs * 0.65) + 30);
+    return L.divIcon({
+        className: 'saferoute-risk-icon',
+        html: `<div style="
+            background:${color};color:#fff;
+            padding:${pad};border-radius:12px;
+            font-size:${fs}px;font-weight:700;
+            font-family:'Segoe UI',Arial,sans-serif;
+            box-shadow:0 2px 8px rgba(0,0,0,0.35);
+            white-space:nowrap;display:flex;
+            align-items:center;gap:3px;
+            border:1.5px solid rgba(255,255,255,0.45);
+            backdrop-filter:blur(2px);
+            line-height:1;
+        ">${icon} ${escHtml(label)}</div>`,
+        iconSize: [approxW, size === 'sm' ? 22 : 26],
+        iconAnchor: [approxW/2, size === 'sm' ? 11 : 13],
+    });
+}
+
+/** Flood pill — same as mkRiskIcon but with blue water styling */
+function mkFloodIcon(risk, label) {
+    // Blue shades: deep navy (high) → medium blue (moderate) → sky blue (low)
+    const cfgs = {
+        high:     { color:'#0d2b6b', bg:'rgba(13,43,107,0.95)',  icon:'🌊', border:'rgba(100,160,255,0.7)' },
+        moderate: { color:'#1565c0', bg:'rgba(21,101,192,0.95)', icon:'💧', border:'rgba(130,185,255,0.6)' },
+        low:      { color:'#1976d2', bg:'rgba(25,118,210,0.95)', icon:'💦', border:'rgba(160,210,255,0.5)' },
+    };
+    const cfg = cfgs[risk] || cfgs.low;
+    const approxW = Math.max(90, label.length * 7 + 36);
+    return L.divIcon({
+        className: 'saferoute-risk-icon',
+        html: `<div style="
+            background:${cfg.bg};color:#fff;
+            padding:3px 9px;border-radius:14px;
+            font-size:11px;font-weight:800;
+            font-family:'Segoe UI',Arial,sans-serif;
+            box-shadow:0 3px 12px rgba(13,43,107,0.5);
+            white-space:nowrap;display:flex;
+            align-items:center;gap:4px;
+            border:2px solid ${cfg.border};
+            line-height:1;
+        ">${cfg.icon} ${escHtml(label)}</div>`,
+        iconSize:   [approxW, 24],
+        iconAnchor: [approxW/2, 12],
+    });
+}
+
+function crimePopupHtml(color, icon, risk, name, summary, extraHtml = '') {
+    const riskLabel = risk === 'high' ? 'High Risk' : 'Moderate Risk';
+    return `<div style="font-family:'Segoe UI',Arial,sans-serif;min-width:180px;padding:4px 2px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+            <span style="font-size:20px;line-height:1;flex-shrink:0;">${icon}</span>
+            <div>
+                <div style="font-weight:700;color:${color};font-size:12px;line-height:1.2;">${riskLabel}</div>
+                <div style="font-size:11px;color:#666;text-transform:capitalize;margin-top:1px;">${escHtml(name||'This area')}</div>
+            </div>
+        </div>
+        <div style="font-size:11px;color:#444;line-height:1.55;margin-bottom:3px;">${escHtml(summary||'Stay alert and on well-lit streets.')}</div>
+        ${extraHtml}
+        <div style="font-size:10px;color:#bbb;margin-top:6px;border-top:1px solid #f0f0f0;padding-top:4px;">
+            📊 SafeRoute crime data
+        </div>
+    </div>`;
+}
+
+function floodPopupHtml(color, risk, label, depth, rainActive) {
+    // Blue shades for flood popups
+    const blueColors = { high:'#0d2b6b', moderate:'#1565c0', low:'#1976d2' };
+    const blueColor  = blueColors[risk] || '#1976d2';
+    const icons  = { high:'🌊', moderate:'💧', low:'💦' };
+    const icon   = icons[risk] || '🌊';
+    const riskLabel = risk.charAt(0).toUpperCase()+risk.slice(1);
+    const depthTxt  = depth ? `~${depth.toFixed(1)}m estimated depth` : 'Flood-prone during rain';
+    const rainNote  = rainActive
+        ? `<div style="margin-top:5px;padding:3px 8px;border-radius:5px;background:#e3f2fd;color:#0d47a1;font-size:10px;font-weight:700;">🌧️ Currently raining here — flooding active</div>`
+        : `<div style="margin-top:5px;padding:3px 8px;border-radius:5px;background:#f5f5f5;color:#666;font-size:10px;">☀️ Dry now — floods when it rains</div>`;
+    return `<div style="font-family:'Segoe UI',Arial,sans-serif;min-width:180px;padding:4px 2px;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <span style="font-size:20px;">${icon}</span>
+            <div>
+                <div style="font-weight:700;color:${blueColor};font-size:13px;">${riskLabel} Flood Risk</div>
+                <div style="font-size:10px;color:#888;">${depthTxt}</div>
+            </div>
+        </div>
+        <div style="font-size:12px;font-weight:600;color:#2c3e50;margin-bottom:3px;">${escHtml(label)}</div>
+        ${rainNote}
+        <div style="font-size:10px;color:#aaa;margin-top:5px;border-top:1px solid #eee;padding-top:4px;">
+            🌊 Source: Project NOAH flood hazard data
+        </div>
+    </div>`;
+}
+
+function drawRouteZoneOverlay(route) {
+    clearCrimeOverlay();
+    if (!route) return;
+
+    // Capture route polyline points for proximity filtering in appendSafetyOverlay
+    _routePathPts = [];
+    const addPts = pts => pts.forEach(pt => {
+        if (Array.isArray(pt)) _routePathPts.push([pt[0], pt[1]]);
+        else if (pt && pt.lat) _routePathPts.push([pt.lat, pt.lng || pt.lon]);
+    });
+    if (route.segments) {
+        route.segments.forEach(seg => {
+            if (!seg.coords) return;
+            const sets = (Array.isArray(seg.coords[0]) && Array.isArray(seg.coords[0][0])) ? seg.coords : [seg.coords];
+            sets.forEach(addPts);
+        });
+    } else if (route.coords) {
+        addPts(route.coords);
+    }
+
+    const drawn  = new Set();
+    let crimeCount = 0, floodCount = 0;
+
+    // ── Crime zones — circles only, never rectangles ──────────────────────
+    // coords = [lat_min, lat_max, lon_min, lon_max]
+    // We convert the bbox to a circle: center + half-diagonal as radius.
+        // ── Zone: bbox → circle, time-aware color, specific crime icon ──────────
+    function addZoneShape(risk, name, summary, coords) {
+        const key = name || String(coords);
+        if (drawn.has(key)) return;
+        drawn.add(key);
+        crimeCount++;
+
+        const nightOnly = _isNightRisk(summary);
+        const style     = _zoneStyle(risk, summary, nightOnly);
+        const icon      = _crimeIcon(name, summary, risk);
+
+        const midLat  = (coords[0] + coords[1]) / 2;
+        const midLon  = (coords[2] + coords[3]) / 2;
+        const latM    = Math.abs(coords[1] - coords[0]) * 111000;
+        const lonM    = Math.abs(coords[3] - coords[2]) * 111000 * Math.cos(midLat * Math.PI / 180);
+        const cappedR = Math.min(Math.sqrt((latM/2)**2 + (lonM/2)**2), 700);
+
+        // Create layers but DON'T add to map yet — applyZoneLOD() handles visibility
+        const circle = L.circle([midLat, midLon], {
+            radius: cappedR, color: style.color, weight: style.weight,
+            fillColor: style.color, fillOpacity: style.fillOpacity,
+            opacity: style.alpha,
+            dashArray: nightOnly ? '4 6' : (risk === 'high' ? null : '6 5'),
+            interactive: false,   // pointer-events handled by pane; explicitly off too
+            pane: 'hazardCircles',
+        });
+
+        // Pulse dot — carries the crime icon in its center for far/mid zoom
+        const pulseDot = mkPulseIcon(style.color, risk === 'high' ? 10 : 8, null, style.alpha, style.slow, icon);
+        const pulseM = L.marker([midLat, midLon], {
+            icon: pulseDot, interactive: true, zIndexOffset: 600, pane: 'hazardMarkers',
+        });
+
+        const shortName = (name || 'Crime Area').replace(/^barangay\s+/i, '').trim();
+        // Icon-only pill (no text) for mid-zoom
+        const iconOnlyM = L.marker([midLat, midLon], {
+            icon: mkIconOnlyMarker(icon, style.color),
+            interactive: true, zIndexOffset: 650, pane: 'hazardMarkers',
+        });
+        // Full label pill for close zoom
+        const labelM = L.marker([midLat, midLon], {
+            icon: mkRiskIcon(icon, shortName, style.color, 'sm'),
+            interactive: true, zIndexOffset: 700, pane: 'hazardMarkers',
+        });
+
+        const nightNote = nightOnly
+            ? (_isNightPHT()
+                ? '<div style="margin-top:5px;padding:3px 7px;border-radius:4px;background:#2c1f3d;color:#d7bfed;font-size:10px;">&#127761; Night-time risk zone — extra caution now</div>'
+                : '<div style="margin-top:5px;padding:3px 7px;border-radius:4px;background:#f4ecf7;color:#6c3483;font-size:10px;">&#127761; Risk increases significantly after 6 PM</div>')
+            : '';
+        const popup = crimePopupHtml(style.color, icon, risk, name, summary, nightNote);
+
+        circle.bindPopup(popup, { maxWidth: 260 });
+        pulseM.bindPopup(popup, { maxWidth: 260 });
+        iconOnlyM.bindPopup(popup, { maxWidth: 260 });
+        labelM.bindPopup(popup, { maxWidth: 260 });
+        circle.bindTooltip('<b>' + icon + ' ' + escHtml(shortName) + (nightOnly ? ' &#127761;' : '') + '</b>', { sticky: true });
+
+        // Register in structured array for LOD management
+        routeZoneObjects.push({ circle, pulse: pulseM, iconOnly: iconOnlyM, label: labelM, type: 'crime' });
+        // Also push to flat array so clearCrimeOverlay() can remove all
+        routeCrimeLayers.push(circle, pulseM, iconOnlyM, labelM);
+    }
+
+    function addEndpointCircle(lat, lon, risk, name, summary) {
+        const key = name || (lat.toFixed(4) + ',' + lon.toFixed(4));
+        if (drawn.has(key)) return;
+        drawn.add(key);
+        crimeCount++;
+
+        const nightOnly = _isNightRisk(summary);
+        const style     = _zoneStyle(risk, summary, nightOnly);
+        const icon      = _crimeIcon(name, summary, risk);
+
+        const circle = L.circle([lat, lon], {
+            radius: 220, color: style.color, weight: style.weight,
+            fillColor: style.color, fillOpacity: style.fillOpacity,
+            opacity: style.alpha,
+            dashArray: nightOnly ? '4 6' : (risk === 'high' ? null : '6 5'),
+            interactive: false,
+            pane: 'hazardCircles',
+        });
+
+        const pulseM = L.marker([lat, lon], {
+            icon: mkPulseIcon(style.color, risk === 'high' ? 10 : 8, null, style.alpha, style.slow, icon),
+            interactive: true, zIndexOffset: 600, pane: 'hazardMarkers',
+        });
+
+        const shortName = (name || 'Crime Area').replace(/^barangay\s+/i, '').trim();
+        const iconOnlyM = L.marker([lat, lon], {
+            icon: mkIconOnlyMarker(icon, style.color),
+            interactive: true, zIndexOffset: 650, pane: 'hazardMarkers',
+        });
+        const labelM = L.marker([lat, lon], {
+            icon: mkRiskIcon(icon, shortName, style.color, 'sm'),
+            interactive: true, zIndexOffset: 700, pane: 'hazardMarkers',
+        });
+
+        const nightNote = nightOnly
+            ? (_isNightPHT()
+                ? '<div style="margin-top:5px;padding:3px 7px;border-radius:4px;background:#2c1f3d;color:#d7bfed;font-size:10px;">&#127761; Night-time risk zone — extra caution now</div>'
+                : '<div style="margin-top:5px;padding:3px 7px;border-radius:4px;background:#f4ecf7;color:#6c3483;font-size:10px;">&#127761; Risk increases significantly after 6 PM</div>')
+            : '';
+        const popup = crimePopupHtml(style.color, icon, risk, name, summary, nightNote);
+
+        circle.bindPopup(popup, { maxWidth: 260 });
+        pulseM.bindPopup(popup, { maxWidth: 260 });
+        iconOnlyM.bindPopup(popup, { maxWidth: 260 });
+        labelM.bindPopup(popup, { maxWidth: 260 });
+
+        routeZoneObjects.push({ circle, pulse: pulseM, iconOnly: iconOnlyM, label: labelM, type: 'crime' });
+        routeCrimeLayers.push(circle, pulseM, iconOnlyM, labelM);
+    }
+
+    // ── Flood zones — only shown when actively raining at that segment ────────
+    function addFloodZone(zone) {
+        const rainActive = zone.rain_active !== false; // default true for legacy data
+
+        // Only render flood markers where it is raining at this route segment.
+        // Dry flood-prone zones are hidden — they clutter the map for no reason.
+        if (!rainActive) return;
+
+        const key = `flood_${zone.lat.toFixed(5)}_${zone.lon.toFixed(5)}`;
+        if (drawn.has(key)) return;
+        drawn.add(key);
+        floodCount++;
+
+        const risk = zone.risk || 'low';
+
+        // Blue shades: deep navy (high) → medium blue (moderate) → sky blue (low)
+        const blueColors = { high:'#0d2b6b', moderate:'#1565c0', low:'#1976d2' };
+        const color  = blueColors[risk] || '#1976d2';
+        const radius = { high:400, moderate:330, low:265 }[risk] || 300;
+        const fillOp = { high:0.18, moderate:0.13, low:0.09 }[risk] || 0.1;
+
+        const circle = L.circle([zone.lat, zone.lon], {
+            radius, color, weight: 2.5,
+            fillColor: color, fillOpacity: fillOp,
+            dashArray: '8 5',
+            interactive: false, pane: 'hazardCircles',
+        });
+
+        const markerIcon = { high:'🌊', moderate:'💧', low:'💦' }[risk] || '💧';
+        const pulseMarker = L.marker([zone.lat, zone.lon], {
+            icon: mkPulseIcon(color, 10, color, 1.0, false, markerIcon),
+            interactive: true, zIndexOffset: 600, pane: 'hazardMarkers',
+        });
+
+        const iconOnlyM = L.marker([zone.lat, zone.lon], {
+            icon: mkIconOnlyMarker(markerIcon, color),
+            interactive: true, zIndexOffset: 650, pane: 'hazardMarkers',
+        });
+
+        const riskLabel = { high:'Flooding!', moderate:'Flooding', low:'Low Flood' }[risk] || 'Flood Zone';
+
+        const labelMarker = L.marker([zone.lat, zone.lon], {
+            icon: mkFloodIcon(risk, riskLabel),
+            interactive: true, zIndexOffset: 700, pane: 'hazardMarkers',
+        });
+
+        const popup = floodPopupHtml(color, risk, zone.label || riskLabel, zone.depth_m, true);
+        circle.bindPopup(popup, { maxWidth: 240 });
+        pulseMarker.bindPopup(popup, { maxWidth: 240 });
+        iconOnlyM.bindPopup(popup, { maxWidth: 240 });
+        labelMarker.bindPopup(popup, { maxWidth: 240 });
+
+        routeZoneObjects.push({ circle, pulse: pulseMarker, iconOnly: iconOnlyM, label: labelMarker, type: 'flood' });
+        routeCrimeLayers.push(circle, pulseMarker, iconOnlyM, labelMarker);
+    }
+
+    // ── Draw all zones ─────────────────────────────────────────────────────
+
+    // 1. Crime zones along route
+    const routeZones = route.route_crime_zones || [];
+    routeZones.forEach(zone => {
+        if (!['high', 'moderate'].includes(zone.risk)) return;
+        const c = zone.coords;
+        if (!c || c.length !== 4) return;
+        const latSpanM = Math.abs(c[1]-c[0]) * 111000;
+        const lonSpanM = Math.abs(c[3]-c[2]) * 111000 * Math.cos(((c[0]+c[1])/2)*Math.PI/180);
+        if (Math.max(latSpanM, lonSpanM) > 5000) return;
+        addZoneShape(zone.risk, zone.name, zone.summary, c);
+    });
+
+    // 2. Origin endpoint crime
+    if (route.orig_crime && ['high','moderate'].includes(route.orig_crime.risk_level) && lastOrigCoords) {
+        const oc = route.orig_crime;
+        addEndpointCircle(lastOrigCoords.lat, lastOrigCoords.lon||lastOrigCoords.lng, oc.risk_level, oc.area, oc.summary);
+    }
+
+    // 3. Destination endpoint crime
+    if (route.dest_crime && ['high','moderate'].includes(route.dest_crime.risk_level) && lastDestCoords) {
+        const dc = route.dest_crime;
+        addEndpointCircle(lastDestCoords.lat, lastDestCoords.lon||lastDestCoords.lng, dc.risk_level, dc.area, dc.summary);
+    }
+
+    // 4. Flood zones along route
+    const floodZones = route.flood_zones_map || [];
+    floodZones.forEach(zone => addFloodZone(zone));
+
+    // 5. Update map status bar
+    // Apply zoom LOD immediately
+    applyZoneLOD();
+    updateMapStatus(crimeCount, floodCount);
+}
+
+function updateMapStatus(crimeCount, floodCount) {
+    const el = document.getElementById('map-status-text');
+    if (!el) return;
+    const parts = [];
+    if (crimeCount > 0) parts.push(`🚨 ${crimeCount} crime zone${crimeCount>1?'s':''}`);
+    if (floodCount > 0) parts.push(`🌊 ${floodCount} flood zone${floodCount>1?'s':''}`);
+    el.textContent = parts.length > 0
+        ? `Active risks on route: ${parts.join(' · ')} — tap markers for details`
+        : 'No major risk zones on this route';
+}
+
+// Legacy async overlay — used only on initial page load for community reports + weather/flood.
+// No longer called on route card clicks.
+async function drawAreaSafetyOverlay(origCoords, destCoords, route = null) {
+    // Always clear crime layers first
+    clearCrimeOverlay();
+    if (!hasActiveRoute) {
+        safetyOverlayLayers.forEach(l => map.removeLayer(l));
+        safetyOverlayLayers = [];
+    }
+    hasActiveRoute = true;
+
+    // Draw crime zones synchronously from route data
+    if (route) drawRouteZoneOverlay(route);
+
+    // Async: fetch community reports + weather/flood for origin only (once per search)
+    if (!origCoords) return;
+    const gen = ++_overlayGeneration;
+    try {
+        const lat = origCoords.lat;
+        const lon = origCoords.lon || origCoords.lng;
+        const resp = await fetch(`/api/safety?lat=${lat}&lon=${lon}`);
+        if (gen !== _overlayGeneration) return; // stale — a newer search started
+        const data = await resp.json();
+
+        // Community report circles
+        if (data.reports && data.reports.length) {
+            appendSafetyOverlay(data.reports);
+        }
+
+        // Flood zone at origin — only shown when raining, blue shades
+        const rainActive = data.weather && ['light_rain','rain','heavy_rain','storm'].includes(data.weather.risk_level);
+        if (data.flood && data.flood.risk_level !== 'none' && rainActive) {
+            const risk  = data.flood.risk_level;
+            // Blue shades: deep navy (high) → medium blue (moderate) → sky blue (low)
+            const blueColors = { high:'#0d2b6b', moderate:'#1565c0', low:'#1976d2' };
+            const color = blueColors[risk] || '#1976d2';
+            const radius = { low:280, moderate:380, high:520 }[risk] || 350;
+            // Dashed blue boundary
+            const floodCircle = L.circle([lat, lon], {
+                radius, color, weight:2.5, fillColor:color, fillOpacity:0.12, dashArray:'8 5',
+                interactive: false, pane: 'hazardCircles',
+            }).addTo(map);
+            // Pulsing flood marker
+            const floodLabel = { high:'High Flood Risk', moderate:'Moderate Flood', low:'Low Flood Risk' }[risk];
+            const floodIcon  = { high:'🌊', moderate:'💧', low:'💦' }[risk] || '💧';
+            const floodPulse = L.marker([lat, lon], {
+                icon: mkPulseIcon(color, 11, color, 1.0, false, floodIcon),
+                interactive:true, zIndexOffset:650, pane:'hazardMarkers',
+            }).addTo(map);
+            const floodMarker = L.marker([lat, lon], {
+                icon: mkFloodIcon(risk, floodLabel),
+                interactive:true, zIndexOffset:700, pane:'hazardMarkers',
+            }).addTo(map);
+            const popupHtml = floodPopupHtml(color, risk, data.flood.label || floodLabel, data.flood.depth_m, true);
+            floodCircle.bindPopup(popupHtml, { maxWidth:240 });
+            floodPulse.bindPopup(popupHtml, { maxWidth:240 });
+            floodMarker.bindPopup(popupHtml, { maxWidth:240 });
+            routeCrimeLayers.push(floodCircle, floodPulse, floodMarker);
+
+            // Show corner alert card
+            showAlertCard('flood_origin', 'flood',
+                floodLabel,
+                (data.flood.label || '') + ' — consider an alternate route.',
+                risk, true);
+        }
+
+        // Weather — show as corner alert card only (no circle blob on map)
+        if (data.weather && ['heavy_rain','storm','rain'].includes(data.weather.risk_level)) {
+            const w = data.weather;
+            const title = w.description || 'Rain Alert';
+            const body  = `${w.temp_c}°C · 💨 ${w.wind_kph} km/h${w.rain_mm > 0 ? ` · 🌧️ ${w.rain_mm} mm/hr` : ''}`;
+            showAlertCard('weather_origin', 'weather', title, body, w.risk_level, false);
+        }
+    } catch(e) {
+        console.warn('Safety overlay fetch failed:', e);
+    }
+}
+
+    function appendSafetyOverlay(reports) {
+      const RADIUS = { flooding:280, crime:240, harassment:200, accident:160, dark_area:220, road_damage:120, heavy_traffic:160, road_closed:120, construction:140, safe_spot:160, police_visible:160 };
+      const FILL_OPACITY = { flooding:0.08, crime:0.10, harassment:0.08, accident:0.07, dark_area:0.06, road_damage:0.05, heavy_traffic:0.05, road_closed:0.07, construction:0.05, safe_spot:0.05, police_visible:0.05 };
+      const _EMOJI2 = {
+          flooding:'🌊', flood:'🌊', crime:'🚨', harassment:'😨',
+          accident:'💥', fire:'🔥', dark_area:'🌑', road_damage:'🚧',
+          heavy_traffic:'🚦', road_closed:'⛔', construction:'🏗️',
+          safe_spot:'✅', police_visible:'👮'
+      };
+
+      // Helper: is this report point within ~500m of the active route path?
+      function nearRoute(rLat, rLon) {
+          const pts = _routePathPts;
+          if (!pts || pts.length === 0) return true; // no route active, show all
+          const DEG = 500 / 111000;
+          for (let i = 0; i < pts.length - 1; i++) {
+              const [aLat, aLon] = pts[i], [bLat, bLon] = pts[i + 1];
+              const dx = bLon - aLon, dy = bLat - aLat;
+              const lenSq = dx*dx + dy*dy;
+              let t = lenSq > 0 ? ((rLon-aLon)*dx + (rLat-aLat)*dy) / lenSq : 0;
+              t = Math.max(0, Math.min(1, t));
+              const dLat = rLat - (aLat + t*dy);
+              const dLon = (rLon - (aLon + t*dx)) * Math.cos(rLat * Math.PI/180);
+              if (Math.sqrt(dLat*dLat + dLon*dLon) <= DEG) return true;
+          }
+          return false;
+      }
+
+      reports.forEach(r => {
+        // Only show reports near the chosen route
+        if (!nearRoute(r.lat, r.lon)) return;
+
+        const radius     = RADIUS[r.type] || 160;
+        const fillOp     = FILL_OPACITY[r.type] || 0.07;
+        const isPositive = (r.type === 'safe_spot' || r.type === 'police_visible');
+        const isHigh     = (r.type === 'flooding' || r.type === 'crime' || r.type === 'harassment');
+        const _em        = _EMOJI2[r.type] || '⚠️';
+
+        const verifiedBadge = r.verified
+          ? `<span style="background:#27ae60;color:white;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:bold;">VERIFIED (${r.confirmations})</span>`
+          : `<span style="color:#888;font-size:11px;">${r.confirmations} report(s)</span>`;
+        const popupHtml = `<div style="min-width:190px;font-family:Arial,sans-serif;">
+          <div style="font-weight:700;font-size:13px;margin-bottom:4px;padding:4px 8px;background:${r.color}22;border-radius:4px;border-left:3px solid ${r.color};">${escHtml(r.label)}</div>
+          ${r.description?`<div style="font-size:12px;color:#555;margin-bottom:4px;">${escHtml(r.description)}</div>`:''}
+          <div style="font-size:11px;color:#888;margin-bottom:6px;">${escHtml(r.reported_at)}</div>
+          <div style="margin-bottom:8px;">${verifiedBadge}</div>
+          <button onclick="confirmReport(${r.id})" style="background:${r.color};color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;width:100%;">Verify Report</button>
+          <div id="conf-msg-${r.id}" style="font-size:11px;margin-top:5px;"></div>
+        </div>`;
+
+        // Three layers — visibility managed by applyZoneLOD() on zoom
+        const circle = L.circle([r.lat, r.lon], {
+          radius, color:r.color, weight:isHigh?2.5:1.5,
+          fillColor:r.color, fillOpacity:fillOp,
+          dashArray:isPositive?null:(isHigh?null:'6 4'),
+          interactive: false,
+          pane: 'hazardCircles',
+        });
+        circle.bindPopup(popupHtml, {maxWidth:230});
+
+        // Pulse + emoji in center — shown at far & mid zoom
+        const pulseM = L.marker([r.lat, r.lon], {
+          icon: mkPulseIcon(r.color, isHigh?9:7, null, 1.0, false, _em),
+          interactive:true, zIndexOffset:490, pane:'hazardMarkers',
+        });
+        pulseM.bindPopup(popupHtml, {maxWidth:230});
+
+        // Icon-only badge — mid zoom
+        const iconOnlyM = L.marker([r.lat, r.lon], {
+          icon: mkIconOnlyMarker(_em, r.color),
+          interactive:true, zIndexOffset:500, pane:'hazardMarkers',
+        });
+        iconOnlyM.bindPopup(popupHtml, {maxWidth:230});
+
+        // Full label pill — close zoom only
+        const labelM = L.marker([r.lat, r.lon], {
+          icon: mkRiskIcon(_em, r.label||r.type||'Incident', r.color, 'sm'),
+          interactive:true, zIndexOffset:510, pane:'hazardMarkers',
+        });
+        labelM.bindPopup(popupHtml, {maxWidth:230});
+
+        // Register in LOD system (same as crime/flood zones)
+        routeZoneObjects.push({ circle, pulse: pulseM, iconOnly: iconOnlyM, label: labelM, type: 'report' });
+        safetyOverlayLayers.push(circle, pulseM, iconOnlyM, labelM);
+      });
+
+      applyZoneLOD();
+    }
+
+// ── Initialize server-rendered alert cards on page load ──
+initServerAlertCards();
+
+// Load safety overlay on page start (only draws if zoom >= OVERLAY_MIN_ZOOM)
+loadSafetyOverlay();
+
+// ── Zoom handler: community reports + route zone LOD ─────────────────────
+map.on('zoomend', function () {
+    const zoom = map.getZoom();
+
+    // Community report circles (hide when zoomed far out)
+    if (zoom < OVERLAY_MIN_ZOOM) {
+        safetyOverlayLayers.forEach(l => { try { map.removeLayer(l); } catch(e){} });
+    } else {
+        safetyOverlayLayers.forEach(l => {
+            if (!map.hasLayer(l)) l.addTo(map);
+        });
+        if (!hasActiveRoute) loadSafetyOverlay();
+    }
+
+    // Route zone LOD — applies 3-tier visibility to crime/flood circles
+    applyZoneLOD();
+});
+
+// ── History prefill: set active mode tile from URL params ─────────────────
+(function() {
+  var prefillMode   = {{ (prefill_mode | default("")) | tojson }};
+  var prefillOrigin = {{ (prefill_origin | default("")) | tojson }};
+  var prefillDest   = {{ (prefill_destination | default("")) | tojson }};
+
+  // Populate input fields from prefill values and geocode to place markers
+  if (prefillOrigin) {
+    document.getElementById('origin-input').value = prefillOrigin;
+    fetch('/api/suggest?q=' + encodeURIComponent(prefillOrigin))
+      .then(function(r) { return r.json(); })
+      .then(function(results) {
+        if (results && results[0]) {
+          var lat = parseFloat(results[0].lat);
+          var lon = parseFloat(results[0].lon);
+          origCoords = { lat: lat, lon: lon };
+          if (origMarker) map.removeLayer(origMarker);
+          origMarker = L.marker([lat, lon], { icon: mkPin(ORIGIN_COLOR, 'A'), pane: 'endpointPins' })
+            .addTo(map).bindPopup('Origin');
+          map.flyTo([lat, lon], 14, { animate: true, duration: 0.8 });
+          checkEnableButton();
+        }
+      }).catch(function() {});
+  }
+  if (prefillDest) {
+    document.getElementById('dest-input').value = prefillDest;
+    fetch('/api/suggest?q=' + encodeURIComponent(prefillDest))
+      .then(function(r) { return r.json(); })
+      .then(function(results) {
+        if (results && results[0]) {
+          var lat = parseFloat(results[0].lat);
+          var lon = parseFloat(results[0].lon);
+          destCoords = { lat: lat, lon: lon };
+          if (destMarker) map.removeLayer(destMarker);
+          destMarker = L.marker([lat, lon], { icon: mkPin(DEST_COLOR, 'B'), pane: 'endpointPins' })
+            .addTo(map).bindPopup('Destination');
+          checkEnableButton();
+        }
+      }).catch(function() {});
+  }
+
+  if (!prefillMode) {
+    checkEnableButton();
+    return;
+  }
+
+  // Map mode string to tile data-mode + optional submode
+  var tileMode = prefillMode;
+  var subMode  = null;
+  var transitSubmodes = ['train', 'lrt1', 'lrt2', 'mrt3', 'jeepney', 'bus'];
+  if (transitSubmodes.indexOf(prefillMode) !== -1) {
+    tileMode = 'transit';
+    subMode  = prefillMode;
+  }
+
+  // Activate the correct main tile
+  document.querySelectorAll('.mode-tile').forEach(function(t) {
+    t.classList.remove('active');
+    if (t.dataset.mode === tileMode) t.classList.add('active');
+  });
+  activeMode = prefillMode;
+
+  // Activate sub-toggles if needed (history prefill)
+  if (subMode) {
+    if (subMode === 'train')                         { trainOn=true;  jeepneyOn=false; busOn=false; }
+    else if (subMode === 'jeepney')                  { trainOn=false; jeepneyOn=true;  busOn=false; }
+    else if (subMode === 'bus')                      { trainOn=false; jeepneyOn=false; busOn=true;  }
+    else if (subMode === 'jeepney_bus')              { trainOn=false; jeepneyOn=true;  busOn=true;  }
+    else if (subMode === 'train_jeepney')            { trainOn=true;  jeepneyOn=true;  busOn=false; }
+    else if (subMode === 'train_bus')                { trainOn=true;  jeepneyOn=false; busOn=true;  }
+    else                                             { trainOn=true;  jeepneyOn=true;  busOn=true;  }
+    updateSubToggles();
+    activeMode = resolvedTransitMode();
+    document.getElementById('transit-subtoggle').classList.add('visible');
+  }
+
+  // Enable button if both fields are filled
+  checkEnableButton();
+
+  // Auto-trigger the search if both origin and destination are set AND user has enabled auto-search
+  if (prefillOrigin && prefillDest && {{ 'true' if auto_search_history else 'false' }}) {
+    // Short delay to let map finish initialising
+    setTimeout(function() {
+      document.getElementById('find-routes-btn').disabled = false;
+      findRoutes();
+    }, 800);
+  }
+})();
+
+// ── Poll incident status on page load ────────────────────────────────────────
+(function pollIncidentStatus() {
+    const statusEl = document.getElementById('incident-status');
+    if (!statusEl) return;
+    fetch('/api/incidents')
+        .then(r => r.json())
+        .then(data => {
+            if (!Array.isArray(data) || data.length === 0) {
+                statusEl.innerHTML = '✅ Monitoring active &nbsp;·&nbsp; No major alerts';
+                statusEl.style.color = '#27ae60';
+            } else {
+                const fires = data.filter(d => d.type === 'fire').length;
+                const floods = data.filter(d => d.type === 'flood').length;
+                const parts = [];
+                if (fires)  parts.push(`🔥 ${fires} fire${fires>1?'s':''}`);
+                if (floods) parts.push(`🌊 ${floods} flood${floods>1?'s':''}`);
+                const others = data.length - fires - floods;
+                if (others > 0) parts.push(`⚠️ ${others} other`);
+                const now = new Date().toLocaleTimeString('en-PH', {hour:'2-digit',minute:'2-digit'});
+                statusEl.innerHTML = `🚨 Active: ${parts.join(' · ')} &nbsp;·&nbsp; <span style="font-weight:normal;color:#e88;">Updated ${now}</span>`;
+                statusEl.style.color = '#c0392b';
+                statusEl.style.fontWeight = 'bold';
+                // Draw them on the map immediately
+                drawIncidentOverlays(null);
+            }
+        })
+        .catch(() => {
+            statusEl.innerHTML = '⚠️ Incident feed unavailable &nbsp;·&nbsp; <span style="color:#aaa;">using local data</span>';
+        });
+})();
+</script>
+{{ report_panel | safe }}
+{{ reports_map_js | safe }}
+
+<!-- ── SOS Panel (panic button + drawer) ───────────────────────────────── -->
+{{ sos_panel | safe }}
+
+<!-- ── Epicenter markers on page load (from Jinja) ─────────────────────── -->
+{% if epicenter_js %}
+<script>
+// Run after map is ready
+window.addEventListener('load', function() {
+  setTimeout(function() {
+    try { {{ epicenter_js | safe }} } catch(e) { console.warn('epicenter_js load error', e); }
+  }, 1200);
+});
+</script>
+{% endif %}
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+//  New module integrations: MMDA, PHIVOLCS, Safe Spots, Vulnerable Profile
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Pass new fields to route search payload ───────────────────────────────
+// Monkey-patch findRoutes to inject plate digit + vulnerable profile.
+// Runs after the main script block so it can wrap the existing buildPayload.
+(function patchFindRoutes() {
+  const _origFind = window.findRoutes;
+  if (typeof _origFind !== 'function') return;
+
+  window.findRoutes = async function() {
+    // Inject extra fields into the next fetch by overriding the payload builder
+    const _origBuildPayload = window._buildRoutePayload;
+    window._buildRoutePayload = function(base) {
+      const payload = _origBuildPayload ? _origBuildPayload(base) : base;
+      const plateVal = document.getElementById('plate-digit-input')?.value.trim();
+      if (plateVal !== '' && plateVal !== undefined) {
+        payload.plate_last_digit = parseInt(plateVal);
+      }
+      const profileVal = document.getElementById('vulnerable-profile-select')?.value;
+      if (profileVal) {
+        payload.vulnerable_profile = profileVal;
+      }
+      return payload;
+    };
+    return _origFind.apply(this, arguments);
+  };
+})();
+
+// ── Handle new API response fields in renderRouteCards ────────────────────
+// Extend updateLiveBanners to also show MMDA and seismic banners
+const _origUpdateLiveBanners = window.updateLiveBanners;
+window.updateLiveBanners = function(data) {
+  if (_origUpdateLiveBanners) _origUpdateLiveBanners(data);
+
+  // MMDA number coding banner
+  ['mmda_live'].forEach(id => {
+    const el = document.getElementById('alert-card-' + id);
+    if (el) el.remove();
+  });
+  if (data.mmda_banner && data.mmda_banner.trim()) {
+    const text = data.mmda_banner.replace(/<[^>]+>/g, '').trim();
+    showAlertCard('mmda_live', 'mmda', '🚗 MMDA Alert', text, 'moderate', false);
+  }
+
+  // PHIVOLCS seismic banner
+  ['seismic_live'].forEach(id => {
+    const el = document.getElementById('alert-card-' + id);
+    if (el) el.remove();
+  });
+  if (data.seismic_banner && data.seismic_banner.trim()) {
+    const text = data.seismic_banner.replace(/<[^>]+>/g, '').trim();
+    showAlertCard('seismic_live', 'seismic', '🌍 PHIVOLCS', text, 'high', true);
+  }
+
+  // Safe spot markers are handled on-demand by toggleSafeSpots()
+  // (server no longer sends safe_spots_js in the route API response)
+
+  // Epicenter markers — re-render after every search so map stays current
+  if (data.epicenter_js) {
+    try { eval(data.epicenter_js); } catch(e) { console.warn('epicenter_js error:', e); }
+  }
+
+  // Profile badge
+  if (data.profile_badge && data.profile_badge.trim()) {
+    let badgeEl = document.getElementById('profile-badge-container');
+    if (!badgeEl) {
+      badgeEl = document.createElement('div');
+      badgeEl.id = 'profile-badge-container';
+      badgeEl.style.cssText = 'padding:4px 8px;';
+      const resultsEl = document.getElementById('route-results');
+      if (resultsEl) resultsEl.insertAdjacentElement('beforebegin', badgeEl);
+    }
+    badgeEl.innerHTML = data.profile_badge;
+  }
+};
+
+// ── Extend renderRouteCards to show new warnings ──────────────────────────
+// Hook into the warningLines build — done via the existing route card renderer.
+// We patch it so MMDA coding + seismic + profile warnings appear in cards.
+const _origRenderRouteCards = window.renderRouteCards;
+window.renderRouteCards = function(routes) {
+  if (_origRenderRouteCards) {
+    // Augment each route with new warning lines before rendering
+    routes.forEach(route => {
+      // MMDA number coding warning
+      if (route.number_coded && route.number_coding_info) {
+        const info = route.number_coding_info;
+        route.report_warnings = route.report_warnings || [];
+        route.report_warnings.unshift('🚗 ' + info.reason);
+      }
+      // MMDA road closures
+      if (route.mmda_closures && route.mmda_closures.length > 0) {
+        route.report_warnings = route.report_warnings || [];
+        route.mmda_closures.slice(0, 2).forEach(c => {
+          route.report_warnings.push('🚧 MMDA Closure: ' + c.road + ' — ' + c.reason);
+        });
+      }
+      // Seismic warning
+      if (route.seismic_warning) {
+        route.report_warnings = route.report_warnings || [];
+        route.report_warnings.push('🌍 ' + route.seismic_warning);
+      }
+      // Vulnerable profile warnings
+      if (route.profile_warnings && route.profile_warnings.length) {
+        route.report_warnings = route.report_warnings || [];
+        route.profile_warnings.forEach(w => route.report_warnings.push(w));
+      }
+    });
+    _origRenderRouteCards(routes);
+  }
+};
+
+// ── MMDA coding status on page load ──────────────────────────────────────
+(function pollMmdaStatus() {
+  const el = document.getElementById('mmda-coding-status');
+  if (!el) return;
+  fetch('/api/mmda')
+    .then(r => r.json())
+    .then(data => {
+      if (data.coding && data.coding.coded) {
+        el.innerHTML = `🚗 <b style="color:#c0392b;">Coding active</b> — Plates ending in ${data.coding.coded_digits.join('/')} coded today`;
+        el.style.color = '#c0392b';
+      } else if (data.coding) {
+        el.innerHTML = `🚗 No coding active now · ${data.closures_count || 0} closure(s) reported`;
+        el.style.color = '#27ae60';
+      } else {
+        el.innerHTML = `🚗 MMDA: ${data.closures_count || 0} road closure(s) reported`;
+      }
+    })
+    .catch(() => { el.textContent = '🚗 MMDA data unavailable'; });
+})();
+
+// ── PHIVOLCS seismic status on page load ─────────────────────────────────
+(function pollSeismicStatus() {
+  const el = document.getElementById('seismic-status');
+  if (!el) return;
+  fetch('/api/phivolcs')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.earthquakes || data.earthquakes.length === 0) {
+        el.innerHTML = '🌍 No significant seismic activity in last 12h';
+        el.style.color = '#27ae60';
+      } else {
+        const top = data.earthquakes.reduce((a, b) => a.magnitude >= b.magnitude ? a : b);
+        const tsunamiNote = top.tsunami ? ' ⚠️ TSUNAMI WARNING' : '';
+        el.innerHTML = `🌍 <b style="color:${top.severity === 'critical' ? '#6c1a1a' : '#e74c3c'};">M${top.magnitude}</b> quake — ${top.place}${tsunamiNote}`;
+        el.style.color = '#e74c3c';
+        el.style.fontWeight = 'bold';
+        if (top.severity === 'high' || top.severity === 'critical') {
+          const tsunNote = top.tsunami ? ' — ⚠️ TSUNAMI WARNING ACTIVE' : '';
+          showAlertCard('seismic_init', 'seismic', '🌍 PHIVOLCS Alert',
+            `M${top.magnitude} earthquake near ${top.place}${tsunNote}`, 'high', true);
+        }
+      }
+      // Draw epicenter markers on the map regardless of severity
+      if (data.epicenter_js) {
+        setTimeout(function() {
+          try { eval(data.epicenter_js); } catch(e) { console.warn('epicenter poll error:', e); }
+        }, 1500);
+      }
+    })
+    .catch(() => { el.textContent = '🌍 Seismic data unavailable'; });
+})();
+
+// ── Init server-side MMDA + seismic alerts from Jinja data ───────────────
+(function initNewAlertCards() {
+  try {
+    const raw  = document.getElementById('server-alerts-data');
+    if (!raw) return;
+    const data = JSON.parse(raw.textContent);
+    if (data.mmda_html && data.mmda_html.trim()) {
+      const text = data.mmda_html.replace(/<[^>]+>/g, '').trim();
+      showAlertCard('mmda_init', 'mmda', '🚗 MMDA Alert', text, 'moderate', false);
+    }
+    if (data.seismic_html && data.seismic_html.trim()) {
+      const text = data.seismic_html.replace(/<[^>]+>/g, '').trim();
+      showAlertCard('seismic_srv', 'seismic', '🌍 PHIVOLCS', text, 'high', true);
+    }
+  } catch(e) { /* ok */ }
+})();
+</script>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+//  Safe Spots — clustering + zoom-gating + priority filtering
+//  Changes from v1:
+//    • L.markerClusterGroup instead of L.layerGroup → collapses overlapping pins
+//    • Zoom-gating: markers hidden below zoom 14 (city overview), shown at street level
+//    • Priority filter: radio buttons let user choose Critical / +Fire / All
+// ══════════════════════════════════════════════════════════════════════════════
+
+var _ssActive      = false;   // checkbox state
+var _ssGroups      = {};      // routeId -> { cluster, allSpots[] }
+var _ssCurrentId   = null;    // routeId whose cluster is on map
+var _ssLoading     = false;   // true while fetching
+var _ssToken       = 0;       // incremented on each new load to cancel stale responses
+var _SS_MIN_ZOOM   = 14;      // hide safe spots below this zoom level
+var _ssZoomGated   = false;   // true when hidden due to zoom (not user toggle)
+
+// ── Type filter helper ───────────────────────────────────────────────────────
+function _ssGetEnabledTypes() {
+  var checked = document.querySelectorAll('input[name="ss-type"]:checked');
+  var types = new Set();
+  checked.forEach(function(el) { types.add(el.value); });
+  return types;
+}
+
+// Wire up type checkboxes — instant re-render on toggle, no refetch needed
+document.querySelectorAll('input[name="ss-type"]').forEach(function(cb) {
+  cb.addEventListener('change', function() {
+    if (_ssActive && _ssCurrentId !== null && _ssGroups[_ssCurrentId]) {
+      _ssRebuildCluster(_ssCurrentId);
+    }
+  });
+});
+
+// ── UI sync ───────────────────────────────────────────────────────────────────
+function _ssUpdateLabel() {
+  var cb     = document.getElementById('safe-spots-checkbox');
+  var label  = document.getElementById('safe-spots-label-text');
+  var wrap   = document.getElementById('safe-spots-pre-toggle');
+  var filter = document.getElementById('safe-spots-filter');
+  if (!cb) return;
+  if (cb.checked !== _ssActive) cb.checked = _ssActive;
+  if (filter) filter.style.display = _ssActive ? 'block' : 'none';
+  if (_ssLoading) {
+    if (wrap)  { wrap.style.background = '#ddeeff'; wrap.style.color = '#1a5276'; wrap.style.borderColor = '#2980b9'; }
+    if (label) label.textContent = '⏳ Loading safe spots…';
+  } else if (_ssActive && _ssZoomGated) {
+    if (wrap)  { wrap.style.background = '#f5f0ff'; wrap.style.color = '#7d3c98'; wrap.style.borderColor = '#9b59b6'; }
+    if (label) label.textContent = '🏥 Safe Spots (zoom in to see)';
+  } else if (_ssActive) {
+    if (wrap)  { wrap.style.background = '#2980b9'; wrap.style.color = '#fff'; wrap.style.borderColor = '#2471a3'; }
+    if (label) label.textContent = '🏥 Safe Spots: ON';
+  } else {
+    if (wrap)  { wrap.style.background = '#f0f7ff'; wrap.style.color = '#2980b9'; wrap.style.borderColor = '#2980b9'; }
+    if (label) label.textContent = '🏥 Include Safe Spots';
+  }
+}
+function updateSafeSpotsBtn() { _ssUpdateLabel(); }
+function _ssUpdateBtn()       { _ssUpdateLabel(); }
+
+// ── Zoom gating ───────────────────────────────────────────────────────────────
+// map is a const defined earlier on this page; attach zoom listener directly.
+var _ssProgrammaticZoom = false;  // suppresses zoom gate during cluster click flyTo
+
+function _ssAttachZoomGate() {
+  map.on('zoomend', function() {
+    if (!_ssActive) return;
+    if (_ssProgrammaticZoom) return;  // ignore flyTo-triggered zoomend events
+    var z = map.getZoom();
+    if (z < _SS_MIN_ZOOM && !_ssZoomGated) {
+      _ssZoomGated = true;
+      if (_ssCurrentId !== null && _ssGroups[_ssCurrentId]) {
+        try { map.removeLayer(_ssGroups[_ssCurrentId].cluster); } catch(e) {}
+      }
+      _ssUpdateLabel();
+    } else if (z >= _SS_MIN_ZOOM && _ssZoomGated) {
+      _ssZoomGated = false;
+      if (_ssCurrentId !== null && _ssGroups[_ssCurrentId]) {
+        try { _ssGroups[_ssCurrentId].cluster.addTo(map); } catch(e) {}
+      }
+      _ssUpdateLabel();
+    }
+  });
+}
+_ssAttachZoomGate();
+
+// ── Checkbox / toggle ─────────────────────────────────────────────────────────
+function onSafeSpotCheckboxChange() {
+  _ssActive = document.getElementById('safe-spots-checkbox').checked;
+  _ssZoomGated = false;
+  _ssUpdateLabel();
+  if (!_ssActive) {
+    _ssHideAll();
+  } else {
+    var r = _ssCurrentRoute();
+    if (r) showSafeSpotsForRoute(r);
+  }
+}
+
+function toggleSafeSpots() {
+  var cb = document.getElementById('safe-spots-checkbox');
+  if (cb) { cb.checked = !cb.checked; onSafeSpotCheckboxChange(); }
+}
+
+function _ssCurrentRoute() {
+  return (window.allRoutes || []).find(function(r){ return r.id === window.activeRouteId; })
+      || (window.allRoutes || [])[0] || null;
+}
+
+// ── Layer management ──────────────────────────────────────────────────────────
+function _ssHideAll() {
+  Object.values(_ssGroups).forEach(function(g) {
+    try { map.removeLayer(g.cluster); } catch(e) {}
+  });
+  _ssCurrentId = null;
+}
+
+function _ssHideCurrent() {
+  if (_ssCurrentId !== null && _ssGroups[_ssCurrentId]) {
+    try { map.removeLayer(_ssGroups[_ssCurrentId].cluster); } catch(e) {}
+  }
+  _ssCurrentId = null;
+}
+
+function clearSafeSpotMarkers() {
+  ++_ssToken;
+  _ssLoading   = false;
+  _ssZoomGated = false;
+  _ssHideAll();
+  _ssGroups = {};
+}
+
+// ── Rebuild cluster from cached spots (after type filter change) ─────────────
+function _ssRebuildCluster(rid) {
+  var entry = _ssGroups[rid];
+  if (!entry) return;
+  try { map.removeLayer(entry.cluster); } catch(e) {}
+
+  var enabledTypes = _ssGetEnabledTypes();
+  var cluster      = _makeCluster();
+  entry.allSpots.forEach(function(spot) {
+    // spot.type is the raw OSM key (e.g. "police", "convenience")
+    // also accept by amenity/shop field stored on spot
+    var t = spot.type || spot.amenity || spot.shop || '';
+    if (enabledTypes.has(t)) _renderSafeSpotMarker(spot, cluster);
+  });
+  entry.cluster = cluster;
+
+  // Re-attach click handler on every rebuild
+  cluster.on('clusterclick', _ssOnClusterClick);
+
+  if (_ssActive && !_ssZoomGated && map.getZoom() >= _SS_MIN_ZOOM) {
+    cluster.addTo(map);
+  }
+}
+
+// ── Cluster factory ───────────────────────────────────────────────────────────
+// ── Cluster click handler ────────────────────────────────────────────────────
+function _ssOnClusterClick(e) {
+  var layer       = e.layer;
+  var latlng      = layer.getLatLng();
+  var currentZoom = map.getZoom();
+  var count       = layer.getChildCount();
+
+  // For small clusters or when already zoomed in, go straight to max zoom
+  var targetZoom = (count <= 3 || currentZoom >= 15) ? 17 : Math.min(currentZoom + 3, 17);
+
+  // Suppress zoom gate so flyTo doesn't hide the cluster mid-animation
+  _ssProgrammaticZoom = true;
+
+  // If zoom-gated, add cluster back before zooming so markers are ready
+  var entry = _ssCurrentId !== null ? _ssGroups[_ssCurrentId] : null;
+  if (entry && entry.cluster && !map.hasLayer(entry.cluster)) {
+    entry.cluster.addTo(map);
+  }
+
+  map.flyTo(latlng, targetZoom, { duration: 0.4, easeLinearity: 0.5 });
+
+  // Once animation finishes: clear flag + force cluster refresh
+  map.once('moveend', function() {
+    _ssProgrammaticZoom = false;
+    var entry = _ssCurrentId !== null ? _ssGroups[_ssCurrentId] : null;
+    if (entry && entry.cluster) {
+      try { map.removeLayer(entry.cluster); entry.cluster.addTo(map); } catch(ex) {}
+    }
+  });
+}
+
+function _makeCluster() {
+  return L.markerClusterGroup({
+    maxClusterRadius: 50,          // px — tighter grouping than default 80
+    disableClusteringAtZoom: 17,   // individual markers at very close zoom
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    zoomToBoundsOnClick: false, // handled manually below for precise zoom-to-spot
+    iconCreateFunction: function(cluster) {
+      var count = cluster.getChildCount();
+      var size  = count < 5 ? 22 : count < 15 ? 26 : 30;
+      return L.divIcon({
+        html: '<div class="ss-cluster-icon" style="width:' + size + 'px;height:' + size + 'px;">'
+              + '<span>' + count + '</span></div>',
+        className: '',
+        iconSize: [size, size],
+        iconAnchor: [size/2, size/2],
+      });
+    },
+  });
+}
+
+// ── Coord extraction — handles ALL route types ────────────────────────────────
+function _extractRouteCoords(route) {
+  var pts = [];
+  function push(c) {
+    if (Array.isArray(c) && c.length === 2
+        && typeof c[0] === 'number' && typeof c[1] === 'number'
+        && isFinite(c[0]) && isFinite(c[1])) pts.push(c);
+  }
+  if (route.segments && route.segments.length) {
+    route.segments.forEach(function(seg) {
+      var sc = seg.coords;
+      if (!sc || !sc.length) return;
+      if (Array.isArray(sc[0]) && sc[0].length && Array.isArray(sc[0][0])) {
+        sc.forEach(function(sub) { sub.forEach(push); });
+      } else {
+        sc.forEach(push);
+      }
+    });
+  }
+  if (!pts.length && route.coords) route.coords.forEach(push);
+  return pts;
+}
+
+// ── Haversine distance (meters) between two [lat,lon] points ─────────────────
+function _haversineM(a, b) {
+  var R = 6371000;
+  var dLat = (b[0] - a[0]) * Math.PI / 180;
+  var dLon = (b[1] - a[1]) * Math.PI / 180;
+  var lat1 = a[0] * Math.PI / 180;
+  var lat2 = b[0] * Math.PI / 180;
+  var s = Math.sin(dLat/2) * Math.sin(dLat/2)
+        + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon/2) * Math.sin(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+// ── Geographic distance sampling ─────────────────────────────────────────────
+// Uses real haversine meters so every km of route gets equal representation.
+// Critical fix: OSRM walk segments have ~100x more points per km than train/
+// jeepney waypoints — degree-based math makes samples bunch at the walk start.
+function _sampleByDistance(coords, n) {
+  if (!coords.length) return [];
+  if (coords.length <= n) return coords.slice();
+
+  var cum = [0];
+  for (var i = 1; i < coords.length; i++) {
+    cum.push(cum[i-1] + _haversineM(coords[i-1], coords[i]));
+  }
+  var total = cum[cum.length - 1];
+  if (total === 0) return [coords[0]];
+
+  var out = [];
+  for (var k = 0; k < n; k++) {
+    var target = (k / (n - 1)) * total;
+    var lo = 0, hi = cum.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (cum[mid] < target) lo = mid + 1; else hi = mid;
+    }
+    out.push(coords[lo]);
+  }
+  return out;
+}
+
+// ── Marker renderer ───────────────────────────────────────────────────────────
+function _renderSafeSpotMarker(spot, group) {
+  var s = 'background:' + spot.color + ';color:#fff;border-radius:50%;'
+    + 'width:28px;height:28px;display:flex;align-items:center;justify-content:center;'
+    + 'font-size:15px;box-shadow:0 2px 8px rgba(0,0,0,0.45);border:2px solid rgba(255,255,255,0.85);';
+  var icon = L.divIcon({
+    className: '',
+    html: '<div style="' + s + '">' + spot.icon + '</div>',
+    iconSize: [28,28], iconAnchor: [14,14],
+  });
+  var name = spot.name || spot.label || '';
+  var addr = spot.address || '';
+  var oh   = spot.open_24h ? 'Yes' : 'Unknown';
+  L.marker([spot.lat, spot.lon], { icon: icon, pane: 'hazardMarkers', zIndexOffset: 800 })
+    .bindPopup('<b>' + name + '</b><br>' + spot.label
+      + (addr ? '<br><small>' + addr + '</small>' : '')
+      + '<br><span style="color:#27ae60;font-size:11px;">&#10003; Safe refuge</span>'
+      + '<br><span style="font-size:10px;color:#888;">Open 24h: ' + oh + '</span>')
+    .bindTooltip(spot.icon + ' ' + name)
+    .addTo(group);
+}
+
+// ── Core load function ────────────────────────────────────────────────────────
+async function showSafeSpotsForRoute(route) {
+  if (!route) return;
+
+  var rid = (route.id != null) ? route.id : 0;
+
+  // Invalidate cache if route geometry changed (e.g. same id, new search result).
+  // Key off first+last coord so a fresh route always re-fetches.
+  var allCoords = _extractRouteCoords(route);
+  var geoKey = allCoords.length > 0
+    ? (allCoords[0][0].toFixed(3) + ',' + allCoords[0][1].toFixed(3) + '|'
+     + allCoords[allCoords.length-1][0].toFixed(3) + ',' + allCoords[allCoords.length-1][1].toFixed(3)
+     + '|' + allCoords.length)
+    : 'empty';
+  if (_ssGroups[rid] && _ssGroups[rid]._geoKey && _ssGroups[rid]._geoKey !== geoKey) {
+    try { map.removeLayer(_ssGroups[rid].cluster); } catch(e) {}
+    delete _ssGroups[rid];
+  }
+
+  _ssHideCurrent();
+
+  // Cache hit — rebuild cluster with current priority filter and show
+  if (_ssGroups[rid]) {
+    _ssRebuildCluster(rid);
+    _ssCurrentId = rid;
+    _ssLoading   = false;
+    _ssUpdateLabel();
+    return;
+  }
+
+  _ssLoading = true;
+  var myToken = ++_ssToken;
+  _ssUpdateLabel();
+
+  // ── Gap-free sampling: one point every STEP_M meters along the route ────
+  // RADIUS=1200m + STEP_M=800m → adjacent circles overlap by 400m, so
+  // there are zero dead zones regardless of route length or type.
+  var RADIUS = 1200;
+  var STEP_M = 800;
+
+  var samples = [];
+  var _seenSample = new Set();
+  var _addSample = function(pt) {
+    var k = pt[0].toFixed(4) + ',' + pt[1].toFixed(4);
+    if (!_seenSample.has(k)) { _seenSample.add(k); samples.push(pt); }
+  };
+
+  _addSample(allCoords[0]);  // always include origin
+  var distAccum = 0;
+  for (var i = 1; i < allCoords.length; i++) {
+    distAccum += _haversineM(allCoords[i-1], allCoords[i]);
+    if (distAccum >= STEP_M) {
+      _addSample(allCoords[i]);
+      distAccum = 0;
+    }
+  }
+  if (allCoords.length > 1) _addSample(allCoords[allCoords.length - 1]);  // always include destination
+
+  if (!samples.length) {
+    _ssLoading = false;
+    _ssUpdateLabel();
+    return;
+  }
+
+  // Register entry immediately so route-switching cleans up correctly
+  var enabledTypes = _ssGetEnabledTypes();
+  var cluster      = _makeCluster();
+  _ssGroups[rid] = { cluster: cluster, allSpots: [], _geoKey: geoKey };
+  _ssCurrentId   = rid;
+
+  var seenIds = new Set();
+
+  // Debug: log sample count and coverage
+  console.log('[SafeSpots] Gap-free sampling:', samples.length, 'points (every', STEP_M, 'm), radius', RADIUS, 'm | route length ~' + Math.round(samples.length * STEP_M / 1000) + 'km');
+
+  // Use batch endpoint — one POST instead of 12 individual GETs.
+  // The backend processes all sample points in parallel threads.
+  try {
+    var batchResp = await fetch('/api/safe-spots/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coords: samples, radius: RADIUS })
+    });
+    var batchData = await batchResp.json();
+    if (myToken !== _ssToken) { _ssLoading = false; _ssUpdateLabel(); return; }
+    (batchData.spots || []).forEach(function(spot) {
+      if (!seenIds.has(spot.id)) {
+        seenIds.add(spot.id);
+        _ssGroups[rid].allSpots.push(spot);
+        if (enabledTypes.has(spot.type || '')) {
+          _renderSafeSpotMarker(spot, cluster);
+        }
+      }
+    });
+    console.log('[SafeSpots] Loaded', seenIds.size, 'unique spots for route', rid);
+  } catch(batchErr) {
+    // Fallback: individual requests if batch endpoint fails
+    console.warn('[SafeSpots] Batch failed, falling back to individual fetches:', batchErr);
+    await Promise.all(samples.map(function(pt) {
+      return fetch('/api/safe-spots?lat=' + pt[0].toFixed(5)
+                                + '&lon=' + pt[1].toFixed(5)
+                                + '&radius=' + RADIUS)
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (myToken !== _ssToken) return;
+          (d.spots || []).forEach(function(spot) {
+            if (!seenIds.has(spot.id)) {
+              seenIds.add(spot.id);
+              _ssGroups[rid].allSpots.push(spot);
+              if (enabledTypes.has(spot.type || '')) {
+                _renderSafeSpotMarker(spot, cluster);
+              }
+            }
+          });
+        })
+        .catch(function() {});
+    }));
+  }
+
+  if (myToken !== _ssToken) return;
+
+  // Respect zoom gate — attach cluster only if zoomed in enough
+  var zoom = map.getZoom();
+  if (zoom >= _SS_MIN_ZOOM) {
+    cluster.addTo(map);
+    _ssZoomGated = false;
+  } else {
+    _ssZoomGated = true;
+  }
+
+  cluster.on('clusterclick', _ssOnClusterClick);
+
+  _ssLoading = false;
+  _ssUpdateLabel();
+}
+</script>
+
+</body>
+</html>

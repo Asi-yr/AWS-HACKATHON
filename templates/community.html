@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Community Reports — SafeRouteAI</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "primary": "#13ecec",
+            "background-dark": "#102222",
+            "neutral-800": "#1a3333",
+            "neutral-700": "#234848",
+            "neutral-600": "#2d5d5d",
+          },
+          fontFamily: { "display": ["Lexend"] },
+        },
+      },
+    };
+  </script>
+  <style>
+    html { class: dark; }
+    body { min-height: 100dvh; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="dark bg-background-dark font-display text-slate-100 antialiased">
+
+<div class="relative flex min-h-screen w-full flex-col overflow-x-hidden">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-50 flex items-center bg-background-dark/80 backdrop-blur-md p-4 justify-between border-b border-neutral-700">
+    <a href="/" class="flex size-10 shrink-0 items-center justify-center rounded-full bg-neutral-800">
+      <span class="material-symbols-outlined text-primary">arrow_back</span>
+    </a>
+    <div class="flex flex-col items-center">
+      <h1 class="text-white text-lg font-bold leading-tight">Safety Feed</h1>
+      <p class="text-xs text-primary/70 font-medium uppercase tracking-wider">Metro Manila</p>
+    </div>
+    <a href="/settings" class="flex size-10 items-center justify-end">
+      <div class="flex items-center justify-center rounded-full bg-neutral-800 p-2">
+        <span class="material-symbols-outlined text-white">settings</span>
+      </div>
+    </a>
+  </header>
+
+  <main class="flex-1 pb-24">
+
+    <!-- Weather Widget -->
+    <section class="p-4">
+      {% set risk = weather.get('risk_level', 'clear') %}
+      {% set risk_colors = {'clear': 'from-green-900', 'cloudy': 'from-slate-800',
+         'light_rain': 'from-blue-900', 'rain': 'from-blue-950',
+         'heavy_rain': 'from-red-950', 'storm': 'from-purple-950', 'fog': 'from-slate-700'} %}
+      <div class="relative overflow-hidden rounded-xl bg-gradient-to-br {{ risk_colors.get(risk, 'from-neutral-800') }} to-background-dark p-5 border border-neutral-700 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <span class="material-symbols-outlined text-4xl text-primary">
+              {% if risk == 'storm' %}thunderstorm
+              {% elif risk in ('heavy_rain', 'rain') %}rainy
+              {% elif risk == 'light_rain' %}grain
+              {% elif risk == 'fog' %}foggy
+              {% else %}partly_cloudy_day{% endif %}
+            </span>
+            <div>
+              <p class="text-2xl font-bold text-white leading-tight">{{ weather.get('description', 'Loading…') }}</p>
+              <p class="text-sm text-slate-400">💨 {{ weather.get('wind_kph', 0)|int }} km/h wind</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <p class="text-3xl font-light text-white">{{ weather.get('temp_c', 0)|int }}°C</p>
+            <p class="text-xs text-primary font-medium">Feels {{ weather.get('feels_like_c', 0)|int }}°</p>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <a href="/" class="flex-1 flex items-center justify-center gap-2 rounded-lg bg-primary py-2 text-sm font-bold text-background-dark no-underline">
+            <span class="material-symbols-outlined text-sm">map</span>
+            Back to Map
+          </a>
+          <div class="flex items-center justify-center rounded-lg bg-neutral-700 px-4 py-2 text-sm font-medium text-white border border-neutral-600">
+            {{ weather.get('fetched_at', '') }}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick Alert Categories (from live report counts) -->
+    <section class="flex gap-3 overflow-x-auto px-4 pb-4 no-scrollbar">
+      {% set flood_count  = reports | selectattr('report_type', 'equalto', 'flooding')  | list | length %}
+      {% set crime_count  = reports | selectattr('report_type', 'equalto', 'crime')     | list | length %}
+      {% set traffic_count= reports | selectattr('report_type', 'equalto', 'heavy_traffic') | list | length %}
+      {% set accident_count = reports | selectattr('report_type', 'equalto', 'accident')| list | length %}
+      <div class="flex min-w-[120px] flex-col gap-2 rounded-xl p-4 bg-blue-500/10 border border-blue-500/20">
+        <span class="material-symbols-outlined text-blue-400">water_damage</span>
+        <p class="text-white text-sm font-medium">Flood</p>
+        <p class="text-blue-400 text-lg font-bold">{{ flood_count }} active</p>
+      </div>
+      <div class="flex min-w-[120px] flex-col gap-2 rounded-xl p-4 bg-red-500/10 border border-red-500/20">
+        <span class="material-symbols-outlined text-red-400">security</span>
+        <p class="text-white text-sm font-medium">Crime</p>
+        <p class="text-red-400 text-lg font-bold">{{ crime_count }} active</p>
+      </div>
+      <div class="flex min-w-[120px] flex-col gap-2 rounded-xl p-4 bg-yellow-500/10 border border-yellow-500/20">
+        <span class="material-symbols-outlined text-yellow-400">traffic</span>
+        <p class="text-white text-sm font-medium">Traffic</p>
+        <p class="text-yellow-400 text-lg font-bold">{{ traffic_count }} active</p>
+      </div>
+      <div class="flex min-w-[120px] flex-col gap-2 rounded-xl p-4 bg-orange-500/10 border border-orange-500/20">
+        <span class="material-symbols-outlined text-orange-400">emergency</span>
+        <p class="text-white text-sm font-medium">Accident</p>
+        <p class="text-orange-400 text-lg font-bold">{{ accident_count }} active</p>
+      </div>
+    </section>
+
+    <!-- Community Feed -->
+    <section class="px-4">
+      <div class="flex items-center justify-between py-4">
+        <h3 class="text-white text-xl font-bold tracking-tight">Community Reports</h3>
+        <span class="text-primary text-sm font-medium">{{ reports | length }} active</span>
+      </div>
+
+      {% if not reports %}
+        <div class="rounded-xl bg-neutral-800 p-8 text-center border border-neutral-700">
+          <span class="material-symbols-outlined text-4xl text-primary mb-3 block">check_circle</span>
+          <p class="text-white font-bold">All clear!</p>
+          <p class="text-slate-400 text-sm mt-1">No active hazard reports right now.</p>
+        </div>
+      {% endif %}
+
+      <div class="space-y-4">
+        {% for report in reports %}
+        {% set is_positive = report.category == 'positive' %}
+        {% set border_color = '#27ae60' if is_positive else report.color %}
+        <div class="flex flex-col gap-3 rounded-xl bg-neutral-800 p-4 shadow-sm border border-neutral-700"
+             style="border-left: 4px solid {{ report.color }};">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="size-10 rounded-full flex items-center justify-center text-xl"
+                   style="background: {{ report.color }}22;">
+                {{ report.icon }}
+              </div>
+              <div>
+                <p class="text-sm font-bold text-white">{{ report.username }}</p>
+                <p class="text-xs text-slate-400">{{ report.reported_at }}</p>
+              </div>
+            </div>
+            <span class="rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider"
+                  style="background: {{ report.color }}22; color: {{ report.color }};">
+              {{ report.label }}
+            </span>
+          </div>
+
+          {% if report.description %}
+          <p class="text-sm leading-relaxed text-slate-300">{{ report.description }}</p>
+          {% endif %}
+
+          <div class="text-xs text-slate-500">
+            📍 {{ '%.4f' | format(report.lat) }}, {{ '%.4f' | format(report.lon) }}
+            &nbsp;·&nbsp;
+            Expires: {{ report.expires_at }}
+          </div>
+
+          <div class="flex items-center justify-between pt-2 border-t border-neutral-700">
+            <div class="flex items-center gap-4">
+              <button onclick="verifyReport({{ report.id }}, this)"
+                      class="flex items-center gap-1.5 {% if report.verified %}text-primary{% else %}text-slate-400 hover:text-primary{% endif %} transition-colors">
+                <span class="material-symbols-outlined text-[20px]">keyboard_double_arrow_up</span>
+                <span class="text-xs font-bold uppercase tracking-widest"
+                      id="conf-count-{{ report.id }}">
+                  Verify ({{ report.confirmations }})
+                </span>
+              </button>
+            </div>
+            {% if report.verified %}
+            <span class="text-xs text-primary font-bold">✅ Community Verified</span>
+            {% endif %}
+          </div>
+          <div id="conf-msg-{{ report.id }}" class="text-xs hidden"></div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- Submit Report Section -->
+    <section class="px-4 pt-6 pb-4">
+      <h3 class="text-white text-xl font-bold tracking-tight mb-4">Submit a Report</h3>
+      <div class="rounded-xl bg-neutral-800 p-4 border border-neutral-700">
+        <div id="submit-loc-badge" class="rounded-lg bg-neutral-700 px-3 py-2 text-xs text-slate-300 mb-3">
+          📍 Use the map on the main screen to pick a location, or use your current location below.
+        </div>
+        <div class="grid grid-cols-2 gap-2 mb-3" id="report-type-grid">
+          {% for key, meta in REPORT_TYPES.items() %}
+          <button onclick="selectType('{{ key }}', this)"
+                  data-type="{{ key }}"
+                  class="report-type-btn flex items-center gap-2 p-3 rounded-lg border border-neutral-600 bg-neutral-700/50 text-sm text-white font-medium transition-all"
+                  style="--hcolor: {{ meta.color }}">
+            <span>{{ meta.icon }}</span>
+            <span>{{ meta.label }}</span>
+          </button>
+          {% endfor %}
+        </div>
+
+        <textarea id="comm-desc" placeholder="Describe what you saw (optional, max 200 chars)"
+                  maxlength="200"
+                  class="w-full rounded-lg bg-neutral-700 border border-neutral-600 p-3 text-sm text-white placeholder-slate-400 resize-none min-h-[60px] mb-3 focus:outline-none focus:border-primary"></textarea>
+
+        <div class="flex gap-2">
+          <button onclick="useMyLocation()"
+                  class="flex-1 flex items-center justify-center gap-2 rounded-lg bg-neutral-700 border border-neutral-600 py-2.5 text-sm font-bold text-white">
+            <span class="material-symbols-outlined text-sm text-primary">my_location</span>
+            My Location
+          </button>
+          <button id="comm-submit-btn" onclick="submitCommunityReport()" disabled
+                  class="flex-1 rounded-lg py-2.5 text-sm font-bold transition-all"
+                  style="background: #c0392b; color: white; opacity: 0.45;">
+            Submit 🚨
+          </button>
+        </div>
+        <div id="comm-msg" class="text-xs mt-2 hidden"></div>
+        <input type="hidden" id="comm-lat" value="">
+        <input type="hidden" id="comm-lon" value="">
+        <input type="hidden" id="comm-type" value="">
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Nav -->
+  <nav class="fixed bottom-0 left-0 right-0 z-50 border-t border-neutral-700 bg-background-dark/95 backdrop-blur-md px-4 pb-6 pt-2">
+    <div class="flex gap-2 justify-between max-w-md mx-auto">
+      <a href="/" class="flex flex-1 flex-col items-center justify-center gap-1 text-slate-500">
+        <span class="material-symbols-outlined">home</span>
+        <p class="text-[10px] font-medium">Home</p>
+      </a>
+      <a href="/community" class="flex flex-1 flex-col items-center justify-center gap-1 text-primary">
+        <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1">warning</span>
+        <p class="text-[10px] font-medium">Reports</p>
+      </a>
+      <a href="/history" class="flex flex-1 flex-col items-center justify-center gap-1 text-slate-500">
+        <span class="material-symbols-outlined">route</span>
+        <p class="text-[10px] font-medium">History</p>
+      </a>
+      <a href="/settings" class="flex flex-1 flex-col items-center justify-center gap-1 text-slate-500">
+        <span class="material-symbols-outlined">account_circle</span>
+        <p class="text-[10px] font-medium">Profile</p>
+      </a>
+    </div>
+  </nav>
+</div>
+
+<script>
+  let selectedType = null;
+
+  function selectType(key, btn) {
+      selectedType = key;
+      document.getElementById('comm-type').value = key;
+      document.querySelectorAll('.report-type-btn').forEach(b => {
+          b.style.borderColor = '#234848';
+          b.style.background = '';
+      });
+      btn.style.borderColor = btn.style.getPropertyValue('--hcolor') || '#13ecec';
+      btn.style.background  = 'rgba(19,236,236,0.08)';
+      updateSubmitBtn();
+  }
+
+  function updateSubmitBtn() {
+      const latOk  = document.getElementById('comm-lat').value !== '';
+      const typeOk = selectedType !== null;
+      const btn    = document.getElementById('comm-submit-btn');
+      btn.disabled    = !(latOk && typeOk);
+      btn.style.opacity = (latOk && typeOk) ? '1' : '0.45';
+  }
+
+  function useMyLocation() {
+      if (!navigator.geolocation) { alert('Geolocation not supported.'); return; }
+      navigator.geolocation.getCurrentPosition(pos => {
+          document.getElementById('comm-lat').value = pos.coords.latitude.toFixed(6);
+          document.getElementById('comm-lon').value = pos.coords.longitude.toFixed(6);
+          document.getElementById('submit-loc-badge').textContent =
+              '📍 Using your current location: ' +
+              pos.coords.latitude.toFixed(4) + ', ' + pos.coords.longitude.toFixed(4);
+          updateSubmitBtn();
+      }, () => alert('Could not get your location.'));
+  }
+
+  async function submitCommunityReport() {
+      const btn  = document.getElementById('comm-submit-btn');
+      const msg  = document.getElementById('comm-msg');
+      btn.disabled = true;
+      btn.textContent = 'Submitting…';
+
+      const body = new URLSearchParams({
+          report_type: document.getElementById('comm-type').value,
+          lat:         document.getElementById('comm-lat').value,
+          lon:         document.getElementById('comm-lon').value,
+          description: document.getElementById('comm-desc').value,
+      });
+
+      try {
+          const resp = await fetch('/report', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                  'X-Requested-With': 'XMLHttpRequest',
+              },
+              body: body.toString(),
+          });
+          const data = await resp.json();
+          msg.className = 'text-xs mt-2';
+          msg.style.color = data.ok ? '#13ecec' : '#e74c3c';
+          msg.textContent = data.ok ? '✅ ' + data.message : '❌ ' + data.message;
+          if (data.ok) {
+              setTimeout(() => location.reload(), 1500);
+          }
+      } catch(e) {
+          msg.className = 'text-xs mt-2';
+          msg.style.color = '#e74c3c';
+          msg.textContent = '❌ Network error. Try again.';
+      }
+      btn.disabled    = false;
+      btn.textContent = 'Submit 🚨';
+  }
+
+  async function verifyReport(reportId, btnEl) {
+      const msg = document.getElementById('conf-msg-' + reportId);
+      try {
+          const resp = await fetch('/api/reports/confirm', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({report_id: reportId}),
+          });
+          const data = await resp.json();
+          const countEl = document.getElementById('conf-count-' + reportId);
+          if (data.ok) {
+              if (countEl) countEl.textContent = 'Verify (' + data.confirmations + ')';
+              btnEl.classList.remove('text-slate-400');
+              btnEl.classList.add('text-primary');
+          }
+          if (msg) {
+              msg.className = 'text-xs mt-1';
+              msg.style.color = data.ok ? '#13ecec' : '#e74c3c';
+              msg.textContent = data.ok ? '✅ ' + data.message : '❌ ' + data.message;
+          }
+      } catch(e) {
+          if (msg) msg.textContent = '❌ Error.';
+      }
+  }
+</script>
+
+</body>
+</html>

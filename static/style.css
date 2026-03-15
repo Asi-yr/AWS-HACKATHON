@@ -1,0 +1,552 @@
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+
+:root {
+    --mode-color: #2980b9;
+}
+
+body { background-color: #f4f7f6; color: #333; overflow: hidden; height: 100vh; width: 100vw; }
+
+/* ── Login / Register ──────────────────────────────────────────────────────── */
+.login-body { display: flex; justify-content: center; align-items: center; height: 100vh; }
+.login-container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; width: 100%; max-width: 400px; }
+.login-container h1 { color: #2c3e50; margin-bottom: 10px; }
+.login-container input { display: block; width: 100%; margin: 20px 0; padding: 12px; border: 1px solid #ccc; border-radius: 5px; }
+.login-container p a { color: #2980b9; text-decoration: none; font-weight: bold; }
+.login-container p a:hover { text-decoration: underline; }
+
+/* ── App layout ────────────────────────────────────────────────────────────── */
+.app-container { display: flex; height: 100vh; width: 100vw; }
+
+/* ── Sidebar ───────────────────────────────────────────────────────────────── */
+.sidebar {
+    width: 350px; background: white; padding: 20px;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1); z-index: 10;
+    display: flex; flex-direction: column; overflow-y: auto;
+}
+.header { margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
+.header h2 { color: #2c3e50; font-size: 22px; }
+.user-info { font-size: 12px; color: #7f8c8d; margin-top: 4px; }
+.user-info a { color: #e74c3c; text-decoration: none; }
+
+/* ── Form controls ─────────────────────────────────────────────────────────── */
+.controls input {
+    width: 100%; padding: 10px; margin-bottom: 0;
+    border: 1px solid #ddd; border-radius: 5px;
+}
+.controls input:focus { border-color: #2980b9; outline: none; }
+.input-label { display: block; font-size: 13px; font-weight: bold; color: #34495e; margin-bottom: 5px; margin-top: 12px; }
+
+.btn-primary {
+    width: 100%; background: #2980b9; color: white;
+    padding: 12px; border: none; border-radius: 5px;
+    cursor: pointer; font-size: 15px; font-weight: bold;
+    transition: background 0.2s, transform 0.1s; margin-top: 16px;
+}
+.btn-primary:hover:not(:disabled) { background: #1a5276; transform: translateY(-1px); }
+.btn-primary:disabled { background: #bdc3c7; cursor: not-allowed; }
+
+/* ── Input with locate icon ────────────────────────────────────────────────── */
+.input-with-icon { position: relative; width: 100%; margin-bottom: 0; margin-top: 0; }
+.input-with-icon input { padding-right: 40px; }
+.locate-me-btn {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    background: transparent; border: none; font-size: 17px; cursor: pointer; transition: 0.2s;
+}
+.locate-me-btn:hover { transform: translateY(-50%) scale(1.2); }
+
+/* ── Transport mode tiles (4 only) ────────────────────────────────────────── */
+.mode-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-top: 8px;
+    margin-bottom: 0;
+}
+
+.mode-tile {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 10px 4px;
+    border: 1.5px solid #e0e0e0; border-radius: 8px;
+    background: #fafafa; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.1s;
+    gap: 4px; min-height: 68px;
+}
+.mode-tile:hover {
+    border-color: var(--mode-color);
+    background: #f0f8ff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.08);
+}
+.mode-tile.active {
+    border-color: var(--mode-color);
+    border-width: 2px;
+    background: #eaf4fd;
+    box-shadow: 0 0 0 3px rgba(41, 128, 185, 0.12);
+}
+.mode-icon  { font-size: 22px; line-height: 1; }
+.mode-name  { font-size: 11px; font-weight: 700; color: #2c3e50; text-align: center; }
+
+/* ── Flash messages ────────────────────────────────────────────────────────── */
+.flash-message {
+    background-color: #f8d7da; color: #721c24;
+    padding: 10px; margin: 8px 0; border-radius: 5px;
+    font-size: 13px; border: 1px solid #f5c6cb;
+}
+
+/* ── Map area ──────────────────────────────────────────────────────────────── */
+/* isolation:isolate creates a new stacking context for the Leaflet map,
+   containing all its internal z-index layers (tiles, markers, controls, popups).
+   This prevents Leaflet's repaints from ever covering fixed-position banners
+   that live in the root stacking context above. */
+.map-area {
+    flex-grow: 1;
+    height: 100%;
+    background-color: #e5e3df;
+    position: relative;
+    isolation: isolate;       /* ← key fix: Leaflet z-indices stay inside this box */
+    z-index: 0;               /* ← anchor this layer below sidebar and banners */
+}
+
+/* ── Map overlay controls ──────────────────────────────────────────────────── */
+.map-overlay-controls {
+    position: absolute; top: 135px; left: 10px; z-index: 1000;
+    display: flex; align-items: center; gap: 10px;
+}
+#pinpoint-btn {
+    width: 34px; height: 34px; background: white;
+    border: 2px solid rgba(0,0,0,0.2); border-radius: 4px;
+    cursor: pointer; font-size: 16px; display: flex;
+    align-items: center; justify-content: center;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.4); transition: 0.2s;
+}
+#pinpoint-btn:hover  { background: #f4f4f4; }
+#pinpoint-btn.active { background: #2980b9; color: white; border-color: #1a5276; }
+.pick-status-label {
+    background: rgba(0,0,0,0.8); color: white;
+    padding: 6px 12px; border-radius: 4px; font-size: 12px;
+    display: none; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* ── Route results section ─────────────────────────────────────────────────── */
+.route-results { margin-top: 16px; }
+
+/* ── Route card — base ─────────────────────────────────────────────────────── */
+.route-card {
+    background: #fdfdfd;
+    border: 1.5px solid #eee;
+    border-left: 5px solid #ccc;
+    padding: 13px 14px;
+    margin-bottom: 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: box-shadow 0.18s, transform 0.18s, opacity 0.15s, border-color 0.15s;
+}
+.route-card:hover,
+.route-card.highlighted {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.11);
+    transform: translateY(-2px);
+    border-color: #c8d8e8;
+}
+.route-card.selected {
+    border-left-width: 6px;
+    background: #f5faff;
+}
+
+/* ── Transit line header ───────────────────────────────────────────────────── */
+.route-line-header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 3px;
+}
+
+/* Colored circle dot — mirrors the image-1 style */
+.line-dot {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.line-dot.secondary {
+    margin-left: -6px;   /* slight overlap for combo routes */
+    border: 2px solid white;
+}
+
+.route-title {
+    font-weight: 700;
+    font-size: 15px;
+    color: #2c3e50;
+}
+.line-subtitle-badge {
+    font-size: 11px;
+    color: #7f8c8d;
+    background: #f0f3f4;
+    border-radius: 10px;
+    padding: 2px 7px;
+    font-weight: 600;
+    margin-left: 2px;
+}
+.route-subtitle {
+    font-size: 12px;
+    color: #95a5a6;
+    margin-bottom: 5px;
+    margin-left: 23px;
+}
+
+/* ── Stats, safety, stations ───────────────────────────────────────────────── */
+.route-stats {
+    font-size: 13px; color: #555;
+    display: flex; justify-content: space-between;
+    margin-bottom: 6px;
+    margin-top: 5px;
+}
+.route-safety { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+.route-stations-count { font-size: 11px; color: #7f8c8d; margin-top: 4px; }
+
+/* ── Leg breakdown rows ─────────────────────────────────────────────────────── */
+.jeepney-legs {
+    display: flex; flex-direction: column; gap: 3px;
+    margin: 7px 0 2px; padding: 7px 9px;
+    background: #f7f9fb; border-radius: 6px; font-size: 11.5px;
+}
+.leg-row { display: flex; align-items: center; gap: 6px; }
+.walk-leg { color: #7f8c8d; }
+.jeep-leg { font-weight: 600; }
+.leg-icon { font-size: 13px; flex-shrink: 0; }
+.leg-desc { line-height: 1.35; }
+
+/* ── Transit sub-toggle ─────────────────────────────────────────────────────── */
+/* ── Transit sub-toggles: 3 independent tiles ───────────────────────────────── */
+.transit-subtoggle {
+    display: none;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-top: 7px;
+    animation: fadeIn 0.15s ease;
+}
+.transit-subtoggle.visible { display: grid; }
+
+.sub-tile {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; padding: 7px 4px;
+    border: 2px solid #e0e0e0; border-radius: 8px;
+    background: #fafafa; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, opacity 0.15s;
+    user-select: none; position: relative;
+}
+.sub-ico  { font-size: 17px; line-height: 1; }
+.sub-lbl  { font-size: 10px; font-weight: 700; color: #2c3e50; }
+.sub-badge {
+    font-size: 8px; font-weight: 800; letter-spacing: 0.05em;
+    padding: 1px 4px; border-radius: 3px; margin-top: 1px;
+    transition: background 0.15s, color 0.15s;
+    background: #ddd; color: #999;
+}
+
+/* Train — green */
+.sub-train.active  { border-color: #27ae60; background: #edfaf1; box-shadow: 0 0 0 3px rgba(39,174,96,0.12); }
+.sub-train.active .sub-badge  { background: #27ae60; color: #fff; }
+.sub-train:hover   { border-color: #27ae60; background: #edfaf1; }
+
+/* Jeepney — orange */
+.sub-jeepney.active  { border-color: #e67e22; background: #fff8f2; box-shadow: 0 0 0 3px rgba(230,126,34,0.12); }
+.sub-jeepney.active .sub-badge  { background: #e67e22; color: #fff; }
+.sub-jeepney:hover   { border-color: #e67e22; background: #fff8f2; }
+
+/* Bus — teal */
+.sub-bus.active  { border-color: #16a085; background: #e8f8f5; box-shadow: 0 0 0 3px rgba(22,160,133,0.12); }
+.sub-bus.active .sub-badge  { background: #16a085; color: #fff; }
+.sub-bus:hover   { border-color: #16a085; background: #e8f8f5; }
+
+/* Inactive — dimmed */
+.sub-tile.inactive { opacity: 0.45; background: #f5f5f5; border-color: #e0e0e0; }
+
+/* Combined hint strip */
+.transit-hint {
+    display: none;
+    margin-top: 5px; padding: 4px 10px;
+    background: linear-gradient(90deg, #edfaf1 0%, #fff8f2 50%, #e8f8f5 100%);
+    border: 1px dashed #aacaaa; border-radius: 6px;
+    font-size: 10.5px; font-weight: 600; color: #555; text-align: center;
+    animation: fadeIn 0.15s ease;
+}
+.transit-hint.visible { display: block; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Safety risk overlay / warning cards ────────────────────────────────────── */
+.route-warning {
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-bottom: 3px;
+    margin-top: 2px;
+    line-height: 1.4;
+}
+.night-warning    { background: #2c3e5018; color: #2c3e50; border-left: 3px solid #2c3e50; }
+.weather-warning  { background: #2980b918; color: #1a5276; border-left: 3px solid #2980b9; }
+.flood-warning    { background: #1a527618; color: #1a5276; border-left: 3px solid #1a5276; }
+.report-warning   { background: #e74c3c18; color: #922b21; border-left: 3px solid #e74c3c; }
+
+.fare-badge {
+    font-size: 12px;
+    font-weight: 700;
+    color: #27ae60;
+    margin-left: 10px;
+    background: #eafaf1;
+    border-radius: 10px;
+    padding: 2px 8px;
+}
+
+/* ── Banners (typhoon / night / weather / crime / flood) ───────────────────── */
+/* These must always render above the Leaflet map regardless of repaint.
+   isolation:isolate on .map-area keeps Leaflet's stacking context contained,
+   so any z-index here wins cleanly. The inline z-index values from Python
+   banner generators (99997-99999) are preserved as-is. */
+.typhoon-banner,
+.night-banner,
+.weather-banner,
+.crime-banner,
+.flood-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 99999;           /* always on top — map is isolated at z-index:0 */
+    pointer-events: auto;
+    font-size: 13px;
+    font-weight: bold;
+    text-align: center;
+    padding: 8px 16px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+/* Stack multiple active banners vertically instead of overlapping */
+.night-banner   { z-index: 99998; }
+.weather-banner { z-index: 99997; }
+.crime-banner   { z-index: 99996; }
+.flood-banner   { z-index: 99995; }
+/* ── Community reports nav link ──────────────────────────────────────────────── */
+.user-info a { color: #2980b9; text-decoration: none; }
+.user-info a:hover { text-decoration: underline; }
+
+/* ── Map area labels (crime, flood) — must survive zoom repaints ─────────────── */
+/* Using a named className instead of inline styles prevents Leaflet from
+   recalculating the element on zoom and losing the label. iconSize must be
+   explicitly set (not null) so the anchor is stable. */
+.saferoute-label { pointer-events: none !important; }
+.sr-area-label {
+    color: white;
+    padding: 3px 9px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
+    font-family: Arial, sans-serif;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.35);
+    display: inline-block;
+    /* No transform — keeps label pinned at anchor through zoom animation */
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* CORNER ALERT CARDS — replaces full-width top banners                       */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Replace old fixed-position banner classes so they don't take up top space  */
+.typhoon-banner,
+.night-banner,
+.weather-banner,
+.crime-banner,
+.flood-banner,
+.dynamic-weather-banner,
+.dynamic-flood-banner {
+    /* Redirect to corner card system — hide any server-rendered inline banners */
+    display: none !important;
+}
+
+/* Modern corner notification card */
+.map-alert-card {
+    background: rgba(255,255,255,0.97);
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    opacity: 0;
+    transform: translateX(20px) scale(0.97);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    cursor: default;
+    pointer-events: auto;
+    backdrop-filter: blur(8px);
+    /* left border color set inline by JS */
+}
+
+.map-alert-card.visible {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+}
+
+.map-alert-card.dismissing {
+    opacity: 0;
+    transform: translateX(18px) scale(0.96);
+    pointer-events: none;
+}
+
+.mac-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+}
+
+.mac-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.mac-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #2c3e50;
+    line-height: 1.3;
+    margin-bottom: 2px;
+}
+
+.mac-body {
+    font-size: 11px;
+    color: #555;
+    line-height: 1.4;
+    word-break: break-word;
+    /* Truncate very long bodies */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.mac-close {
+    background: none;
+    border: none;
+    color: #aaa;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: color 0.15s;
+}
+.mac-close:hover { color: #e74c3c; }
+
+/* ── Risk icon pills on map ──────────────────────────────────────────────── */
+.saferoute-risk-icon {
+    background: transparent !important;
+    border: none !important;
+}
+
+/* ── Map status bar ─────────────────────────────────────────────────────── */
+#map-status-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background: rgba(44, 62, 80, 0.82);
+    color: rgba(255,255,255,0.92);
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 6px 14px;
+    text-align: center;
+    backdrop-filter: blur(6px);
+    pointer-events: none;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    letter-spacing: 0.01em;
+}
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* PULSING RISK MARKERS — animated rings for crime/flood zones                */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The pulse ring expands outward and fades — creates a sonar/radar effect    */
+@keyframes sr-pulse {
+    0%   { transform: scale(1);    opacity: 0.75; }
+    70%  { transform: scale(2.8);  opacity: 0; }
+    100% { transform: scale(2.8);  opacity: 0; }
+}
+
+/* Container: no Leaflet default background/border */
+.sr-pulse-icon {
+    background: transparent !important;
+    border: none !important;
+}
+
+/* Pill label icons stay crisp */
+.saferoute-risk-icon {
+    background: transparent !important;
+    border: none !important;
+}
+/* ══════════════════════════════════════════════════════════════════════════════
+   Safe Spot Cluster Icons
+   Custom cluster bubbles for L.markerClusterGroup — replaces default blue circles
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.ss-cluster-icon {
+  background: linear-gradient(135deg, #2980b9 0%, #1a5276 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+
+.ss-cluster-icon:hover {
+  transform: scale(1.12);
+}
+
+.ss-cluster-icon span {
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* Override MarkerCluster default styles so our custom icon shows cleanly */
+.leaflet-cluster-anim .leaflet-marker-icon,
+.leaflet-cluster-anim .leaflet-marker-shadow {
+  transition: transform 0.3s ease-out, opacity 0.3s ease-in;
+}
+
+/* Safe spots type filter checkboxes */
+.ss-type-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s;
+  user-select: none;
+  font-size: 11.5px;
+}
+
+.ss-type-toggle:hover {
+  background: rgba(41, 128, 185, 0.12);
+}
+
+.ss-type-toggle input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  accent-color: #2980b9;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ss-type-toggle:has(input:checked) {
+  font-weight: 600;
+  color: #1a5276;
+}

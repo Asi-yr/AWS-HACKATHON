@@ -1,0 +1,2314 @@
+{
+  "routes": [
+    {
+      "route_transit": "Divisoria - Navotas via H. Lopez",
+      "start": {
+        "lat": 14.6108,
+        "lon": 120.9738
+      },
+      "destination": {
+        "lat": 14.6667,
+        "lon": 120.95
+      }
+    },
+    {
+      "route_transit": "Monumento - Libertad via Taft Ave",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.5477,
+        "lon": 120.9945
+      }
+    },
+    {
+      "route_transit": "Malabon - Monumento via Acacia",
+      "start": {
+        "lat": 14.6694,
+        "lon": 120.9673
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Navotas - Malabon (Hulo)",
+      "start": {
+        "lat": 14.6667,
+        "lon": 120.95
+      },
+      "destination": {
+        "lat": 14.6625,
+        "lon": 120.9566
+      }
+    },
+    {
+      "route_transit": "Divisoria - San Juan via C.M. Recto",
+      "start": {
+        "lat": 14.6108,
+        "lon": 120.9738
+      },
+      "destination": {
+        "lat": 14.6023,
+        "lon": 121.0394
+      }
+    },
+    {
+      "route_transit": "Divisoria - Stop & Shop via Magsaysay Blvd",
+      "start": {
+        "lat": 14.6108,
+        "lon": 120.9738
+      },
+      "destination": {
+        "lat": 14.5976,
+        "lon": 121.0176
+      }
+    },
+    {
+      "route_transit": "EDSA/North Ave - Pag-asa",
+      "start": {
+        "lat": 14.657,
+        "lon": 121.0305
+      },
+      "destination": {
+        "lat": 14.661,
+        "lon": 121.035
+      }
+    },
+    {
+      "route_transit": "EDSA/Shaw Central - Quiapo via Sta. Mesa",
+      "start": {
+        "lat": 14.5822,
+        "lon": 121.054
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Punta - Quiapo via Sta. Mesa",
+      "start": {
+        "lat": 14.5894,
+        "lon": 121.021
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "MCU - Pasay RTDA via EDSA",
+      "start": {
+        "lat": 14.6586,
+        "lon": 120.9846
+      },
+      "destination": {
+        "lat": 14.5377,
+        "lon": 121.0014
+      }
+    },
+    {
+      "route_transit": "Gasak - Recto via Dagat-Dagatan",
+      "start": {
+        "lat": 14.6617,
+        "lon": 120.9431
+      },
+      "destination": {
+        "lat": 14.6038,
+        "lon": 120.981
+      }
+    },
+    {
+      "route_transit": "Cubao - San Juan via Aurora Blvd",
+      "start": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      },
+      "destination": {
+        "lat": 14.6023,
+        "lon": 121.0394
+      }
+    },
+    {
+      "route_transit": "Monumento - Navotas via Letre",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.6736,
+        "lon": 120.94
+      }
+    },
+    {
+      "route_transit": "Malabon - Letre - Monumento",
+      "start": {
+        "lat": 14.6625,
+        "lon": 120.9566
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Divisoria - Malanday via Rizal Ave",
+      "start": {
+        "lat": 14.605,
+        "lon": 120.974
+      },
+      "destination": {
+        "lat": 14.7167,
+        "lon": 120.9583
+      }
+    },
+    {
+      "route_transit": "Blumentritt - Novaliches via A. Bonifacio",
+      "start": {
+        "lat": 14.6225,
+        "lon": 120.9831
+      },
+      "destination": {
+        "lat": 14.7033,
+        "lon": 121.0367
+      }
+    },
+    {
+      "route_transit": "Quiapo - Pasig via Sta. Mesa",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.559,
+        "lon": 121.061
+      }
+    },
+    {
+      "route_transit": "Baclaran - Divisoria via Taft Ave",
+      "start": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Cubao - Vito Cruz via Mabini",
+      "start": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      },
+      "destination": {
+        "lat": 14.5633,
+        "lon": 120.9947
+      }
+    },
+    {
+      "route_transit": "Guadalupe - L. Guinto via JP Rizal",
+      "start": {
+        "lat": 14.567,
+        "lon": 121.045
+      },
+      "destination": {
+        "lat": 14.575,
+        "lon": 120.99
+      }
+    },
+    {
+      "route_transit": "San Juan - Crame via Santolan",
+      "start": {
+        "lat": 14.603,
+        "lon": 121.03
+      },
+      "destination": {
+        "lat": 14.61,
+        "lon": 121.05
+      }
+    },
+    {
+      "route_transit": "Stop & Shop - Boni via Kalentong",
+      "start": {
+        "lat": 14.601,
+        "lon": 121.012
+      },
+      "destination": {
+        "lat": 14.577,
+        "lon": 121.035
+      }
+    },
+    {
+      "route_transit": "Sangandaan - Divisoria via Dagat-Dagatan",
+      "start": {
+        "lat": 14.66,
+        "lon": 120.97
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Monumento - Recto via Rizal Ave",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.6038,
+        "lon": 120.981
+      }
+    },
+    {
+      "route_transit": "Navotas - Recto via H. Lopez",
+      "start": {
+        "lat": 14.6667,
+        "lon": 120.95
+      },
+      "destination": {
+        "lat": 14.6038,
+        "lon": 120.981
+      }
+    },
+    {
+      "route_transit": "Malabon - Yamane via Gov. Pascual",
+      "start": {
+        "lat": 14.6694,
+        "lon": 120.9673
+      },
+      "destination": {
+        "lat": 14.675,
+        "lon": 120.96
+      }
+    },
+    {
+      "route_transit": "Stop & Shop - Parang via Aurora Blvd",
+      "start": {
+        "lat": 14.5976,
+        "lon": 121.0176
+      },
+      "destination": {
+        "lat": 14.65,
+        "lon": 121.11
+      }
+    },
+    {
+      "route_transit": "San Juan - Divisoria via V. Mapa",
+      "start": {
+        "lat": 14.6023,
+        "lon": 121.0394
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Monumento - Mu\u00f1oz via EDSA",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.657,
+        "lon": 121.02
+      }
+    },
+    {
+      "route_transit": "Pandacan - Leon Guinto",
+      "start": {
+        "lat": 14.589,
+        "lon": 121.005
+      },
+      "destination": {
+        "lat": 14.575,
+        "lon": 120.99
+      }
+    },
+    {
+      "route_transit": "Paco - Sta. Ana via JP Rizal",
+      "start": {
+        "lat": 14.58,
+        "lon": 120.995
+      },
+      "destination": {
+        "lat": 14.585,
+        "lon": 121.015
+      }
+    },
+    {
+      "route_transit": "G. Tuazon - Quiapo",
+      "start": {
+        "lat": 14.608,
+        "lon": 121.0
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Lardizabal - Tayuman via Dela Fuente",
+      "start": {
+        "lat": 14.6042,
+        "lon": 121.0001
+      },
+      "destination": {
+        "lat": 14.6175,
+        "lon": 120.9832
+      }
+    },
+    {
+      "route_transit": "San Juan - Rosario via Ortigas Ave",
+      "start": {
+        "lat": 14.6023,
+        "lon": 121.0394
+      },
+      "destination": {
+        "lat": 14.5864,
+        "lon": 121.0831
+      }
+    },
+    {
+      "route_transit": "Malabon - Navotas via C4 Road",
+      "start": {
+        "lat": 14.6625,
+        "lon": 120.9566
+      },
+      "destination": {
+        "lat": 14.6667,
+        "lon": 120.95
+      }
+    },
+    {
+      "route_transit": "Monumento - Polo via McArthur Highway",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.7083,
+        "lon": 120.9542
+      }
+    },
+    {
+      "route_transit": "Divisoria - Gasak via H. Lopez Blvd",
+      "start": {
+        "lat": 14.6108,
+        "lon": 120.9738
+      },
+      "destination": {
+        "lat": 14.6617,
+        "lon": 120.9431
+      }
+    },
+    {
+      "route_transit": "Blumentritt - Libertad via Quiapo",
+      "start": {
+        "lat": 14.6225,
+        "lon": 120.9831
+      },
+      "destination": {
+        "lat": 14.5477,
+        "lon": 120.9945
+      }
+    },
+    {
+      "route_transit": "Cubao - San Juan via N. Domingo",
+      "start": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      },
+      "destination": {
+        "lat": 14.603,
+        "lon": 121.03
+      }
+    },
+    {
+      "route_transit": "Sta. Mesa - Pasig via Kalentong",
+      "start": {
+        "lat": 14.5976,
+        "lon": 121.0176
+      },
+      "destination": {
+        "lat": 14.559,
+        "lon": 121.061
+      }
+    },
+    {
+      "route_transit": "Project 8 - Quiapo via Roosevelt Ave",
+      "start": {
+        "lat": 14.6742,
+        "lon": 121.0203
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Balintawak - Monumento via EDSA",
+      "start": {
+        "lat": 14.6583,
+        "lon": 121.0031
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Malanday - Recto via Rizal Ave",
+      "start": {
+        "lat": 14.7167,
+        "lon": 120.9583
+      },
+      "destination": {
+        "lat": 14.6038,
+        "lon": 120.981
+      }
+    },
+    {
+      "route_transit": "Navotas - Tangos via M. Naval",
+      "start": {
+        "lat": 14.6667,
+        "lon": 120.95
+      },
+      "destination": {
+        "lat": 14.68,
+        "lon": 120.93
+      }
+    },
+    {
+      "route_transit": "San Juan - Little Baguio via F. Blumentritt",
+      "start": {
+        "lat": 14.6023,
+        "lon": 121.0394
+      },
+      "destination": {
+        "lat": 14.598,
+        "lon": 121.035
+      }
+    },
+    {
+      "route_transit": "Divisoria - Cubao via Recto Ave",
+      "start": {
+        "lat": 14.6108,
+        "lon": 120.9738
+      },
+      "destination": {
+        "lat": 14.615,
+        "lon": 121.025
+      }
+    },
+    {
+      "route_transit": "Sangandaan - Recto via A. Mabini",
+      "start": {
+        "lat": 14.66,
+        "lon": 120.97
+      },
+      "destination": {
+        "lat": 14.6038,
+        "lon": 120.981
+      }
+    },
+    {
+      "route_transit": "G. Tuazon - Sta. Mesa via Unang Yakap",
+      "start": {
+        "lat": 14.608,
+        "lon": 121.0
+      },
+      "destination": {
+        "lat": 14.5976,
+        "lon": 121.0176
+      }
+    },
+    {
+      "route_transit": "Monumento - V.V. Soliven via EDSA",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.608,
+        "lon": 121.055
+      }
+    },
+    {
+      "route_transit": "Baclaran - Blumentritt via Dimasalang",
+      "start": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      },
+      "destination": {
+        "lat": 14.6225,
+        "lon": 120.9831
+      }
+    },
+    {
+      "route_transit": "Dapitan - Baclaran via Quiapo",
+      "start": {
+        "lat": 14.6142,
+        "lon": 120.9881
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Valenzuela (Ugong) - Monumento via McArthur Highway",
+      "start": {
+        "lat": 14.695,
+        "lon": 120.988
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Polo - Monumento via McArthur Highway",
+      "start": {
+        "lat": 14.7083,
+        "lon": 120.9542
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Malinta - Monumento via McArthur Highway",
+      "start": {
+        "lat": 14.685,
+        "lon": 120.972
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Valenzuela - Sangandaan via A. Mabini",
+      "start": {
+        "lat": 14.695,
+        "lon": 120.988
+      },
+      "destination": {
+        "lat": 14.66,
+        "lon": 120.97
+      }
+    },
+    {
+      "route_transit": "Ugong - Malabon via Paso de Blas",
+      "start": {
+        "lat": 14.692,
+        "lon": 120.99
+      },
+      "destination": {
+        "lat": 14.6694,
+        "lon": 120.9673
+      }
+    },
+    {
+      "route_transit": "Gen. T. de Leon - Monumento via McArthur Highway",
+      "start": {
+        "lat": 14.68,
+        "lon": 120.978
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Valenzuela - MCU via EDSA",
+      "start": {
+        "lat": 14.695,
+        "lon": 120.988
+      },
+      "destination": {
+        "lat": 14.6586,
+        "lon": 120.9846
+      }
+    },
+    {
+      "route_transit": "Karuhatan - Sangandaan via McArthur Highway",
+      "start": {
+        "lat": 14.7,
+        "lon": 120.983
+      },
+      "destination": {
+        "lat": 14.66,
+        "lon": 120.97
+      }
+    },
+    {
+      "route_transit": "Paso de Blas - Monumento via McArthur Highway",
+      "start": {
+        "lat": 14.701,
+        "lon": 120.972
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Valenzuela - Divisoria via Rizal Ave Extension",
+      "start": {
+        "lat": 14.695,
+        "lon": 120.988
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Polo - Divisoria via McArthur Highway",
+      "start": {
+        "lat": 14.7083,
+        "lon": 120.9542
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Karuhatan - Divisoria via McArthur Highway",
+      "start": {
+        "lat": 14.7,
+        "lon": 120.983
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Valenzuela (Lingunan) - Monumento",
+      "start": {
+        "lat": 14.702,
+        "lon": 120.991
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Valenzuela - Caloocan (5th Ave) via McArthur Highway",
+      "start": {
+        "lat": 14.695,
+        "lon": 120.988
+      },
+      "destination": {
+        "lat": 14.648,
+        "lon": 120.978
+      }
+    },
+    {
+      "route_transit": "Malanday - Monumento via McArthur Highway",
+      "start": {
+        "lat": 14.7167,
+        "lon": 120.9583
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Valenzuela (Viente Reales) - Monumento",
+      "start": {
+        "lat": 14.69,
+        "lon": 120.976
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Polo - Malabon via Tinajeros",
+      "start": {
+        "lat": 14.7083,
+        "lon": 120.9542
+      },
+      "destination": {
+        "lat": 14.6694,
+        "lon": 120.9673
+      }
+    },
+    {
+      "route_transit": "Valenzuela - Navotas via C4 Road",
+      "start": {
+        "lat": 14.695,
+        "lon": 120.988
+      },
+      "destination": {
+        "lat": 14.6667,
+        "lon": 120.95
+      }
+    },
+    {
+      "route_transit": "Monumento - Deparo via A. Bonifacio",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.69,
+        "lon": 121.01
+      }
+    },
+    {
+      "route_transit": "Balintawak - Caloocan (5th Ave)",
+      "start": {
+        "lat": 14.6583,
+        "lon": 121.0031
+      },
+      "destination": {
+        "lat": 14.648,
+        "lon": 120.978
+      }
+    },
+    {
+      "route_transit": "Monumento - Bagong Silang via Commonwealth",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.72,
+        "lon": 121.04
+      }
+    },
+    {
+      "route_transit": "Sangandaan - Monumento via A. Mabini",
+      "start": {
+        "lat": 14.66,
+        "lon": 120.97
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Camarin - Monumento via A. Bonifacio",
+      "start": {
+        "lat": 14.735,
+        "lon": 121.025
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Grace Park - Divisoria via 8th Ave",
+      "start": {
+        "lat": 14.645,
+        "lon": 120.983
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Caloocan (10th Ave) - Quiapo via Rizal Ave",
+      "start": {
+        "lat": 14.638,
+        "lon": 120.982
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Monumento - Novaliches via Quirino Highway",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.7033,
+        "lon": 121.0367
+      }
+    },
+    {
+      "route_transit": "Bagong Barrio - Monumento via EDSA",
+      "start": {
+        "lat": 14.67,
+        "lon": 121.005
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Caloocan - Baclaran via Taft Ave",
+      "start": {
+        "lat": 14.648,
+        "lon": 120.978
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Monumento - Recto via A. Bonifacio",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.6038,
+        "lon": 120.981
+      }
+    },
+    {
+      "route_transit": "Sangandaan - Divisoria via Rizal Ave",
+      "start": {
+        "lat": 14.66,
+        "lon": 120.97
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Fairview - Monumento via Commonwealth Ave",
+      "start": {
+        "lat": 14.75,
+        "lon": 121.058
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Fairview - Cubao via Commonwealth Ave",
+      "start": {
+        "lat": 14.75,
+        "lon": 121.058
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Novaliches - Cubao via Commonwealth Ave",
+      "start": {
+        "lat": 14.7033,
+        "lon": 121.0367
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Bagong Silang - Cubao via Commonwealth Ave",
+      "start": {
+        "lat": 14.72,
+        "lon": 121.04
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Litex - Cubao via Commonwealth Ave",
+      "start": {
+        "lat": 14.71,
+        "lon": 121.05
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "UP Diliman - Cubao via Katipunan",
+      "start": {
+        "lat": 14.654,
+        "lon": 121.0685
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Cubao - Antipolo via Aurora Blvd",
+      "start": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      },
+      "destination": {
+        "lat": 14.586,
+        "lon": 121.176
+      }
+    },
+    {
+      "route_transit": "Cubao - Angono via Aurora Blvd",
+      "start": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      },
+      "destination": {
+        "lat": 14.525,
+        "lon": 121.153
+      }
+    },
+    {
+      "route_transit": "Philcoa - Quiapo via EDSA",
+      "start": {
+        "lat": 14.654,
+        "lon": 121.049
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Tandang Sora - Cubao via EDSA",
+      "start": {
+        "lat": 14.683,
+        "lon": 121.049
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Mu\u00f1oz - Cubao via EDSA",
+      "start": {
+        "lat": 14.657,
+        "lon": 121.02
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Project 6 - Quiapo via Quezon Ave",
+      "start": {
+        "lat": 14.66,
+        "lon": 121.01
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Batasan Hills - Cubao via Commonwealth Ave",
+      "start": {
+        "lat": 14.689,
+        "lon": 121.1
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Payatas - Cubao via Commonwealth Ave",
+      "start": {
+        "lat": 14.72,
+        "lon": 121.11
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Balintawak - Cubao via EDSA",
+      "start": {
+        "lat": 14.6583,
+        "lon": 121.0031
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Cubao - Divisoria via Espa\u00f1a Blvd",
+      "start": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Kamuning - Quiapo via Quezon Ave",
+      "start": {
+        "lat": 14.635,
+        "lon": 121.035
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Project 8 - Monumento via A. Bonifacio",
+      "start": {
+        "lat": 14.6742,
+        "lon": 121.0203
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Balintawak Market - Divisoria via Rizal Ave",
+      "start": {
+        "lat": 14.6583,
+        "lon": 121.0031
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Novaliches - Divisoria via A. Bonifacio",
+      "start": {
+        "lat": 14.7033,
+        "lon": 121.0367
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "UP Diliman - Quiapo via Espa\u00f1a Blvd",
+      "start": {
+        "lat": 14.654,
+        "lon": 121.0685
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Katipunan - Quiapo via Aurora Blvd",
+      "start": {
+        "lat": 14.635,
+        "lon": 121.078
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Congressional - Cubao via EDSA",
+      "start": {
+        "lat": 14.669,
+        "lon": 121.054
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Mindanao Ave - Monumento via EDSA",
+      "start": {
+        "lat": 14.669,
+        "lon": 121.048
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Tala - Monumento via Quirino Highway",
+      "start": {
+        "lat": 14.75,
+        "lon": 121.02
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Quiapo - Baclaran via Taft Ave",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Divisoria - Baclaran via Taft Ave",
+      "start": {
+        "lat": 14.605,
+        "lon": 120.974
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Quiapo - Cubao via Espa\u00f1a Blvd",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Quiapo - Divisoria via CM Recto",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Tondo - Divisoria via Moriones",
+      "start": {
+        "lat": 14.62,
+        "lon": 120.965
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Binondo - Quiapo via Quezon Blvd",
+      "start": {
+        "lat": 14.598,
+        "lon": 120.976
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Port Area - Quiapo via Bonifacio Drive",
+      "start": {
+        "lat": 14.581,
+        "lon": 120.975
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Intramuros - Quiapo via Quezon Blvd",
+      "start": {
+        "lat": 14.59,
+        "lon": 120.975
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Divisoria - Paco via CM Recto",
+      "start": {
+        "lat": 14.605,
+        "lon": 120.974
+      },
+      "destination": {
+        "lat": 14.58,
+        "lon": 120.995
+      }
+    },
+    {
+      "route_transit": "Tondo - Quiapo via Moriones",
+      "start": {
+        "lat": 14.62,
+        "lon": 120.965
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Quiapo - Malate via Mabini",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.57,
+        "lon": 120.989
+      }
+    },
+    {
+      "route_transit": "Quiapo - Ermita via Mabini",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.578,
+        "lon": 120.984
+      }
+    },
+    {
+      "route_transit": "Espa\u00f1a - Quiapo via Legarda",
+      "start": {
+        "lat": 14.61,
+        "lon": 120.993
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Sampaloc - Quiapo via Legarda",
+      "start": {
+        "lat": 14.615,
+        "lon": 120.995
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Divisoria - Espa\u00f1a via Rizal Ave",
+      "start": {
+        "lat": 14.605,
+        "lon": 120.974
+      },
+      "destination": {
+        "lat": 14.61,
+        "lon": 120.993
+      }
+    },
+    {
+      "route_transit": "Blumentritt - Quiapo via Rizal Ave",
+      "start": {
+        "lat": 14.6225,
+        "lon": 120.9831
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Quiapo - Vito Cruz via Taft Ave",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.5633,
+        "lon": 120.9947
+      }
+    },
+    {
+      "route_transit": "Tondo - Baclaran via Taft Ave",
+      "start": {
+        "lat": 14.62,
+        "lon": 120.965
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Divisoria - Monumento via Rizal Ave",
+      "start": {
+        "lat": 14.605,
+        "lon": 120.974
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Quiapo - Santa Ana via JP Rizal",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.585,
+        "lon": 121.015
+      }
+    },
+    {
+      "route_transit": "Makati (Buendia) - Quiapo via Taft Ave",
+      "start": {
+        "lat": 14.554,
+        "lon": 121.019
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Makati - Cubao via EDSA",
+      "start": {
+        "lat": 14.555,
+        "lon": 121.02
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "BGC - Makati via McKinley Road",
+      "start": {
+        "lat": 14.55,
+        "lon": 121.055
+      },
+      "destination": {
+        "lat": 14.555,
+        "lon": 121.02
+      }
+    },
+    {
+      "route_transit": "Alabang - Makati via EDSA",
+      "start": {
+        "lat": 14.42,
+        "lon": 121.038
+      },
+      "destination": {
+        "lat": 14.555,
+        "lon": 121.02
+      }
+    },
+    {
+      "route_transit": "Pasay (Rotonda) - Baclaran via EDSA",
+      "start": {
+        "lat": 14.538,
+        "lon": 121.001
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Baclaran - Makati via EDSA",
+      "start": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      },
+      "destination": {
+        "lat": 14.555,
+        "lon": 121.02
+      }
+    },
+    {
+      "route_transit": "Makati (Ayala) - Quiapo via Buendia",
+      "start": {
+        "lat": 14.557,
+        "lon": 121.017
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Taguig (Hagonoy) - Quiapo via Kalayaan Ave",
+      "start": {
+        "lat": 14.505,
+        "lon": 121.06
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Pasay - Divisoria via Taft Ave",
+      "start": {
+        "lat": 14.538,
+        "lon": 121.001
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Makati - Divisoria via Taft Ave",
+      "start": {
+        "lat": 14.555,
+        "lon": 121.02
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Marikina - Cubao via Aurora Blvd",
+      "start": {
+        "lat": 14.638,
+        "lon": 121.105
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Marikina - Quiapo via Aurora Blvd",
+      "start": {
+        "lat": 14.638,
+        "lon": 121.105
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Pasig - Cubao via Ortigas Ave",
+      "start": {
+        "lat": 14.559,
+        "lon": 121.061
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Cainta - Cubao via Ortigas Ave",
+      "start": {
+        "lat": 14.578,
+        "lon": 121.12
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Taytay - Cubao via Ortigas Ave",
+      "start": {
+        "lat": 14.56,
+        "lon": 121.14
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Pasig - Quiapo via Aurora Blvd",
+      "start": {
+        "lat": 14.559,
+        "lon": 121.061
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Marikina (Concepcion) - Cubao via Katipunan",
+      "start": {
+        "lat": 14.648,
+        "lon": 121.1
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Antipolo - Cubao via Marcos Highway",
+      "start": {
+        "lat": 14.586,
+        "lon": 121.176
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Pasig (Kapitolyo) - Makati via Estrella",
+      "start": {
+        "lat": 14.564,
+        "lon": 121.056
+      },
+      "destination": {
+        "lat": 14.555,
+        "lon": 121.02
+      }
+    },
+    {
+      "route_transit": "Marikina - Divisoria via Santolan",
+      "start": {
+        "lat": 14.638,
+        "lon": 121.105
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Mandaluyong - Quiapo via Shaw Blvd",
+      "start": {
+        "lat": 14.579,
+        "lon": 121.035
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Mandaluyong - Cubao via EDSA",
+      "start": {
+        "lat": 14.579,
+        "lon": 121.035
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Ortigas - Cubao via EDSA",
+      "start": {
+        "lat": 14.587,
+        "lon": 121.056
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Ortigas - Divisoria via Kalentong",
+      "start": {
+        "lat": 14.587,
+        "lon": 121.056
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "San Juan - Divisoria via N. Domingo",
+      "start": {
+        "lat": 14.6023,
+        "lon": 121.0394
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Mandaluyong - Baclaran via EDSA",
+      "start": {
+        "lat": 14.579,
+        "lon": 121.035
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Shaw Blvd - Quiapo via V. Mapa",
+      "start": {
+        "lat": 14.5822,
+        "lon": 121.054
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Wack Wack - Cubao via EDSA",
+      "start": {
+        "lat": 14.587,
+        "lon": 121.045
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Paranaque - Baclaran via Quirino Ave",
+      "start": {
+        "lat": 14.49,
+        "lon": 121.015
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Las Pinas - Baclaran via Alabang-Zapote Road",
+      "start": {
+        "lat": 14.45,
+        "lon": 120.985
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Muntinlupa - Baclaran via Sucat Road",
+      "start": {
+        "lat": 14.41,
+        "lon": 121.043
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Alabang - Baclaran via Sucat Road",
+      "start": {
+        "lat": 14.42,
+        "lon": 121.038
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Paranaque (BF Homes) - Pasay via Quirino Ave",
+      "start": {
+        "lat": 14.48,
+        "lon": 121.01
+      },
+      "destination": {
+        "lat": 14.538,
+        "lon": 121.001
+      }
+    },
+    {
+      "route_transit": "Las Pinas - Divisoria via Taft Ave",
+      "start": {
+        "lat": 14.45,
+        "lon": 120.985
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Paranaque - Makati via EDSA",
+      "start": {
+        "lat": 14.49,
+        "lon": 121.015
+      },
+      "destination": {
+        "lat": 14.555,
+        "lon": 121.02
+      }
+    },
+    {
+      "route_transit": "Alabang - Cubao via EDSA",
+      "start": {
+        "lat": 14.42,
+        "lon": 121.038
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Taguig (Tuktukan) - Quiapo via Kalayaan Ave",
+      "start": {
+        "lat": 14.525,
+        "lon": 121.065
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Taguig - Makati via C5 Road",
+      "start": {
+        "lat": 14.52,
+        "lon": 121.06
+      },
+      "destination": {
+        "lat": 14.555,
+        "lon": 121.02
+      }
+    },
+    {
+      "route_transit": "Fort Bonifacio - Makati via McKinley Road",
+      "start": {
+        "lat": 14.52,
+        "lon": 121.055
+      },
+      "destination": {
+        "lat": 14.555,
+        "lon": 121.02
+      }
+    },
+    {
+      "route_transit": "Pateros - Cubao via Santolan",
+      "start": {
+        "lat": 14.545,
+        "lon": 121.07
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Meycauayan - Monumento via McArthur Highway",
+      "start": {
+        "lat": 14.735,
+        "lon": 120.96
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Marilao - Monumento via McArthur Highway",
+      "start": {
+        "lat": 14.76,
+        "lon": 120.95
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Bocaue - Monumento via McArthur Highway",
+      "start": {
+        "lat": 14.798,
+        "lon": 120.93
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Balagtas - Divisoria via McArthur Highway",
+      "start": {
+        "lat": 14.815,
+        "lon": 120.925
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "San Jose del Monte - Monumento via Quirino Highway",
+      "start": {
+        "lat": 14.815,
+        "lon": 121.045
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Guiguinto - Divisoria via McArthur Highway",
+      "start": {
+        "lat": 14.833,
+        "lon": 120.89
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Malolos - Divisoria via McArthur Highway",
+      "start": {
+        "lat": 14.86,
+        "lon": 120.81
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Bacoor - Baclaran via Aguinaldo Highway",
+      "start": {
+        "lat": 14.459,
+        "lon": 120.965
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Imus - Baclaran via Aguinaldo Highway",
+      "start": {
+        "lat": 14.43,
+        "lon": 120.935
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Kawit - Baclaran via Zapote Road",
+      "start": {
+        "lat": 14.435,
+        "lon": 120.9
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Noveleta - Baclaran via Aguinaldo Highway",
+      "start": {
+        "lat": 14.428,
+        "lon": 120.878
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Dasmari\u00f1as - Baclaran via Aguinaldo Highway",
+      "start": {
+        "lat": 14.33,
+        "lon": 120.94
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "San Mateo - Cubao via Marcos Highway",
+      "start": {
+        "lat": 14.695,
+        "lon": 121.12
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Montalban - Cubao via Marcos Highway",
+      "start": {
+        "lat": 14.74,
+        "lon": 121.15
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Cainta (Junction) - Cubao via Ortigas Ave",
+      "start": {
+        "lat": 14.58,
+        "lon": 121.11
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Taytay - Pasig via Ortigas Ave",
+      "start": {
+        "lat": 14.56,
+        "lon": 121.14
+      },
+      "destination": {
+        "lat": 14.559,
+        "lon": 121.061
+      }
+    },
+    {
+      "route_transit": "Angono - Cubao via Marcos Highway",
+      "start": {
+        "lat": 14.525,
+        "lon": 121.153
+      },
+      "destination": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      }
+    },
+    {
+      "route_transit": "Bi\u00f1an - Alabang via South Luzon Expressway",
+      "start": {
+        "lat": 14.338,
+        "lon": 121.08
+      },
+      "destination": {
+        "lat": 14.42,
+        "lon": 121.038
+      }
+    },
+    {
+      "route_transit": "San Pedro - Alabang via Aguinaldo Highway",
+      "start": {
+        "lat": 14.36,
+        "lon": 121.05
+      },
+      "destination": {
+        "lat": 14.42,
+        "lon": 121.038
+      }
+    },
+    {
+      "route_transit": "Fairview - Baclaran via EDSA",
+      "start": {
+        "lat": 14.75,
+        "lon": 121.058
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Monumento - Baclaran via EDSA",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Quiapo - Novaliches via Quezon Ave",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.7033,
+        "lon": 121.0367
+      }
+    },
+    {
+      "route_transit": "Divisoria - Novaliches via Rizal Ave",
+      "start": {
+        "lat": 14.605,
+        "lon": 120.974
+      },
+      "destination": {
+        "lat": 14.7033,
+        "lon": 121.0367
+      }
+    },
+    {
+      "route_transit": "Quiapo - Fairview via Espa\u00f1a",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.75,
+        "lon": 121.058
+      }
+    },
+    {
+      "route_transit": "Baclaran - Fairview via EDSA",
+      "start": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      },
+      "destination": {
+        "lat": 14.75,
+        "lon": 121.058
+      }
+    },
+    {
+      "route_transit": "Divisoria - Alabang via Taft Ave",
+      "start": {
+        "lat": 14.605,
+        "lon": 120.974
+      },
+      "destination": {
+        "lat": 14.42,
+        "lon": 121.038
+      }
+    },
+    {
+      "route_transit": "Cubao - Baclaran via EDSA",
+      "start": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    },
+    {
+      "route_transit": "Monumento - Makati via EDSA",
+      "start": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      },
+      "destination": {
+        "lat": 14.555,
+        "lon": 121.02
+      }
+    },
+    {
+      "route_transit": "Fairview - Makati via EDSA",
+      "start": {
+        "lat": 14.75,
+        "lon": 121.058
+      },
+      "destination": {
+        "lat": 14.555,
+        "lon": 121.02
+      }
+    },
+    {
+      "route_transit": "Quiapo - Antipolo via Aurora Blvd",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.586,
+        "lon": 121.176
+      }
+    },
+    {
+      "route_transit": "Divisoria - Antipolo via Aurora Blvd",
+      "start": {
+        "lat": 14.605,
+        "lon": 120.974
+      },
+      "destination": {
+        "lat": 14.586,
+        "lon": 121.176
+      }
+    },
+    {
+      "route_transit": "Cubao - Marikina via Santolan",
+      "start": {
+        "lat": 14.6194,
+        "lon": 121.0511
+      },
+      "destination": {
+        "lat": 14.638,
+        "lon": 121.105
+      }
+    },
+    {
+      "route_transit": "Quiapo - Monumento via Rizal Ave",
+      "start": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      },
+      "destination": {
+        "lat": 14.6569,
+        "lon": 120.9839
+      }
+    },
+    {
+      "route_transit": "Baclaran - Divisoria via Quirino Ave",
+      "start": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Tondo - Quiapo via Recto Ave",
+      "start": {
+        "lat": 14.62,
+        "lon": 120.965
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Sta. Cruz - Quiapo via Quezon Blvd",
+      "start": {
+        "lat": 14.606,
+        "lon": 120.982
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Navotas - Divisoria via H. Lopez Blvd",
+      "start": {
+        "lat": 14.6736,
+        "lon": 120.94
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Malabon - Divisoria via H. Lopez Blvd",
+      "start": {
+        "lat": 14.6694,
+        "lon": 120.9673
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Navotas - Quiapo via H. Lopez Blvd",
+      "start": {
+        "lat": 14.6736,
+        "lon": 120.94
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Malabon - Quiapo via Dagat-Dagatan",
+      "start": {
+        "lat": 14.6694,
+        "lon": 120.9673
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Caloocan - Divisoria via 8th Ave",
+      "start": {
+        "lat": 14.648,
+        "lon": 120.978
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Caloocan - Quiapo via 5th Ave",
+      "start": {
+        "lat": 14.648,
+        "lon": 120.978
+      },
+      "destination": {
+        "lat": 14.5995,
+        "lon": 120.9842
+      }
+    },
+    {
+      "route_transit": "Espa\u00f1a - Divisoria via Lacson",
+      "start": {
+        "lat": 14.61,
+        "lon": 120.993
+      },
+      "destination": {
+        "lat": 14.605,
+        "lon": 120.974
+      }
+    },
+    {
+      "route_transit": "Sampaloc - Baclaran via Taft Ave",
+      "start": {
+        "lat": 14.615,
+        "lon": 120.995
+      },
+      "destination": {
+        "lat": 14.5317,
+        "lon": 120.9917
+      }
+    }
+  ]
+}

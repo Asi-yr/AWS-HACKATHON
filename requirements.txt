@@ -1,0 +1,24 @@
+# version lock, for stable releases.
+# ---
+#flask==3.1.3
+#requests==2.32.3
+#shapely==2.1.2
+#numpy==2.4.2
+#mysql-connector-python==9.6.0
+
+# ---
+# development use. lock only if it runs good and reached stable release
+# ---
+flask
+flask-cors
+requests
+shapely
+numpy
+mysql-connector-python
+folium
+python-dotenv
+ddgs
+beautifulsoup4
+google-genai
+
+# briefcase
