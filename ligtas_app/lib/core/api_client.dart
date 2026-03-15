@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/explore_models.dart';
@@ -15,10 +17,15 @@ class ApiClient {
 
   /// Base URL of the Flask backend.
   ///
-  /// - On Android emulator, `10.0.2.2` points to the host machine.
-  /// - On iOS simulator or real devices, change this to your machine's LAN IP,
-  ///   e.g. `http://192.168.1.10:5000`.
-  static const String baseUrl = 'http://localhost:5000';
+  /// Android emulator maps `10.0.2.2` to the host machine's localhost.
+  /// iOS simulator and web can reach `localhost` directly.
+  /// For real physical devices, use your machine's LAN IP instead.
+  static String get baseUrl {
+    if (!kIsWeb && Platform.isAndroid) {
+      return 'http://10.0.2.2:5000';
+    }
+    return 'http://localhost:5000';
+  }
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 

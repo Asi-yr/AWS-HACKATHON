@@ -36,6 +36,7 @@ class SurveyView extends StatefulWidget {
 
 class _SurveyViewState extends State<SurveyView> {
   int _step = 0;
+  bool _isSubmitting = false;
 
   // Step 1 — commuter type (multi select)
   final Set<String> _commuterTypes = {};
@@ -137,10 +138,13 @@ class _SurveyViewState extends State<SurveyView> {
                 )),
                 const SizedBox(width: 12),
               ],
-              Expanded(flex: 2, child: TealButton(
-                label: _step < 2 ? 'Continue' : 'Get Started',
-                onTap: _canContinue ? _next : () {},
-              )),
+              Expanded(flex: 2, child: _isSubmitting
+                ? const TealButton(label: 'Saving...', onTap: _noOp)
+                : TealButton(
+                    label: _step < 2 ? 'Continue' : 'Get Started',
+                    onTap: _canContinue ? _next : _noOp,
+                  )),
+
             ]),
           ),
         ]),
@@ -154,46 +158,45 @@ class _SurveyViewState extends State<SurveyView> {
     return true; // safety step optional
   }
 
+  static void _noOp() {}
+
   void _next() {
     if (_step < 2) {
       setState(() => _step++);
     } else {
-      // BACKEND: POST /api/user/survey with collected data
       _saveSurveyAndNavigate();
     }
   }
 
   /// Save survey responses to backend and navigate to explore screen.
   Future<void> _saveSurveyAndNavigate() async {
+    setState(() => _isSubmitting = true);
     try {
       final token = await SessionManager.instance.getAuthToken();
       if (token == null || token.isEmpty) {
-        // If not logged in, just proceed with local defaults (survey is pre-auth)
         debugPrint('[SurveyView] Not logged in, using local defaults only');
         _proceedToExplore();
         return;
       }
 
-      // Save survey to backend
-      debugPrint('[SurveyView] Saving survey to backend...');
       await ApiClient.instance.saveSurvey(
         commuterTypes: _commuterTypes.toList(),
         transportModes: _transport.toList(),
         safetyConcerns: _safety.toList(),
         token: token,
       );
-
-      debugPrint('[SurveyView] Survey saved successfully to backend');
       _proceedToExplore();
     } catch (e) {
       debugPrint('[SurveyView] Error saving survey: $e');
-      // Proceed anyway with local defaults if backend save fails
       _proceedToExplore();
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
   /// Navigate to explore screen with survey defaults.
   void _proceedToExplore() {
+    if (!mounted) return;
     // Seed the explore filters with the user's answers so they
     // show up pre-selected when the explore screen loads for the first time.
     context.read<ExploreController>().setSurveyDefaults(

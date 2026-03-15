@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_router.dart';
 import '../../core/session_manager.dart';
+import '../../core/theme_controller.dart';
 
 /// Splash / onboarding entry point.
 /// BACKEND: Replace _onInit with real auth check:
@@ -66,8 +68,9 @@ class _SplashViewState extends State<SplashView>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.watch<ThemeController>().isDark;
     return Scaffold(
-      backgroundColor: AppColors.bgLight,
+      backgroundColor: isDark ? AppColors.bgDark : AppColors.bgLight,
       body: Center(
         child: FadeTransition(
           opacity: _fade,

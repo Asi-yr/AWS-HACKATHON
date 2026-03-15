@@ -1063,8 +1063,14 @@ def api_user_current():
             'commuterType': user_settings.get('default_commuter_type', 'commute'),
             'preferences': {
                 'aiSafety': user_settings.get('show_weather_banner', True),
-                'nightMode': False,  # Will be controlled by theme_controller
+                'nightMode': False,  # Controlled by ThemeController on the client
                 'transport': user_settings.get('transport_preference', ['jeep', 'walk']),
+            },
+            'survey': {
+                'completed': user_settings.get('survey_completed', False),
+                'commuter_types': user_settings.get('commuter_types', []),
+                'transport_modes': user_settings.get('transport_modes', []),
+                'safety_concerns': user_settings.get('safety_concerns', []),
             },
         }
         print(f"[DEBUG] [api_user_current] Returning user data for '{username}'")
@@ -1109,6 +1115,10 @@ def api_get_settings():
                 'preferred_name': user_settings.get('preferred_name', ''),
                 'home_address': user_settings.get('home_address', ''),
                 'work_address': user_settings.get('work_address', ''),
+                'commuter_types': user_settings.get('commuter_types', []),
+                'transport_modes': user_settings.get('transport_modes', []),
+                'safety_concerns': user_settings.get('safety_concerns', []),
+                'survey_completed': user_settings.get('survey_completed', False),
             }
         }), 200
     except Exception as e:
@@ -1137,21 +1147,21 @@ def api_save_settings():
         data = request.get_json() or {}
         print(f"[DEBUG] [api_save_settings] Received settings data: {data}")
         
-        # Build settings dict from request
-        settings = {
-            'default_commuter_type': data.get('default_commuter_type', 'commute'),
-            'transport_preference': data.get('transport_preference', ['jeep', 'walk']),
-            'show_weather_banner': data.get('show_weather_banner', True),
-            'show_crime_banner': data.get('show_crime_banner', True),
-            'show_flood_banner': data.get('show_flood_banner', True),
-            'show_night_warnings': data.get('show_night_warnings', True),
-            'preferred_name': data.get('preferred_name', ''),
-            'home_address': data.get('home_address', ''),
-            'work_address': data.get('work_address', ''),
-        }
+        # Load current settings first to preserve survey data and other fields
+        current_settings = get_user_settings(chDB_perf, username)
         
-        # Save settings to database
-        success = save_user_settings(chDB_perf, username, settings)
+        # Apply only the non-survey settings fields provided in this request
+        updatable_keys = [
+            'default_commuter_type', 'transport_preference', 'show_weather_banner',
+            'show_crime_banner', 'show_flood_banner', 'show_night_warnings',
+            'preferred_name', 'home_address', 'work_address',
+        ]
+        for key in updatable_keys:
+            if key in data:
+                current_settings[key] = data[key]
+        
+        # Save merged settings (survey data preserved)
+        success = save_user_settings(chDB_perf, username, current_settings)
         
         if not success:
             print(f"[DEBUG] [api_save_settings] Failed to save settings for '{username}'")

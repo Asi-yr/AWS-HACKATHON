@@ -66,6 +66,31 @@ class ReportType {
 class ExploreController extends ChangeNotifier {
   ExploreController() {
     _initLocation();
+    loadUserPreferences();
+  }
+
+  /// Fetch saved survey prefs from backend and seed filters.
+  /// Called on init and after login so prefs are always applied for the session.
+  Future<void> loadUserPreferences() async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) return;
+      final data = await ApiClient.instance.getSettings(token: token);
+      if (data['ok'] != true) return;
+      final s = (data['settings'] as Map<String, dynamic>?) ?? {};
+      final commuter = (s['commuter_types'] as List?)?.cast<String>() ?? [];
+      final transport = (s['transport_modes'] as List?)?.cast<String>() ?? [];
+      final safety   = (s['safety_concerns'] as List?)?.cast<String>() ?? [];
+      if (commuter.isNotEmpty || transport.isNotEmpty || safety.isNotEmpty) {
+        setSurveyDefaults(
+          commuterTypes: commuter,
+          transport: transport,
+          safety: safety,
+        );
+      }
+    } catch (_) {
+      // Non-fatal — fall through with empty defaults
+    }
   }
 
   Future<void> _initLocation() async {
