@@ -188,6 +188,11 @@ class _SurveyViewState extends State<SurveyView> {
       _proceedToExplore();
     } catch (e) {
       debugPrint('[SurveyView] Error saving survey: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Survey saved locally — server unreachable')),
+        );
+      }
       _proceedToExplore();
     } finally {
       if (mounted) setState(() => _isSubmitting = false);

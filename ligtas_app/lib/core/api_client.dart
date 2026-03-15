@@ -17,12 +17,14 @@ class ApiClient {
 
   /// Base URL of the Flask backend.
   ///
-  /// Android emulator maps `10.0.2.2` to the host machine's localhost.
+  /// Android (both emulator & physical device) uses the host machine's
+  /// LAN IP so the phone can reach the dev server over Wi-Fi.
   /// iOS simulator and web can reach `localhost` directly.
-  /// For real physical devices, use your machine's LAN IP instead.
+  static const _lanIp = '192.168.1.3';
+
   static String get baseUrl {
     if (!kIsWeb && Platform.isAndroid) {
-      return 'http://10.0.2.2:5000';
+      return 'http://$_lanIp:5000';
     }
     return 'http://localhost:5000';
   }
