@@ -1631,7 +1631,7 @@ class _ForecastStrip extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             padding: EdgeInsets.zero,
             itemCount: days.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
             itemBuilder: (_, i) {
               final d          = days[i];
               final dayLabel   = d['day_label']?.toString()  ?? '---';

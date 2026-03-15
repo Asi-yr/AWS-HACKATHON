@@ -90,9 +90,18 @@ class _RootShellState extends State<RootShell> {
   @override
   void initState() {
     super.initState();
-    // Listen for tab-switch requests from child screens (e.g. Community weather card)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<AppTabController>().addListener(_onTabControllerChanged);
+      // Restore the tab the user was on when the app was last closed.
+      // Splash always enters via /explore, so we set the index ourselves here.
+      SessionManager.instance.getLastRoute().then((route) {
+        if (!mounted) return;
+        if (route == AppRouter.community && _currentIndex != 1) {
+          setState(() => _currentIndex = 1);
+        } else if (route == AppRouter.profile && _currentIndex != 2) {
+          setState(() => _currentIndex = 2);
+        }
+      });
     });
   }
 
