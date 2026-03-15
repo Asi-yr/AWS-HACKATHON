@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'core/theme_controller.dart';
 import 'core/app_router.dart';
 import 'core/app_colors.dart';
+import 'core/app_tab_controller.dart';
 import 'core/session_manager.dart';
 import 'screens/explore/explore_view.dart';
 import 'screens/explore/explore_controller.dart';
@@ -18,7 +19,8 @@ void main() {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeController()),
-        ChangeNotifierProvider(create: (_) => ExploreController()), 
+        ChangeNotifierProvider(create: (_) => ExploreController()),
+        ChangeNotifierProvider(create: (_) => AppTabController()),
       ],
       child: const LigtasApp(),
     ),
@@ -65,6 +67,50 @@ class _RootShellState extends State<RootShell> {
     const ProfileView(),
   ];
 
+  void _onTabControllerChanged() {
+    final requested = context.read<AppTabController>().index;
+    if (requested != _currentIndex) {
+      _setTab(requested);
+    }
+  }
+
+  void _setTab(int index) {
+    if (index == 0) {
+      context.read<ExploreController>().clearSearch();
+      SessionManager.instance.setLastRoute(AppRouter.explore);
+    } else if (index == 1) {
+      SessionManager.instance.setLastRoute(AppRouter.community);
+    } else if (index == 2) {
+      SessionManager.instance.setLastRoute(AppRouter.profile);
+    }
+    SessionManager.instance.updateLastActive();
+    setState(() => _currentIndex = index);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AppTabController>().addListener(_onTabControllerChanged);
+      // Restore the tab the user was on when the app was last closed.
+      // Splash always enters via /explore, so we set the index ourselves here.
+      SessionManager.instance.getLastRoute().then((route) {
+        if (!mounted) return;
+        if (route == AppRouter.community && _currentIndex != 1) {
+          setState(() => _currentIndex = 1);
+        } else if (route == AppRouter.profile && _currentIndex != 2) {
+          setState(() => _currentIndex = 2);
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    context.read<AppTabController>().removeListener(_onTabControllerChanged);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     // FIX: Watch ThemeController HERE at the shell level, not inside
@@ -76,7 +122,7 @@ class _RootShellState extends State<RootShell> {
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      extendBody: true, 
+      extendBody: true,
       body: IndexedStack(
         index: _currentIndex,
         children: _pages,
@@ -84,16 +130,8 @@ class _RootShellState extends State<RootShell> {
       bottomNavigationBar: _LigtasBottomNav(
           currentIndex: _currentIndex,
           onTap: (index) {
-            if (index == 0) {
-              context.read<ExploreController>().clearSearch();
-              SessionManager.instance.setLastRoute(AppRouter.explore);
-            } else if (index == 1) {
-              SessionManager.instance.setLastRoute(AppRouter.community);
-            } else if (index == 2) {
-              SessionManager.instance.setLastRoute(AppRouter.profile);
-            }
-            SessionManager.instance.updateLastActive();
-            setState(() => _currentIndex = index);
+            context.read<AppTabController>().switchTo(index);
+            _setTab(index);
           },
         ),
     );

@@ -10,6 +10,7 @@
 # development use. lock only if it runs good and reached stable release
 # ---
 flask
+flask-cors
 requests
 shapely
 numpy

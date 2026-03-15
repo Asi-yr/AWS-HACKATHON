@@ -441,3 +441,127 @@ def apply_weather_to_routes(routes: list, weather: dict, commuter_type: str) -> 
         r["weather_warning"] = warning if base_penalty > 0 else ""
 
     return routes
+
+
+# ── 5-day forecast helpers ────────────────────────────────────────────────────
+
+_WEEKDAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+_RISK_FORECAST_LABEL = {
+    "clear":      "SAFE",
+    "cloudy":     "SAFE",
+    "fog":        "LOW",
+    "light_rain": "LOW",
+    "rain":       "MED",
+    "heavy_rain": "HIGH",
+    "storm":      "HIGH",
+}
+
+_RISK_FORECAST_COLOR = {
+    "SAFE": "#27ae60",
+    "LOW":  "#f39c12",
+    "MED":  "#e67e22",
+    "HIGH": "#e74c3c",
+}
+
+_WMO_EMOJI = {
+    "clear":      "☀️",
+    "cloudy":     "⛅",
+    "fog":        "🌫️",
+    "light_rain": "🌦️",
+    "rain":       "🌧️",
+    "heavy_rain": "🌧️",
+    "storm":      "⛈️",
+}
+
+
+def get_forecast(lat: float, lon: float, days: int = 5) -> list:
+    """
+    Fetch N-day daily weather forecast for (lat, lon) via Open-Meteo.
+
+    Returns a list of dicts (one per day):
+        {
+          "day_label":   str,   # "TODAY", "Tue", "Wed", etc.
+          "date":        str,   # "2026-03-15"
+          "temp_max_c":  float,
+          "temp_min_c":  float,
+          "precip_pct":  int,   # precipitation probability %
+          "risk_level":  str,   # one of _RISK_LEVELS
+          "risk_label":  str,   # "SAFE" | "LOW" | "MED" | "HIGH"
+          "risk_color":  str,   # hex color
+          "description": str,   # "Heavy rain"
+          "icon":        str,   # emoji
+          "wmo_code":    int,
+        }
+
+    Returns empty list on any failure.
+    """
+    params = {
+        "latitude":  lat,
+        "longitude": lon,
+        "daily": [
+            "weather_code",
+            "temperature_2m_max",
+            "temperature_2m_min",
+            "precipitation_probability_max",
+        ],
+        "wind_speed_unit": "kmh",
+        "timezone":        "Asia/Manila",
+        "forecast_days":   days,
+    }
+
+    try:
+        resp = requests.get(_OM_URL, params=params,
+                            headers={"User-Agent": "SafeRoute/1.0"}, timeout=8)
+        resp.raise_for_status()
+        data  = resp.json()
+        daily = data.get("daily", {})
+
+        times         = daily.get("time", [])
+        wmo_codes     = daily.get("weather_code", [])
+        temp_max_list = daily.get("temperature_2m_max", [])
+        temp_min_list = daily.get("temperature_2m_min", [])
+        precip_list   = daily.get("precipitation_probability_max", [])
+
+        today_str = datetime.now(_PHT).strftime("%Y-%m-%d")
+        result    = []
+
+        for i, date_str in enumerate(times):
+            wmo_code               = int(wmo_codes[i])     if i < len(wmo_codes)     else 0
+            description, risk_level = _WMO_CODES.get(wmo_code, ("Partly cloudy", "cloudy"))
+            temp_max               = float(temp_max_list[i]) if i < len(temp_max_list) else 0.0
+            temp_min               = float(temp_min_list[i]) if i < len(temp_min_list) else 0.0
+            precip_pct             = int(precip_list[i])    if i < len(precip_list)   else 0
+
+            if date_str == today_str:
+                day_label = "TODAY"
+            else:
+                try:
+                    dt        = datetime.fromisoformat(date_str)
+                    day_label = _WEEKDAY_ABBR[dt.weekday()]
+                except Exception:
+                    day_label = date_str
+
+            risk_label = _RISK_FORECAST_LABEL.get(risk_level, "LOW")
+            risk_color = _RISK_FORECAST_COLOR.get(risk_label, "#7f8c8d")
+            icon       = _WMO_EMOJI.get(risk_level, "🌤️")
+
+            result.append({
+                "day_label":   day_label,
+                "date":        date_str,
+                "temp_max_c":  temp_max,
+                "temp_min_c":  temp_min,
+                "precip_pct":  precip_pct,
+                "risk_level":  risk_level,
+                "risk_label":  risk_label,
+                "risk_color":  risk_color,
+                "description": description,
+                "icon":        icon,
+                "wmo_code":    wmo_code,
+            })
+
+        return result
+
+    except Exception as e:
+        print(f"[weather] get_forecast error: {e}")
+        return []

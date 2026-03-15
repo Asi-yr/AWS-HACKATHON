@@ -55,7 +55,13 @@ class _SplashViewState extends State<SplashView>
       next = AppRouter.explore;
     } else {
       // Logged in, recently active → resume last route or explore by default
-      next = await session.getLastRoute() ?? AppRouter.explore;
+      final saved = await session.getLastRoute() ?? AppRouter.explore;
+      // /community and /profile are tab-only views that live inside RootShell.
+      // Navigating to them directly skips the Scaffold + bottom nav.
+      // Always enter through /explore — RootShell will restore the correct tab.
+      next = (saved == AppRouter.community || saved == AppRouter.profile)
+          ? AppRouter.explore
+          : saved;
     }
 
     await session.updateLastActive();
