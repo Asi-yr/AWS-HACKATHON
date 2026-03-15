@@ -44,16 +44,18 @@ class ApiClient {
     String mode = 'commute',
     Map<String, dynamic>? extraParams,
   }) async {
-    final resp = await http.post(
-      _uri('/api/routes'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'origin': origin,
-        'destination': destination,
-        'mode': mode,
-        ...?extraParams,
-      }),
-    ).timeout(const Duration(seconds: 90));
+    final resp = await http
+        .post(
+          _uri('/api/routes'),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'origin': origin,
+            'destination': destination,
+            'mode': mode,
+            ...?extraParams,
+          }),
+        )
+        .timeout(const Duration(seconds: 90));
 
     // ── Never throw on HTTP errors — always return a usable map ──────────
     // The controller checks routes.isEmpty and surfaces the error as a toast.
@@ -73,7 +75,11 @@ class ApiClient {
     if (resp.statusCode != 200) {
       return {
         'routes': <RouteModel>[],
-        'error': (decoded['error'] ?? decoded['message'] ?? 'No route found (${resp.statusCode})').toString(),
+        'error':
+            (decoded['error'] ??
+                    decoded['message'] ??
+                    'No route found (${resp.statusCode})')
+                .toString(),
         'incidents': <dynamic>[],
         'mmda_banner': '',
         'mmda_closures_count': 0,
@@ -132,15 +138,17 @@ class ApiClient {
     String mode = 'commute',
   }) async {
     try {
-      final resp = await http.post(
-        _uri('/api/routes'),
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'origin': origin,
-          'destination': destination,
-          'mode': mode,
-        }),
-      ).timeout(const Duration(seconds: 90));
+      final resp = await http
+          .post(
+            _uri('/api/routes'),
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'origin': origin,
+              'destination': destination,
+              'mode': mode,
+            }),
+          )
+          .timeout(const Duration(seconds: 90));
 
       if (resp.statusCode != 200) return const [];
 
@@ -198,6 +206,15 @@ class ApiClient {
 
     final List<List<double>> polyline = _extractPolyline(r);
 
+    // ── Merge endpoint crime warning + route-path zone warning ──────────────
+    // crime_warning    → set by apply_crime_both_ends()  (origin/dest risk)
+    // route_zones_warning → set by apply_route_crime_to_routes() (zones crossed)
+    // Both are safety penalties that affect safety_score; surface both to user.
+    final String? crimeWarning = _mergeWarnings(
+      r['crime_warning'] as String?,
+      r['route_zones_warning'] as String?,
+    );
+
     return RouteModel(
       id: (r['id'] ?? 'route_$index').toString(),
       modes: modes,
@@ -212,7 +229,7 @@ class ApiClient {
       ligtasTags: const [],
       seismicWarning: r['seismic_warning'] as String?,
       floodWarning: r['flood_warning'] as String?,
-      crimeWarning: r['crime_warning'] as String?,
+      crimeWarning: crimeWarning,
       profileWarnings: r['profile_warnings'] as List<dynamic>?,
       routeCrimeZones: (r['route_crime_zones'] is List)
           ? (r['route_crime_zones'] as List)
@@ -270,7 +287,9 @@ class ApiClient {
             title = label.isNotEmpty ? label : type;
             desc = '';
         }
-        steps.add(RouteStep(title: title, description: desc, vehicleName: type));
+        steps.add(
+          RouteStep(title: title, description: desc, vehicleName: type),
+        );
       }
       if (steps.isNotEmpty) return steps;
     }
@@ -388,6 +407,90 @@ class ApiClient {
       return double.tryParse(v);
     }
     return null;
+  }
+
+  /// Merges two nullable warning strings into one, separated by a newline.
+  /// Returns null when both are empty/null (so the UI shows nothing).
+  static String? _mergeWarnings(String? a, String? b) {
+    final parts = [a, b]
+        .where((s) => s != null && s.trim().isNotEmpty)
+        .map((s) => s!.trim())
+        .toList();
+    if (parts.isEmpty) return null;
+    return parts.join('\n');
+  }
+
+  // ── Forward geocoding ─────────────────────────────────────────────────────
+
+  /// Forward-geocode a free-text query to coordinates.
+  /// Tries progressively simplified variants of the query so that brand names
+  /// and local shorthands (e.g. "Jollibee, MCU EDSA") still resolve even when
+  /// the full string returns nothing from Nominatim.
+  ///
+  /// Used by the controller to set A/B pins BEFORE the full /api/routes
+  /// call completes, so pins appear immediately on map regardless of whether
+  /// routes can be fetched.
+  Future<Map<String, double>?> geocodeText({
+    required String query,
+    String? token,
+  }) async {
+    final q = query.trim();
+    if (q.isEmpty) return null;
+
+    // Build a list of progressively simpler query variants to try in order.
+    // e.g. "Jollibee, MCU EDSA" → ["Jollibee, MCU EDSA", "MCU EDSA", "EDSA"]
+    final variants = _geocodeVariants(q);
+
+    for (final variant in variants) {
+      try {
+        final uri = Uri.parse(
+          '$baseUrl/api/suggest',
+        ).replace(queryParameters: {'q': variant});
+        final resp = await http
+            .get(uri, headers: _headers(token))
+            .timeout(const Duration(seconds: 8));
+        if (resp.statusCode != 200) continue;
+        final dynamic decoded = jsonDecode(resp.body);
+        if (decoded is! List || decoded.isEmpty) continue;
+        final first = decoded.first;
+        if (first is! Map<String, dynamic>) continue;
+        final lat = _toDouble(first['lat']);
+        final lon = _toDouble(first['lon']);
+        if (lat == null || lon == null) continue;
+        return {'lat': lat, 'lon': lon};
+      } catch (_) {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  /// Produces ordered query variants from most-specific to least-specific.
+  /// Stops at 3 chars so we never send noise to the geocoder.
+  static List<String> _geocodeVariants(String query) {
+    final variants = <String>[query];
+    // Split on commas and spaces to get sub-parts
+    final parts = query
+        .split(RegExp(r'[,]+'))
+        .map((s) => s.trim())
+        .where((s) => s.length >= 3)
+        .toList();
+    // Try each suffix: "A, B, C" → "B, C", "C"
+    for (var i = 1; i < parts.length; i++) {
+      final sub = parts.sublist(i).join(', ');
+      if (sub.length >= 3 && !variants.contains(sub)) variants.add(sub);
+    }
+    // Also try individual words from the last part that look like landmarks
+    if (parts.isNotEmpty) {
+      final words = parts.last
+          .split(RegExp(r'\s+'))
+          .where((w) => w.length >= 4)
+          .toList();
+      for (final w in words) {
+        if (!variants.contains(w)) variants.add(w);
+      }
+    }
+    return variants;
   }
 
   // ── Authentication API methods ─────────────────────────────────────────────
@@ -1040,15 +1143,15 @@ class ApiClient {
       if (decoded is! List) return const [];
       return decoded.take(6).map<MiniItem>((item) {
         final fullName = item['display_name']?.toString() ?? '';
-        final parts    = fullName.split(',');
-        final name     = parts.first.trim();
-        final sub      = parts.length > 1
+        final parts = fullName.split(',');
+        final name = parts.first.trim();
+        final sub = parts.length > 1
             ? parts.skip(1).take(2).join(',').trim()
             : '';
         return MiniItem(
           type: MiniItemType.pin,
           name: name.isEmpty ? fullName : name,
-          sub:  sub,
+          sub: sub,
         );
       }).toList();
     } catch (_) {
@@ -1075,5 +1178,4 @@ class ApiClient {
       return const [];
     }
   }
-
 }

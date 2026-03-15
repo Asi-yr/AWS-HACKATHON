@@ -69,6 +69,12 @@ class ExploreController extends ChangeNotifier {
     loadUserPreferences();
   }
 
+  /// Optional callback fired when GPS coordinates are first resolved.
+  /// The map widget wires this up to imperatively move the camera so the
+  /// initial center stays accurate on real phones where permission is granted
+  /// asynchronously (after the map widget already built with a fallback center).
+  VoidCallback? onLocationResolved;
+
   /// Fetch saved survey prefs from backend and seed filters.
   /// Called on init and after login so prefs are always applied for the session.
   Future<void> loadUserPreferences() async {
@@ -80,7 +86,7 @@ class ExploreController extends ChangeNotifier {
       final s = (data['settings'] as Map<String, dynamic>?) ?? {};
       final commuter = (s['commuter_types'] as List?)?.cast<String>() ?? [];
       final transport = (s['transport_modes'] as List?)?.cast<String>() ?? [];
-      final safety   = (s['safety_concerns'] as List?)?.cast<String>() ?? [];
+      final safety = (s['safety_concerns'] as List?)?.cast<String>() ?? [];
       if (commuter.isNotEmpty || transport.isNotEmpty || safety.isNotEmpty) {
         setSurveyDefaults(
           commuterTypes: commuter,
@@ -122,6 +128,8 @@ class ExploreController extends ChangeNotifier {
           _currentLocationText =
               '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
         }
+        // Re-center the map now that we have a real GPS fix
+        onLocationResolved?.call();
       } catch (_) {
         // Couldn't get position even with permission — leave popup hidden,
         // user can still type manually
@@ -205,17 +213,9 @@ class ExploreController extends ChangeNotifier {
       }
 
       showToast('Location enabled', 'green');
+      // Re-center the map to the real GPS position
+      onLocationResolved?.call();
       notifyListeners();
-      // Reverse-geocode coordinates to a human-readable address label
-      final rev = await ApiClient.instance.reverseGeocode(
-        lat: pos.latitude,
-        lon: pos.longitude,
-      );
-      final addr = rev['address'] as String? ?? '';
-      if (addr.isNotEmpty) {
-        _currentLocationText = addr;
-        notifyListeners();
-      }
     } catch (e) {
       showToast('Could not get location — enter manually', 'red');
       _locationPopupVisible = false;
@@ -685,6 +685,60 @@ class ExploreController extends ChangeNotifier {
     showToast('Finding routes...', 'teal');
     notifyListeners();
 
+    // ── STEP 1: Geocode both endpoints immediately so A/B pins appear
+    // on the map right away, before the full /api/routes pipeline completes.
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+
+      // Origin: prefer live GPS coords when user is at current location
+      if (_lat != null &&
+          _lng != null &&
+          (_currentLocationText.isEmpty ||
+              _currentLocationText.startsWith('14.') ||
+              _currentLocationText.startsWith('My location') ||
+              _currentLocationText == 'Current location')) {
+        _resolvedOrigLat = _lat;
+        _resolvedOrigLon = _lng;
+        debugPrint('[searchRoutes] Origin: using live GPS ($_lat, $_lng)');
+      } else {
+        final origGeo = await ApiClient.instance.geocodeText(
+          query: _currentLocationText,
+          token: token,
+        );
+        if (origGeo != null) {
+          _resolvedOrigLat = origGeo['lat'];
+          _resolvedOrigLon = origGeo['lon'];
+          debugPrint(
+            '[searchRoutes] Origin geocoded: $_resolvedOrigLat, $_resolvedOrigLon',
+          );
+        } else {
+          debugPrint(
+            '[searchRoutes] Origin geocode FAILED for: $_currentLocationText',
+          );
+        }
+      }
+
+      final destGeo = await ApiClient.instance.geocodeText(
+        query: _destinationText,
+        token: token,
+      );
+      if (destGeo != null) {
+        _resolvedDestLat = destGeo['lat'];
+        _resolvedDestLon = destGeo['lon'];
+        debugPrint(
+          '[searchRoutes] Dest geocoded: $_resolvedDestLat, $_resolvedDestLon',
+        );
+      } else {
+        debugPrint('[searchRoutes] Dest geocode FAILED for: $_destinationText');
+      }
+
+      // Paint pins immediately — user sees A/B markers while routes load
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[searchRoutes] Geocode step threw: $e');
+      // Non-fatal: pins will appear later from the /api/routes response coords
+    }
+
     try {
       // Build request body — include vulnerable profile and GPS coords if available
       final extraParams = <String, dynamic>{};
@@ -693,6 +747,14 @@ class ExploreController extends ChangeNotifier {
       }
       if (_lat != null && _lng != null) {
         extraParams['orig_coords'] = {'lat': _lat, 'lon': _lng};
+      }
+      // If Step 1 geocoded the dest, pass it to the backend so it skips
+      // its own geocoding (which may also fail for brand names).
+      if (_resolvedDestLat != null && _resolvedDestLon != null) {
+        extraParams['dest_coords'] = {
+          'lat': _resolvedDestLat,
+          'lon': _resolvedDestLon,
+        };
       }
 
       final response = await ApiClient.instance.searchRoutesWithAlerts(
@@ -710,12 +772,47 @@ class ExploreController extends ChangeNotifier {
       if (routes.isNotEmpty) {
         setAllRoutes(routes);
 
-        // Store server-resolved geocoded coordinates for map pins
-        _resolvedOrigLat = (response['orig_lat'] as num?)?.toDouble();
-        _resolvedOrigLon = (response['orig_lon'] as num?)?.toDouble();
-        _resolvedDestLat = (response['dest_lat'] as num?)?.toDouble();
-        _resolvedDestLon = (response['dest_lon'] as num?)?.toDouble();
-        notifyListeners(); // repaint map with A/B pins immediately
+        // Store server-resolved geocoded coordinates for map pins.
+        // Only overwrite Step 1 geocoded coords if the server gives a non-null
+        // value — never replace a good geocoded coord with null.
+        final apiOrigLat = (response['orig_lat'] as num?)?.toDouble();
+        final apiOrigLon = (response['orig_lon'] as num?)?.toDouble();
+        final apiDestLat = (response['dest_lat'] as num?)?.toDouble();
+        final apiDestLon = (response['dest_lon'] as num?)?.toDouble();
+        if (apiOrigLat != null) _resolvedOrigLat = apiOrigLat;
+        if (apiOrigLon != null) _resolvedOrigLon = apiOrigLon;
+        if (apiDestLat != null) _resolvedDestLat = apiDestLat;
+        if (apiDestLon != null) _resolvedDestLon = apiDestLon;
+
+        // Last resort: if dest is still null, extract it from the end of
+        // the first route polyline — guaranteed to be near the destination.
+        if (_resolvedDestLat == null && routes.isNotEmpty) {
+          final poly = routes.first.polyline;
+          if (poly.isNotEmpty) {
+            _resolvedDestLat = poly.last[0];
+            _resolvedDestLon = poly.last[1];
+            debugPrint(
+              '[searchRoutes] Dest from polyline end: $_resolvedDestLat,$_resolvedDestLon',
+            );
+          }
+        }
+        if (_resolvedOrigLat == null && routes.isNotEmpty) {
+          final poly = routes.first.polyline;
+          if (poly.isNotEmpty) {
+            _resolvedOrigLat = poly.first[0];
+            _resolvedOrigLon = poly.first[1];
+            debugPrint(
+              '[searchRoutes] Orig from polyline start: $_resolvedOrigLat,$_resolvedOrigLon',
+            );
+          }
+        }
+        debugPrint(
+          '[searchRoutes] Final coords → orig=($_resolvedOrigLat,$_resolvedOrigLon) dest=($_resolvedDestLat,$_resolvedDestLon)',
+        );
+        // If dest was null after Step 1 (Nominatim couldn't resolve brand name
+        // like "Jollibee MCU EDSA") but the backend resolved it, this notify
+        // triggers _fitBoundsIfNewPins which now handles partial coords.
+        notifyListeners(); // repaint map with A/B pins
 
         setAlertData(
           incidents:
@@ -791,7 +888,21 @@ class ExploreController extends ChangeNotifier {
         return;
       }
 
-      // No routes found — clear routes, show empty state (do NOT fall back to mock)
+      // No routes found — but still capture geocoded coords from the backend
+      // so A/B pins appear even when no route could be computed.
+      final apiOrigLat = (response['orig_lat'] as num?)?.toDouble();
+      final apiOrigLon = (response['orig_lon'] as num?)?.toDouble();
+      final apiDestLat = (response['dest_lat'] as num?)?.toDouble();
+      final apiDestLon = (response['dest_lon'] as num?)?.toDouble();
+      if (apiOrigLat != null) _resolvedOrigLat = apiOrigLat;
+      if (apiOrigLon != null) _resolvedOrigLon = apiOrigLon;
+      if (apiDestLat != null) _resolvedDestLat = apiDestLat;
+      if (apiDestLon != null) _resolvedDestLon = apiDestLon;
+      if (apiDestLat != null || apiOrigLat != null) notifyListeners();
+      debugPrint(
+        '[searchRoutes] No routes — coords: orig=($_resolvedOrigLat,$_resolvedOrigLon) dest=($_resolvedDestLat,$_resolvedDestLon)',
+      );
+
       // Surface the backend's own error message (e.g. "No route found near your
       // origin/destination") so the user sees something actionable.
       final backendError = response['error'] as String?;

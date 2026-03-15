@@ -606,9 +606,14 @@ class _SearchOverlayState extends State<_SearchOverlay> {
   void _search() {
     FocusScope.of(context).unfocus();
     final ctrl = context.read<ExploreController>();
+    // Always sync text fields to controller before searching
     if (_currentCtrl.text.isNotEmpty) ctrl.setOriginText(_currentCtrl.text);
     if (_destCtrl.text.isNotEmpty) ctrl.setDestText(_destCtrl.text);
-    ctrl.searchRoutes();
+    // searchRoutes() sets state → state2 synchronously on its first line,
+    // so the map is already showing the moment we pop back to ExploreView.
+    // The async geocoding + route fetching completes in the background and
+    // notifyListeners() triggers map repaints as each step finishes.
+    ctrl.searchRoutes(); // intentionally not awaited — fire and pop
     if (mounted) Navigator.of(context).pop();
   }
 

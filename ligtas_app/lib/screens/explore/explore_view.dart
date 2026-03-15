@@ -98,6 +98,37 @@ class _ExploreScaffoldState extends State<_ExploreScaffold> {
   static const double _panelMax = 0.58;
   double _panelHeight = -1;
 
+  @override
+  void initState() {
+    super.initState();
+    // Wire the location-resolved callback so the map moves to the real GPS
+    // fix immediately when permission is granted (async on real phones).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctrl = context.read<ExploreController>();
+      ctrl.onLocationResolved = _onLocationResolved;
+    });
+  }
+
+  @override
+  void dispose() {
+    // Clear callback to avoid calling into a disposed widget
+    try {
+      context.read<ExploreController>().onLocationResolved = null;
+    } catch (_) {}
+    super.dispose();
+  }
+
+  void _onLocationResolved() {
+    final ctrl = context.read<ExploreController>();
+    if (ctrl.lat != null && ctrl.lng != null) {
+      try {
+        _mapCtrl.move(LatLng(ctrl.lat!, ctrl.lng!), 15);
+      } catch (_) {
+        // MapController not ready yet — map will build with correct center
+      }
+    }
+  }
+
   void _onPanelDragUpdate(DragUpdateDetails d, double screenH) {
     setState(() {
       _panelHeight = (_panelHeight - d.primaryDelta!).clamp(
@@ -277,8 +308,7 @@ class _ExploreScaffoldState extends State<_ExploreScaffold> {
             ))
               const _LocationPopup(),
             // ── SOS button — always visible on the map, top-right ───────────
-            if (isState2 || isState3 || isNavigating)
-              const _SosButton(),
+            if (isState2 || isState3 || isNavigating) const _SosButton(),
             // ── MMDA banner (shown when road closures / coding active) ──
             const _MmdaBanner(),
             // ── Advisory banner (weather / seismic / crime) ─────────────
@@ -714,22 +744,35 @@ class _DetailsPanelState extends State<_DetailsPanel> {
                 if (ctrl.mmdaBanner.isNotEmpty) ...[
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFFF3CD),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFFFD700), width: 1),
+                      border: Border.all(
+                        color: const Color(0xFFFFD700),
+                        width: 1,
+                      ),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.traffic_rounded, color: Color(0xFFB8860B), size: 18),
+                        const Icon(
+                          Icons.traffic_rounded,
+                          color: Color(0xFFB8860B),
+                          size: 18,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             ctrl.mmdaBanner,
                             style: GoogleFonts.plusJakartaSans(
-                              fontSize: 11, color: const Color(0xFF856404), fontWeight: FontWeight.w600),
+                              fontSize: 11,
+                              color: const Color(0xFF856404),
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
@@ -740,22 +783,35 @@ class _DetailsPanelState extends State<_DetailsPanel> {
                 if (ctrl.seismicBanner.isNotEmpty) ...[
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFFE5E5),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFFF4444), width: 1),
+                      border: Border.all(
+                        color: const Color(0xFFFF4444),
+                        width: 1,
+                      ),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.vibration_rounded, color: Color(0xFFCC0000), size: 18),
+                        const Icon(
+                          Icons.vibration_rounded,
+                          color: Color(0xFFCC0000),
+                          size: 18,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             ctrl.seismicBanner,
                             style: GoogleFonts.plusJakartaSans(
-                              fontSize: 11, color: const Color(0xFF8B0000), fontWeight: FontWeight.w600),
+                              fontSize: 11,
+                              color: const Color(0xFF8B0000),
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
@@ -2080,9 +2136,104 @@ class _LocationPopup extends StatelessWidget {
 //   • Flood-zone hazard circles (blue shades) with emoji labels
 //   • Community-report incident circles
 //   • Safe-spot POI markers (hospital, police, pharmacy, etc.)
-class _MapLayer extends StatelessWidget {
+class _MapLayer extends StatefulWidget {
   final MapController mapCtrl;
   const _MapLayer({required this.mapCtrl});
+
+  @override
+  State<_MapLayer> createState() => _MapLayerState();
+}
+
+class _MapLayerState extends State<_MapLayer> {
+  // Track the last set of resolved coords so we only fit-bounds once per
+  // new pair, not on every rebuild.
+  double? _lastOrigLat, _lastOrigLon, _lastDestLat, _lastDestLon;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Safe hook: fires after every provider-triggered rebuild, but NOT
+    // during the build phase, so we can schedule a post-frame callback here.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fitBoundsIfNewPins();
+    });
+  }
+
+  void _fitBoundsIfNewPins() {
+    if (!mounted) return;
+    final ctrl = context.read<ExploreController>();
+    final oLat = ctrl.resolvedOrigLat;
+    final oLon = ctrl.resolvedOrigLon;
+    final dLat = ctrl.resolvedDestLat;
+    final dLon = ctrl.resolvedDestLon;
+
+    // Need at least one complete pin to do anything
+    final hasOrig = oLat != null && oLon != null;
+    final hasDest = dLat != null && dLon != null;
+    if (!hasOrig && !hasDest) {
+      debugPrint('[_MapLayer] _fitBoundsIfNewPins: no coords yet, skipping');
+      return;
+    }
+
+    // Skip if nothing has meaningfully changed (< 5m tolerance)
+    bool _near(double? a, double? b) =>
+        a == b || (a != null && b != null && (a - b).abs() < 0.00005);
+    if (_near(oLat, _lastOrigLat) &&
+        _near(oLon, _lastOrigLon) &&
+        _near(dLat, _lastDestLat) &&
+        _near(dLon, _lastDestLon))
+      return;
+
+    _lastOrigLat = oLat;
+    _lastOrigLon = oLon;
+    _lastDestLat = dLat;
+    _lastDestLon = dLon;
+
+    final double targetLat;
+    final double targetLon;
+    final double zoom;
+
+    if (hasOrig && hasDest) {
+      // Both pins — center between them at a zoom that shows both
+      targetLat = (oLat! + dLat!) / 2;
+      targetLon = (oLon! + dLon!) / 2;
+      final maxDiff = [
+        (oLat - dLat).abs(),
+        (oLon! - dLon!).abs(),
+      ].reduce((a, b) => a > b ? a : b);
+      if (maxDiff < 0.01)
+        zoom = 15;
+      else if (maxDiff < 0.03)
+        zoom = 14;
+      else if (maxDiff < 0.07)
+        zoom = 13;
+      else if (maxDiff < 0.15)
+        zoom = 12;
+      else if (maxDiff < 0.35)
+        zoom = 11;
+      else
+        zoom = 10;
+    } else if (hasDest) {
+      // Only dest so far — center on it
+      targetLat = dLat!;
+      targetLon = dLon!;
+      zoom = 14;
+    } else {
+      // Only origin so far — center on it
+      targetLat = oLat!;
+      targetLon = oLon!;
+      zoom = 14;
+    }
+
+    debugPrint(
+      '[_MapLayer] Moving camera → ($targetLat, $targetLon) z=$zoom  orig=($oLat,$oLon) dest=($dLat,$dLon)',
+    );
+    try {
+      widget.mapCtrl.move(LatLng(targetLat, targetLon), zoom);
+    } catch (e) {
+      debugPrint('[_MapLayer] mapCtrl.move failed: $e');
+    }
+  }
 
   // ── Safety score → line colour (mirrors safetyLineColor in JS) ─────────────
   // ── Flood risk → colour (mirrors blueColors in JS) ─────────────────────────
@@ -2419,7 +2570,7 @@ class _MapLayer extends StatelessWidget {
         : <Marker>[];
 
     return FlutterMap(
-      mapController: mapCtrl,
+      mapController: widget.mapCtrl,
       options: MapOptions(
         initialCenter: ctrl.hasLocation && ctrl.lat != null
             ? LatLng(ctrl.lat!, ctrl.lng!)
@@ -3048,26 +3199,37 @@ class _SosButton extends StatelessWidget {
       child: GestureDetector(
         onTap: () => _onSosTap(context),
         child: Container(
-          width: 44, height: 44,
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(
             color: AppColors.safeRed,
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
                 color: AppColors.safeRed.withValues(alpha: 0.45),
-                blurRadius: 16, offset: const Offset(0, 4)),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
             ],
           ),
           child: Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.emergency_share_rounded,
-                    color: Colors.white, size: 16),
+                const Icon(
+                  Icons.emergency_share_rounded,
+                  color: Colors.white,
+                  size: 16,
+                ),
                 const SizedBox(height: 1),
-                Text('SOS',
+                Text(
+                  'SOS',
                   style: GoogleFonts.plusJakartaSans(
-                    color: Colors.white, fontSize: 8, fontWeight: FontWeight.w900)),
+                    color: Colors.white,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ],
             ),
           ),
