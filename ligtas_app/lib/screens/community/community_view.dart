@@ -605,7 +605,7 @@ class _CommunityViewState extends State<CommunityView> {
                           }
                           return;
                         }
-                        await ApiClient.instance.submitReportJson(
+                        await ApiClient.instance.submitReport(
                           lat: 14.5995,
                           lon: 120.9842,
                           reportType: selectedType!,

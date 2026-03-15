@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/api_client.dart';
 import '../../core/app_colors.dart';
 import '../../core/theme_controller.dart';
 import '../../data/mock_data.dart';
@@ -14,23 +13,10 @@ import 'explore_controller.dart';
 
 // ═══════════════════════════════════════════════════════════════
 // MiniScreen — Animated landing screen (State 1)
-//
-// Used in explore_view.dart as:
-//   MiniScreen(onSearchTap: () => _openSearch(context))
-//
-// Used in main.dart routes as:
-//   MiniScreen.routeName  →  '/explore/search'
-//   routes: { MiniScreen.routeName: (_) => const MiniScreen() }
-//   (when used as a route, it shows the search overlay instead)
 // ═══════════════════════════════════════════════════════════════
 class MiniScreen extends StatefulWidget {
-  /// Provide [onSearchTap] when embedding as the landing screen in explore_view.
-  /// Omit it (leave null) when pushed as a named route — it will show the
-  /// search overlay automatically.
   final VoidCallback? onSearchTap;
-
   const MiniScreen({super.key, this.onSearchTap});
-
   static const routeName = '/explore/search';
 
   @override
@@ -40,17 +26,13 @@ class MiniScreen extends StatefulWidget {
 class _MiniScreenState extends State<MiniScreen> {
   @override
   Widget build(BuildContext context) {
-    // When pushed as a named route (onSearchTap == null), show search overlay.
-    // When embedded in explore_view with onSearchTap, show the landing screen.
-    if (widget.onSearchTap == null) {
-      return const _SearchOverlay();
-    }
+    if (widget.onSearchTap == null) return const _SearchOverlay();
     return _LandingScreen(onSearchTap: widget.onSearchTap!);
   }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// LANDING SCREEN  (animated)
+// LANDING SCREEN
 // ═══════════════════════════════════════════════════════════════
 class _LandingScreen extends StatefulWidget {
   final VoidCallback onSearchTap;
@@ -62,19 +44,15 @@ class _LandingScreen extends StatefulWidget {
 
 class _LandingScreenState extends State<_LandingScreen>
     with TickerProviderStateMixin {
-
-  // ── Entry: plays once on mount ─────────────────────────────────
   late final AnimationController _entryCtrl;
   late final Animation<double> _logoFade, _logoScale;
-  late final Animation<Offset>  _logoSlide;
-  late final Animation<double>  _subtitleFade;
-  late final Animation<Offset>  _subtitleSlide;
-  late final Animation<double>  _pillFade;
-  late final Animation<Offset>  _pillSlide;
+  late final Animation<Offset> _logoSlide;
+  late final Animation<double> _subtitleFade;
+  late final Animation<Offset> _subtitleSlide;
+  late final Animation<double> _pillFade;
+  late final Animation<Offset> _pillSlide;
 
-  // ── Idle loop: only pulse (keeps RAM low) ─────────────────────
   late final AnimationController _pulseCtrl;
-
   late final Animation<double> _pulseOpacity, _pulseScale;
 
   @override
@@ -82,39 +60,64 @@ class _LandingScreenState extends State<_LandingScreen>
     super.initState();
 
     _entryCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 800));
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
 
-    _logoFade = CurvedAnimation(parent: _entryCtrl,
-        curve: const Interval(0.00, 0.55, curve: Curves.easeOut));
+    _logoFade = CurvedAnimation(
+      parent: _entryCtrl,
+      curve: const Interval(0.00, 0.55, curve: Curves.easeOut),
+    );
     _logoScale = Tween<double>(begin: 0.72, end: 1.0).animate(
-        CurvedAnimation(parent: _entryCtrl,
-            curve: const Interval(0.00, 0.60, curve: Curves.easeOutBack)));
-    _logoSlide = Tween<Offset>(
-        begin: const Offset(0, 0.22), end: Offset.zero).animate(
-        CurvedAnimation(parent: _entryCtrl,
-            curve: const Interval(0.00, 0.58, curve: Curves.easeOutCubic)));
+      CurvedAnimation(
+        parent: _entryCtrl,
+        curve: const Interval(0.00, 0.60, curve: Curves.easeOutBack),
+      ),
+    );
+    _logoSlide = Tween<Offset>(begin: const Offset(0, 0.22), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _entryCtrl,
+            curve: const Interval(0.00, 0.58, curve: Curves.easeOutCubic),
+          ),
+        );
 
-    _subtitleFade = CurvedAnimation(parent: _entryCtrl,
-        curve: const Interval(0.28, 0.72, curve: Curves.easeOut));
-    _subtitleSlide = Tween<Offset>(
-        begin: const Offset(0, 0.28), end: Offset.zero).animate(
-        CurvedAnimation(parent: _entryCtrl,
-            curve: const Interval(0.28, 0.72, curve: Curves.easeOutCubic)));
+    _subtitleFade = CurvedAnimation(
+      parent: _entryCtrl,
+      curve: const Interval(0.28, 0.72, curve: Curves.easeOut),
+    );
+    _subtitleSlide =
+        Tween<Offset>(begin: const Offset(0, 0.28), end: Offset.zero).animate(
+          CurvedAnimation(
+            parent: _entryCtrl,
+            curve: const Interval(0.28, 0.72, curve: Curves.easeOutCubic),
+          ),
+        );
 
-    _pillFade = CurvedAnimation(parent: _entryCtrl,
-        curve: const Interval(0.50, 0.92, curve: Curves.easeOut));
-    _pillSlide = Tween<Offset>(
-        begin: const Offset(0, 0.35), end: Offset.zero).animate(
-        CurvedAnimation(parent: _entryCtrl,
-            curve: const Interval(0.50, 0.92, curve: Curves.easeOutCubic)));
+    _pillFade = CurvedAnimation(
+      parent: _entryCtrl,
+      curve: const Interval(0.50, 0.92, curve: Curves.easeOut),
+    );
+    _pillSlide = Tween<Offset>(begin: const Offset(0, 0.35), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _entryCtrl,
+            curve: const Interval(0.50, 0.92, curve: Curves.easeOutCubic),
+          ),
+        );
 
     _pulseCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 2400))
-      ..repeat(reverse: true);
-    _pulseOpacity = Tween<double>(begin: 0.18, end: 0.52).animate(
-        CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
-    _pulseScale = Tween<double>(begin: 1.0, end: 1.15).animate(
-        CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat(reverse: true);
+    _pulseOpacity = Tween<double>(
+      begin: 0.18,
+      end: 0.52,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
+    _pulseScale = Tween<double>(
+      begin: 1.0,
+      end: 1.15,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _entryCtrl.forward();
@@ -140,14 +143,10 @@ class _LandingScreenState extends State<_LandingScreen>
         color: AppColors.bg(isDark),
         child: Stack(
           children: [
-
-            // ── Radial teal glow backdrop ──────────────────────
             Positioned.fill(child: _RadialGlow(isDark: isDark)),
-
-            // ── Dot-grid texture ───────────────────────────────
-            Positioned.fill(child: CustomPaint(painter: _DotGridPainter(isDark: isDark))),
-
-            // ── All content: centered ──────────────────────────
+            Positioned.fill(
+              child: CustomPaint(painter: _DotGridPainter(isDark: isDark)),
+            ),
             SafeArea(
               child: Center(
                 child: Padding(
@@ -156,8 +155,6 @@ class _LandingScreenState extends State<_LandingScreen>
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-
-                      // ── Logo + app name ──────────────────────
                       FadeTransition(
                         opacity: _logoFade,
                         child: SlideTransition(
@@ -167,64 +164,65 @@ class _LandingScreenState extends State<_LandingScreen>
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-
                                 AnimatedBuilder(
-                                  animation: Listenable.merge(
-                                      [_pulseScale, _pulseOpacity]),
+                                  animation: Listenable.merge([
+                                    _pulseScale,
+                                    _pulseOpacity,
+                                  ]),
                                   builder: (_, _) => SizedBox(
-                                    width: 120, height: 120,
+                                    width: 120,
+                                    height: 120,
                                     child: Stack(
                                       alignment: Alignment.center,
                                       children: [
-                                        // Outer glow ring
                                         Transform.scale(
                                           scale: _pulseScale.value,
                                           child: Container(
-                                            width: 110, height: 110,
+                                            width: 110,
+                                            height: 110,
                                             decoration: BoxDecoration(
                                               shape: BoxShape.circle,
                                               color: AppColors.teal.withValues(
-                                                  alpha: _pulseOpacity.value * 0.28),
+                                                alpha:
+                                                    _pulseOpacity.value * 0.28,
+                                              ),
                                             ),
                                           ),
                                         ),
-                                        // Middle glow ring
                                         Transform.scale(
-                                          scale: (_pulseScale.value - 1) * 0.55 + 1,
+                                          scale:
+                                              (_pulseScale.value - 1) * 0.55 +
+                                              1,
                                           child: Container(
-                                            width: 84, height: 84,
+                                            width: 84,
+                                            height: 84,
                                             decoration: BoxDecoration(
                                               shape: BoxShape.circle,
                                               color: AppColors.teal.withValues(
-                                                  alpha: _pulseOpacity.value * 0.45),
+                                                alpha:
+                                                    _pulseOpacity.value * 0.45,
+                                              ),
                                             ),
                                           ),
                                         ),
-
-                                        // ┌────────────────────────────────┐
-                                        // │   LOGO IMAGE PLACEHOLDER       │
-                                        // │   Replace this Container with: │
-                                        // │                                │
-                                        // │   SvgPicture.asset(            │
-                                        // │     'assets/logo.svg',         │
-                                        // │     width: 64, height: 64,     │
-                                        // │   )                            │
-                                        // └────────────────────────────────┘
                                         Container(
-                                          width: 64, height: 64,
+                                          width: 64,
+                                          height: 64,
                                           decoration: BoxDecoration(
                                             color: AppColors.teal,
-                                            borderRadius: BorderRadius.circular(18),
+                                            borderRadius: BorderRadius.circular(
+                                              18,
+                                            ),
                                             boxShadow: [
                                               BoxShadow(
-                                                color: AppColors.teal.withValues(alpha: 0.55),
+                                                color: AppColors.teal
+                                                    .withValues(alpha: 0.55),
                                                 blurRadius: 30,
                                                 spreadRadius: 2,
                                                 offset: const Offset(0, 8),
                                               ),
                                             ],
                                           ),
-                                          // ↓ Remove this Icon once SVG logo is ready
                                           child: const Icon(
                                             Icons.image_outlined,
                                             color: Colors.white54,
@@ -235,9 +233,7 @@ class _LandingScreenState extends State<_LandingScreen>
                                     ),
                                   ),
                                 ),
-
                                 const SizedBox(height: 20),
-
                                 Text(
                                   'LIGTAS',
                                   textAlign: TextAlign.center,
@@ -253,10 +249,7 @@ class _LandingScreenState extends State<_LandingScreen>
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 18),
-
-                      // ── Headline + subtitle ──────────────────
                       FadeTransition(
                         opacity: _subtitleFade,
                         child: SlideTransition(
@@ -270,7 +263,9 @@ class _LandingScreenState extends State<_LandingScreen>
                                 style: GoogleFonts.plusJakartaSans(
                                   fontSize: 22,
                                   fontWeight: FontWeight.w700,
-                                  color: AppColors.text(isDark).withValues(alpha: 0.92),
+                                  color: AppColors.text(
+                                    isDark,
+                                  ).withValues(alpha: 0.92),
                                   height: 1.38,
                                   letterSpacing: -0.3,
                                 ),
@@ -288,16 +283,13 @@ class _LandingScreenState extends State<_LandingScreen>
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 44),
-
-                      // ── Search pill ──────────────────────────
                       FadeTransition(
                         opacity: _pillFade,
                         child: SlideTransition(
                           position: _pillSlide,
                           child: _LandingSearchPill(
-                            onTap: widget.onSearchTap,
+                            onSearchTap: widget.onSearchTap,
                           ),
                         ),
                       ),
@@ -316,7 +308,6 @@ class _LandingScreenState extends State<_LandingScreen>
 // ═══════════════════════════════════════════════════════════════
 // BACKGROUND HELPERS
 // ═══════════════════════════════════════════════════════════════
-
 class _RadialGlow extends StatelessWidget {
   final bool isDark;
   const _RadialGlow({required this.isDark});
@@ -344,80 +335,120 @@ class _DotGridPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final p = Paint()
       ..color = AppColors.teal.withValues(alpha: isDark ? 0.045 : 0.06)
-      ..style  = PaintingStyle.fill;
+      ..style = PaintingStyle.fill;
     const spacing = 26.0;
     const r = 1.3;
-    for (double x = spacing / 2; x < size.width;  x += spacing) {
-    for (double y = spacing / 2; y < size.height; y += spacing) {
-      canvas.drawCircle(Offset(x, y), r, p);
-  }}}
-  @override bool shouldRepaint(_DotGridPainter old) => old.isDark != isDark;
+    for (double x = spacing / 2; x < size.width; x += spacing) {
+      for (double y = spacing / 2; y < size.height; y += spacing) {
+        canvas.drawCircle(Offset(x, y), r, p);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DotGridPainter old) => old.isDark != isDark;
 }
 
+// ── Landing search pill ──────────────────────────────────────────
+// The pill itself opens the search overlay.
+// The teal GPS icon button inside it independently:
+//   1. Calls GPS → reverse-geocodes → fills the origin field
+//   2. Then opens the search overlay so the user just needs to type a dest.
 class _LandingSearchPill extends StatelessWidget {
-  final VoidCallback onTap;
-  const _LandingSearchPill({required this.onTap});
+  final VoidCallback onSearchTap;
+  const _LandingSearchPill({required this.onSearchTap});
 
   @override
   Widget build(BuildContext context) {
     final isDark = context.watch<ThemeController>().isDark;
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: BoxDecoration(
-          color: AppColors.card(isDark),
-          borderRadius: BorderRadius.circular(50),
-          border: Border.all(
-            color: AppColors.teal.withValues(alpha: 0.35),
-            width: 1.4,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.teal.withValues(alpha: 0.12),
-              blurRadius: 20, offset: const Offset(0, 6),
-            ),
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.12),
-              blurRadius: 10, offset: const Offset(0, 3),
-            ),
-          ],
+    final ctrl = context.read<ExploreController>();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: AppColors.card(isDark),
+        borderRadius: BorderRadius.circular(50),
+        border: Border.all(
+          color: AppColors.teal.withValues(alpha: 0.35),
+          width: 1.4,
         ),
-        child: Row(children: [
-          const Icon(Icons.search_rounded, color: AppColors.teal, size: 20),
-          const SizedBox(width: 12),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.teal.withValues(alpha: 0.12),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // ── Search text area — opens search overlay ──
           Expanded(
-            child: Text('Search destination…',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 15,
-                color: AppColors.text2(isDark),
-                fontWeight: FontWeight.w500,
+            child: GestureDetector(
+              onTap: onSearchTap,
+              behavior: HitTestBehavior.opaque,
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.search_rounded,
+                    color: AppColors.teal,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Search destination…',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 15,
+                        color: AppColors.text2(isDark),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          Container(
-            width: 38, height: 38,
-            decoration: BoxDecoration(
-              color: AppColors.teal, shape: BoxShape.circle,
-              boxShadow: [BoxShadow(
-                color: AppColors.teal.withValues(alpha: 0.40),
-                blurRadius: 12, offset: const Offset(0, 3),
-              )],
+          // ── GPS icon — gets current location then opens search ──
+          GestureDetector(
+            onTap: () async {
+              await ctrl.useCurrentLocationAsOrigin();
+              onSearchTap();
+            },
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: AppColors.teal,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.teal.withValues(alpha: 0.40),
+                    blurRadius: 12,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.my_location_rounded,
+                color: Colors.white,
+                size: 17,
+              ),
             ),
-            child: const Icon(Icons.my_location_rounded,
-                color: Colors.white, size: 17),
           ),
-        ]),
+        ],
       ),
     );
   }
 }
 
-
 // ═══════════════════════════════════════════════════════════════
-// SEARCH OVERLAY  (original MiniScreen logic — unchanged)
-// Shown when MiniScreen is pushed as a named route with no onSearchTap
+// SEARCH OVERLAY
 // ═══════════════════════════════════════════════════════════════
 class _SearchOverlay extends StatefulWidget {
   const _SearchOverlay();
@@ -427,17 +458,21 @@ class _SearchOverlay extends StatefulWidget {
 }
 
 class _SearchOverlayState extends State<_SearchOverlay> {
-  final _currentCtrl  = TextEditingController();
-  final _destCtrl     = TextEditingController();
+  final _currentCtrl = TextEditingController();
+  final _destCtrl = TextEditingController();
   final _currentFocus = FocusNode();
-  final _destFocus    = FocusNode();
+  final _destFocus = FocusNode();
 
   bool _isOriginFocused = true;
-  bool _currentActive   = true;
+  bool _currentActive = true;
 
-  List<MiniItem> _filteredItems = [];
+  // ── Autocomplete ──────────────────────────────────────────────
+  // Two separate suggestion lists: static miniItems + live API results.
+  List<MiniItem> _filteredStatic = []; // from mock_data.dart
+  List<Map<String, dynamic>> _apiSuggestions = []; // from /api/suggest
   String _lastQuery = '___INIT___';
   Timer? _debounce;
+  bool _isLoadingApi = false;
 
   @override
   void initState() {
@@ -445,8 +480,8 @@ class _SearchOverlayState extends State<_SearchOverlay> {
 
     final ctrl = context.read<ExploreController>();
     _currentCtrl.text = ctrl.originText;
-    _destCtrl.text    = ctrl.destText;
-    _filteredItems    = List.from(miniItems);
+    _destCtrl.text = ctrl.destText;
+    _filteredStatic = List.from(miniItems);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_currentCtrl.text.isEmpty) {
@@ -467,7 +502,7 @@ class _SearchOverlayState extends State<_SearchOverlay> {
   void _setFocusState(bool isOrigin) {
     if (!mounted) return;
     setState(() {
-      _currentActive   = isOrigin;
+      _currentActive = isOrigin;
       _isOriginFocused = isOrigin;
       _lastQuery = '___REFRESH___';
       _onSearchChanged();
@@ -489,48 +524,67 @@ class _SearchOverlayState extends State<_SearchOverlay> {
     if (query == _lastQuery) return;
     _lastQuery = query;
 
-    if (query.isEmpty) {
-      setState(() => _filteredItems = List.from(miniItems));
-      return;
-    }
+    // Always update static results instantly
+    setState(() {
+      _filteredStatic = query.isEmpty
+          ? List.from(miniItems)
+          : _searchStatic(query);
+      _apiSuggestions = [];
+    });
 
-    // Show immediate local results while API call is in-flight
-    setState(() => _filteredItems = _localSearch(query));
-
-    // Debounce API call — wait 400ms after user stops typing
+    // Fetch live API suggestions for queries ≥ 3 characters
     if (query.length >= 3) {
-      _debounce?.cancel();
-      _debounce = Timer(const Duration(milliseconds: 400), () {
-        _fetchApiSuggestions(query);
-      });
+      _fetchApiSuggestions(query);
     }
   }
 
   Future<void> _fetchApiSuggestions(String query) async {
-    final results = await ApiClient.instance.getSuggestions(query);
     if (!mounted) return;
-    // Only apply if the query hasn't changed since the call was made
-    final current = _isOriginFocused ? _currentCtrl.text : _destCtrl.text;
-    if (current != query) return;
-    if (results.isNotEmpty) {
-      setState(() => _filteredItems = results);
+    setState(() => _isLoadingApi = true);
+    try {
+      final ctrl = context.read<ExploreController>();
+      final results = await ctrl.suggestLocations(query);
+      if (!mounted) return;
+      // Guard: only update if the query is still current
+      final currentQuery = _isOriginFocused
+          ? _currentCtrl.text
+          : _destCtrl.text;
+      if (currentQuery == query) {
+        setState(() {
+          _apiSuggestions = results;
+          _isLoadingApi = false;
+        });
+      } else {
+        setState(() => _isLoadingApi = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingApi = false);
     }
   }
 
-  List<MiniItem> _localSearch(String query) {
+  List<MiniItem> _searchStatic(String query) {
     final lowerQuery = query.toLowerCase().trim();
-    final scored = miniItems.map((item) {
-      final nameLower = item.name.toLowerCase();
-      final subLower  = item.sub.toLowerCase();
-      int score = 0;
-      if (nameLower == lowerQuery)                                              { score = 1000; }
-      else if (nameLower.startsWith(lowerQuery))                                { score = 500;  }
-      else if (nameLower.contains(' $lowerQuery') ||
-               nameLower.contains('$lowerQuery '))                              { score = 300;  }
-      else if (nameLower.contains(lowerQuery))                                  { score = 100;  }
-      else if (subLower.contains(lowerQuery))                                   { score = 50;   }
-      return MapEntry(item, score);
-    }).where((e) => e.value > 0).toList();
+    final scored = miniItems
+        .map((item) {
+          final nameLower = item.name.toLowerCase();
+          final subLower = item.sub.toLowerCase();
+          int score = 0;
+          if (nameLower == lowerQuery) {
+            score = 1000;
+          } else if (nameLower.startsWith(lowerQuery)) {
+            score = 500;
+          } else if (nameLower.contains(' $lowerQuery') ||
+              nameLower.contains('$lowerQuery ')) {
+            score = 300;
+          } else if (nameLower.contains(lowerQuery)) {
+            score = 100;
+          } else if (subLower.contains(lowerQuery)) {
+            score = 50;
+          }
+          return MapEntry(item, score);
+        })
+        .where((e) => e.value > 0)
+        .toList();
     scored.sort((a, b) => b.value.compareTo(a.value));
     return scored.map((e) => e.key).toList();
   }
@@ -553,7 +607,7 @@ class _SearchOverlayState extends State<_SearchOverlay> {
     FocusScope.of(context).unfocus();
     final ctrl = context.read<ExploreController>();
     if (_currentCtrl.text.isNotEmpty) ctrl.setOriginText(_currentCtrl.text);
-    if (_destCtrl.text.isNotEmpty)    ctrl.setDestText(_destCtrl.text);
+    if (_destCtrl.text.isNotEmpty) ctrl.setDestText(_destCtrl.text);
     ctrl.searchRoutes();
     if (mounted) Navigator.of(context).pop();
   }
@@ -563,7 +617,7 @@ class _SearchOverlayState extends State<_SearchOverlay> {
     Navigator.of(context).pop();
   }
 
-  void _onItemTap(MiniItem item) {
+  void _onStaticItemTap(MiniItem item) {
     if (_isOriginFocused) {
       _currentCtrl.text = item.name;
       _destFocus.requestFocus();
@@ -575,9 +629,38 @@ class _SearchOverlayState extends State<_SearchOverlay> {
     }
   }
 
+  void _onApiItemTap(String placeName) {
+    if (_isOriginFocused) {
+      _currentCtrl.text = placeName;
+      _destFocus.requestFocus();
+    } else {
+      _destCtrl.text = placeName;
+    }
+    setState(() {
+      _apiSuggestions = [];
+    });
+    if (_currentCtrl.text.isNotEmpty && _destCtrl.text.isNotEmpty) {
+      _search();
+    }
+  }
+
+  /// Called by the GPS icon in the search header.
+  /// Gets position, fills origin field, then shifts focus to destination.
+  Future<void> _useCurrentLocation() async {
+    final ctrl = context.read<ExploreController>();
+    await ctrl.useCurrentLocationAsOrigin();
+    if (!mounted) return;
+    // After GPS fills the field, sync the controller text
+    _currentCtrl.text = ctrl.originText;
+    _destFocus.requestFocus();
+    _setFocusState(false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = context.watch<ThemeController>().isDark;
+    final query = _isOriginFocused ? _currentCtrl.text : _destCtrl.text;
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
@@ -586,21 +669,26 @@ class _SearchOverlayState extends State<_SearchOverlay> {
           child: Column(
             children: [
               _InputHeader(
-                currentCtrl:   _currentCtrl,
-                destCtrl:      _destCtrl,
-                currentFocus:  _currentFocus,
-                destFocus:     _destFocus,
+                currentCtrl: _currentCtrl,
+                destCtrl: _destCtrl,
+                currentFocus: _currentFocus,
+                destFocus: _destFocus,
                 currentActive: _currentActive,
-                onCurrentTap:  () => _currentFocus.requestFocus(),
-                onDestTap:     () => _destFocus.requestFocus(),
-                onSearch:      _search,
-                onBack:        _back,
+                onCurrentTap: () => _currentFocus.requestFocus(),
+                onDestTap: () => _destFocus.requestFocus(),
+                onSearch: _search,
+                onBack: _back,
+                onUseCurrentLocation: _useCurrentLocation,
               ),
+              const _ModeSelectorRow(),
               Expanded(
                 child: _SuggestionList(
-                  items: _filteredItems,
-                  query: _currentActive ? _currentCtrl.text : _destCtrl.text,
-                  onSelect: _onItemTap,
+                  staticItems: _filteredStatic,
+                  apiSuggestions: _apiSuggestions,
+                  isLoadingApi: _isLoadingApi,
+                  query: query,
+                  onSelectStatic: _onStaticItemTap,
+                  onSelectApi: _onApiItemTap,
                 ),
               ),
             ],
@@ -612,7 +700,84 @@ class _SearchOverlayState extends State<_SearchOverlay> {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SEARCH OVERLAY COMPONENTS  (original — unchanged)
+// MODE SELECTOR ROW — Transit / Walk / Car / Motorcycle
+// ═══════════════════════════════════════════════════════════════
+
+class _ModeSelectorRow extends StatelessWidget {
+  const _ModeSelectorRow();
+
+  static const _modes = [
+    _ModeOption(key: 'transit', label: 'Transit', emoji: '🚌'),
+    _ModeOption(key: 'walk', label: 'Walk', emoji: '🚶'),
+    _ModeOption(key: 'car', label: 'Car', emoji: '🚗'),
+    _ModeOption(key: 'motorcycle', label: 'Motorcycle', emoji: '🏍️'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<ExploreController>();
+    final isDark = context.watch<ThemeController>().isDark;
+
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.bg(isDark),
+        border: Border(bottom: BorderSide(color: AppColors.border(isDark))),
+      ),
+      child: Row(
+        children: _modes.map((m) {
+          final isActive = ctrl.activeMode == m.key;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => ctrl.setMode(m.key),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: isActive ? AppColors.teal : AppColors.card2(isDark),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isActive ? AppColors.teal : AppColors.border(isDark),
+                  ),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(m.emoji, style: const TextStyle(fontSize: 14)),
+                    const SizedBox(height: 1),
+                    Text(
+                      m.label,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: isActive
+                            ? Colors.white
+                            : AppColors.text2(isDark),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _ModeOption {
+  final String key, label, emoji;
+  const _ModeOption({
+    required this.key,
+    required this.label,
+    required this.emoji,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SEARCH OVERLAY COMPONENTS
 // ═══════════════════════════════════════════════════════════════
 
 class _InputHeader extends StatelessWidget {
@@ -626,6 +791,7 @@ class _InputHeader extends StatelessWidget {
     required this.onDestTap,
     required this.onSearch,
     required this.onBack,
+    required this.onUseCurrentLocation,
   });
 
   final TextEditingController currentCtrl;
@@ -637,6 +803,7 @@ class _InputHeader extends StatelessWidget {
   final VoidCallback onDestTap;
   final VoidCallback onSearch;
   final VoidCallback onBack;
+  final VoidCallback onUseCurrentLocation; // ← NEW: GPS tap handler
 
   @override
   Widget build(BuildContext context) {
@@ -653,55 +820,99 @@ class _InputHeader extends StatelessWidget {
               GestureDetector(
                 onTap: onBack,
                 child: Container(
-                  width: 32, height: 32,
+                  width: 32,
+                  height: 32,
                   margin: const EdgeInsets.only(top: 6),
                   decoration: BoxDecoration(
                     color: AppColors.card2(isDark),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(Icons.arrow_back_rounded, size: 18,
-                      color: AppColors.text2(isDark)),
+                  child: Icon(
+                    Icons.arrow_back_rounded,
+                    size: 18,
+                    color: AppColors.text2(isDark),
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
               Column(
                 children: [
                   const SizedBox(height: 14),
-                  _Dot(color: currentActive
-                      ? AppColors.teal : AppColors.text3(isDark)),
+                  _Dot(
+                    color: currentActive
+                        ? AppColors.teal
+                        : AppColors.text3(isDark),
+                  ),
                   Container(
-                    width: 2, height: 32,
+                    width: 2,
+                    height: 32,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
                           currentActive
-                              ? AppColors.teal : AppColors.text3(isDark),
+                              ? AppColors.teal
+                              : AppColors.text3(isDark),
                           !currentActive
-                              ? AppColors.teal : AppColors.text3(isDark),
+                              ? AppColors.teal
+                              : AppColors.text3(isDark),
                         ],
                       ),
                     ),
                   ),
-                  _Dot(color: !currentActive
-                      ? AppColors.teal : AppColors.text3(isDark)),
+                  _Dot(
+                    color: !currentActive
+                        ? AppColors.teal
+                        : AppColors.text3(isDark),
+                  ),
                 ],
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   children: [
-                    _InputField(
-                      controller: currentCtrl,
-                      focusNode: currentFocus,
-                      onTap: onCurrentTap,
-                      hint: 'Current location',
-                      isActive: currentActive,
-                      dotIcon: Icons.my_location_rounded,
-                      dotColor: AppColors.teal,
-                      textInputAction: TextInputAction.next,
-                      onSubmitted: (_) => destFocus.requestFocus(),
+                    // ── Current location field with GPS icon ──────────────────
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _InputField(
+                            controller: currentCtrl,
+                            focusNode: currentFocus,
+                            onTap: onCurrentTap,
+                            hint: 'Current location',
+                            isActive: currentActive,
+                            dotIcon: Icons.my_location_rounded,
+                            dotColor: AppColors.teal,
+                            textInputAction: TextInputAction.next,
+                            onSubmitted: (_) => destFocus.requestFocus(),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        // ── GPS button — fills origin from device location ──
+                        GestureDetector(
+                          onTap: onUseCurrentLocation,
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: AppColors.teal,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.teal.withValues(alpha: 0.35),
+                                  blurRadius: 8,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.my_location_rounded,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     _InputField(
@@ -722,11 +933,12 @@ class _InputHeader extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Tap a suggestion or press Enter to search',
+            'Tap the 📍 icon to use your current location',
             style: GoogleFonts.plusJakartaSans(
-                fontSize: 11,
-                color: AppColors.text3(isDark),
-                fontWeight: FontWeight.w500),
+              fontSize: 11,
+              color: AppColors.text3(isDark),
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ],
       ),
@@ -740,13 +952,15 @@ class _Dot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 10, height: 10,
+      width: 10,
+      height: 10,
       decoration: BoxDecoration(
         color: color,
         shape: BoxShape.circle,
         border: Border.all(
-            color: AppColors.card2(context.watch<ThemeController>().isDark),
-            width: 2),
+          color: AppColors.card2(context.watch<ThemeController>().isDark),
+          width: 2,
+        ),
       ),
     );
   }
@@ -785,7 +999,8 @@ class _InputField extends StatelessWidget {
         color: isActive ? AppColors.tealDim : AppColors.card2(isDark),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-            color: isActive ? AppColors.teal : Colors.transparent),
+          color: isActive ? AppColors.teal : Colors.transparent,
+        ),
       ),
       child: Row(
         children: [
@@ -801,11 +1016,15 @@ class _InputField extends StatelessWidget {
               autocorrect: false,
               enableSuggestions: false,
               style: GoogleFonts.plusJakartaSans(
-                  color: AppColors.text(isDark), fontSize: 13),
+                color: AppColors.text(isDark),
+                fontSize: 13,
+              ),
               decoration: InputDecoration(
                 hintText: hint,
                 hintStyle: GoogleFonts.plusJakartaSans(
-                    color: AppColors.text2(isDark), fontSize: 13),
+                  color: AppColors.text2(isDark),
+                  fontSize: 13,
+                ),
                 isDense: true,
                 contentPadding: EdgeInsets.zero,
                 border: InputBorder.none,
@@ -819,8 +1038,11 @@ class _InputField extends StatelessWidget {
                   ? const SizedBox.shrink()
                   : GestureDetector(
                       onTap: () => controller.clear(),
-                      child: Icon(Icons.close_rounded,
-                          size: 14, color: AppColors.text2(isDark)),
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 14,
+                        color: AppColors.text2(isDark),
+                      ),
                     ),
             ),
         ],
@@ -829,38 +1051,160 @@ class _InputField extends StatelessWidget {
   }
 }
 
+// ── Unified suggestion list ────────────────────────────────────
+// Shows live API results first, then static favourites below.
 class _SuggestionList extends StatelessWidget {
-  final List<MiniItem> items;
+  final List<MiniItem> staticItems;
+  final List<Map<String, dynamic>> apiSuggestions;
+  final bool isLoadingApi;
   final String query;
-  final void Function(MiniItem) onSelect;
-  const _SuggestionList(
-      {required this.items, required this.query, required this.onSelect});
+  final void Function(MiniItem) onSelectStatic;
+  final void Function(String) onSelectApi;
+
+  const _SuggestionList({
+    required this.staticItems,
+    required this.apiSuggestions,
+    required this.isLoadingApi,
+    required this.query,
+    required this.onSelectStatic,
+    required this.onSelectApi,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isDark = context.watch<ThemeController>().isDark;
-    if (items.isEmpty && query.isNotEmpty) {
+    final hasApi = apiSuggestions.isNotEmpty;
+    final hasStatic = staticItems.isNotEmpty;
+    final isEmpty = !hasApi && !hasStatic && query.isNotEmpty && !isLoadingApi;
+
+    if (isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off_rounded,
-                size: 48, color: AppColors.text3(isDark)),
+            Icon(
+              Icons.search_off_rounded,
+              size: 48,
+              color: AppColors.text3(isDark),
+            ),
             const SizedBox(height: 16),
-            Text('No results for "$query"',
-                style: GoogleFonts.plusJakartaSans(
-                    fontSize: 14,
-                    color: AppColors.text2(isDark),
-                    fontWeight: FontWeight.w600)),
+            Text(
+              'No results for "$query"',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 14,
+                color: AppColors.text2(isDark),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
         ),
       );
     }
-    return ListView.builder(
+
+    return ListView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      itemCount: items.length,
-      itemBuilder: (_, i) => _SuggestionTile(
-          item: items[i], query: query, onTap: () => onSelect(items[i])),
+      children: [
+        // ── Loading indicator while API call is in-flight ──────
+        if (isLoadingApi)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.teal,
+                ),
+              ),
+            ),
+          ),
+
+        // ── Live API results (Nominatim) ───────────────────────
+        if (hasApi) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text(
+              'Places',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text3(isDark),
+                letterSpacing: 0.8,
+              ),
+            ),
+          ),
+          ...apiSuggestions.map((place) {
+            final name = place['display_name'] as String? ?? '';
+            final address = place['address'] as Map? ?? {};
+            // Build a short readable label from the address parts
+            final shortName = [
+              address['road'] as String?,
+              address['suburb'] as String? ?? address['city'] as String?,
+            ].where((s) => s != null && s.isNotEmpty).join(', ');
+
+            return ListTile(
+              leading: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.tealDim,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.location_on_rounded,
+                  size: 18,
+                  color: AppColors.teal,
+                ),
+              ),
+              title: _HighlightedText(
+                text: shortName.isNotEmpty ? shortName : name,
+                query: query,
+                style: GoogleFonts.plusJakartaSans(
+                  color: AppColors.text(isDark),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: shortName.isNotEmpty
+                  ? Text(
+                      name,
+                      style: GoogleFonts.plusJakartaSans(
+                        color: AppColors.text2(isDark),
+                        fontSize: 10,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    )
+                  : null,
+              onTap: () => onSelectApi(shortName.isNotEmpty ? shortName : name),
+            );
+          }),
+        ],
+
+        // ── Static favourites / recent places ─────────────────
+        if (hasStatic) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text(
+              hasApi ? 'Suggestions' : 'Recent & Saved',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text3(isDark),
+                letterSpacing: 0.8,
+              ),
+            ),
+          ),
+          ...staticItems.map(
+            (item) => _SuggestionTile(
+              item: item,
+              query: query,
+              onTap: () => onSelectStatic(item),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -869,35 +1213,47 @@ class _SuggestionTile extends StatelessWidget {
   final MiniItem item;
   final String query;
   final VoidCallback onTap;
-  const _SuggestionTile(
-      {required this.item, required this.query, required this.onTap});
+  const _SuggestionTile({
+    required this.item,
+    required this.query,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isDark = context.watch<ThemeController>().isDark;
     return ListTile(
       leading: Container(
-        width: 36, height: 36,
+        width: 36,
+        height: 36,
         decoration: BoxDecoration(
-            color: AppColors.card2(isDark),
-            borderRadius: BorderRadius.circular(10)),
-        child: Icon(item.icon,
-            size: 18,
-            color: item.type == MiniItemType.heart
-                ? AppColors.safeRed
-                : AppColors.text2(isDark)),
+          color: AppColors.card2(isDark),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(
+          item.icon,
+          size: 18,
+          color: item.type == MiniItemType.heart
+              ? AppColors.safeRed
+              : AppColors.text2(isDark),
+        ),
       ),
       title: _HighlightedText(
         text: item.name,
         query: query,
         style: GoogleFonts.plusJakartaSans(
-            color: AppColors.text(isDark),
-            fontSize: 13,
-            fontWeight: FontWeight.w600),
+          color: AppColors.text(isDark),
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
       ),
-      subtitle: Text(item.sub,
-          style: GoogleFonts.plusJakartaSans(
-              color: AppColors.text2(isDark), fontSize: 11)),
+      subtitle: Text(
+        item.sub,
+        style: GoogleFonts.plusJakartaSans(
+          color: AppColors.text2(isDark),
+          fontSize: 11,
+        ),
+      ),
       onTap: onTap,
     );
   }
@@ -907,30 +1263,43 @@ class _HighlightedText extends StatelessWidget {
   final String text;
   final String query;
   final TextStyle style;
-  const _HighlightedText(
-      {required this.text, required this.query, required this.style});
+  const _HighlightedText({
+    required this.text,
+    required this.query,
+    required this.style,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final lowerText  = text.toLowerCase();
+    final lowerText = text.toLowerCase();
     final lowerQuery = query.toLowerCase();
-    final index      = lowerText.indexOf(lowerQuery);
+    final index = lowerText.indexOf(lowerQuery);
 
     if (query.isEmpty || index == -1) {
-      return Text(text, style: style, maxLines: 1,
-          overflow: TextOverflow.ellipsis);
+      return Text(
+        text,
+        style: style,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
     }
-
     return Text.rich(
-      TextSpan(children: [
-        TextSpan(text: text.substring(0, index)),
-        TextSpan(
+      TextSpan(
+        children: [
+          TextSpan(text: text.substring(0, index)),
+          TextSpan(
             text: text.substring(index, index + query.length),
             style: const TextStyle(
-                fontWeight: FontWeight.w800, color: AppColors.teal)),
-        TextSpan(text: text.substring(index + query.length)),
-      ], style: style),
-      maxLines: 1, overflow: TextOverflow.ellipsis,
+              fontWeight: FontWeight.w800,
+              color: AppColors.teal,
+            ),
+          ),
+          TextSpan(text: text.substring(index + query.length)),
+        ],
+        style: style,
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }

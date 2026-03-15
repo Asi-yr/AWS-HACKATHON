@@ -18,7 +18,7 @@ class ApiClient {
   /// - On Android emulator, `10.0.2.2` points to the host machine.
   /// - On iOS simulator or real devices, change this to your machine's LAN IP,
   ///   e.g. `http://192.168.1.10:5000`.
-  static const String baseUrl = 'http://10.0.2.2:5000';
+  static const String baseUrl = 'http://localhost:5000';
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
@@ -35,6 +35,7 @@ class ApiClient {
     required String origin,
     required String destination,
     String mode = 'commute',
+    Map<String, dynamic>? extraParams,
   }) async {
     final resp = await http.post(
       _uri('/api/routes'),
@@ -43,16 +44,41 @@ class ApiClient {
         'origin': origin,
         'destination': destination,
         'mode': mode,
+        ...?extraParams,
       }),
-    );
+    ).timeout(const Duration(seconds: 90));
 
-    if (resp.statusCode != 200) {
-      throw Exception('Backend returned ${resp.statusCode}');
+    // ── Never throw on HTTP errors — always return a usable map ──────────
+    // The controller checks routes.isEmpty and surfaces the error as a toast.
+    // Throwing here crashes the app with an unhandled exception on every
+    // "no route found" / geocoding failure from the backend.
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(resp.body);
+    } catch (_) {
+      decoded = <String, dynamic>{};
+    }
+    if (decoded is! Map<String, dynamic>) {
+      decoded = <String, dynamic>{};
     }
 
-    final dynamic decoded = jsonDecode(resp.body);
-    if (decoded is! Map<String, dynamic>) {
-      throw Exception('Unexpected /api/routes payload shape');
+    // 4xx / 5xx — backend returned an error payload like {"error": "..."}
+    if (resp.statusCode != 200) {
+      return {
+        'routes': <RouteModel>[],
+        'error': (decoded['error'] ?? decoded['message'] ?? 'No route found (${resp.statusCode})').toString(),
+        'incidents': <dynamic>[],
+        'mmda_banner': '',
+        'mmda_closures_count': 0,
+        'earthquakes': <dynamic>[],
+        'seismic_banner': '',
+        'weather_risk': 'clear',
+        'flood_risk': 'none',
+        'orig_lat': null,
+        'orig_lon': null,
+        'dest_lat': null,
+        'dest_lon': null,
+      };
     }
 
     // Extract routes
@@ -85,49 +111,48 @@ class ApiClient {
       'seismic_banner': seismicBanner.toString(),
       'weather_risk': weatherRisk.toString(),
       'flood_risk': floodRisk.toString(),
+      // Resolved geocoded coordinates for A/B map pins
+      'orig_lat': decoded['orig_lat'],
+      'orig_lon': decoded['orig_lon'],
+      'dest_lat': decoded['dest_lat'],
+      'dest_lon': decoded['dest_lon'],
     };
   }
 
-  /// Original method for backward compatibility.
-  /// Call the backend `/api/routes` endpoint and adapt the result into
-  /// the app's `RouteModel` shape used by ExploreView.
   Future<List<RouteModel>> searchRoutes({
     required String origin,
     required String destination,
     String mode = 'commute',
   }) async {
-    final resp = await http.post(
-      _uri('/api/routes'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'origin': origin,
-        'destination': destination,
-        // The backend accepts `mode` or `commuterType`.
-        'mode': mode,
-      }),
-    );
+    try {
+      final resp = await http.post(
+        _uri('/api/routes'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'origin': origin,
+          'destination': destination,
+          'mode': mode,
+        }),
+      ).timeout(const Duration(seconds: 90));
 
-    if (resp.statusCode != 200) {
-      throw Exception('Backend returned ${resp.statusCode}');
-    }
+      if (resp.statusCode != 200) return const [];
 
-    final dynamic decoded = jsonDecode(resp.body);
-    if (decoded is! Map<String, dynamic>) {
-      throw Exception('Unexpected /api/routes payload shape');
-    }
+      final dynamic decoded = jsonDecode(resp.body);
+      if (decoded is! Map<String, dynamic>) return const [];
 
-    final routesJson = decoded['routes'];
-    if (routesJson is! List) {
+      final routesJson = decoded['routes'];
+      if (routesJson is! List) return const [];
+
+      final List<RouteModel> result = [];
+      for (var i = 0; i < routesJson.length; i++) {
+        final r = routesJson[i];
+        if (r is! Map<String, dynamic>) continue;
+        result.add(_routeFromApi(i, r));
+      }
+      return result;
+    } catch (_) {
       return const [];
     }
-
-    final List<RouteModel> result = [];
-    for (var i = 0; i < routesJson.length; i++) {
-      final r = routesJson[i];
-      if (r is! Map<String, dynamic>) continue;
-      result.add(_routeFromApi(i, r));
-    }
-    return result;
   }
 
   RouteModel _routeFromApi(int index, Map<String, dynamic> r) {
@@ -135,8 +160,17 @@ class ApiClient {
     final String distanceStr = (r['distance'] ?? '').toString();
     final int minutes = _parseMinutes(timeStr);
 
-    final numFare = r['fare'];
-    final int fare = numFare is num ? numFare.round() : 0;
+    // ── Fare: backend sends either a plain num OR { display, value } ──────
+    final fareRaw = r['fare'];
+    final int fare;
+    if (fareRaw is num) {
+      fare = fareRaw.round();
+    } else if (fareRaw is Map) {
+      final v = fareRaw['value'];
+      fare = v is num ? v.round() : 0;
+    } else {
+      fare = 0;
+    }
 
     final numScore = r['safety_score'] ?? 75;
     final int safetyScore = numScore is num ? numScore.round() : 75;
@@ -145,22 +179,15 @@ class ApiClient {
         (r['mode_label'] ?? r['route_name'] ?? 'Route ${index + 1}').toString();
     final String modes = modeLabelRaw;
 
-    final String tag = _tagFromModeLabel(modeLabelRaw);
+    final String tag = _tagFromScore(safetyScore, r['tag'] as String?);
 
     final String safetyNote =
-        (r['safety_note'] ?? 'Safety score $safetyScore based on live risk data.')
+        (r['safety_note'] ??
+                'Safety score $safetyScore based on live risk data.')
             .toString();
 
-    // Basic step list: keep it simple and let the design drive the text.
-    final List<RouteStep> steps = [
-      RouteStep(
-        title: modes,
-        description: [
-          if (timeStr.isNotEmpty) timeStr,
-          if (distanceStr.isNotEmpty) distanceStr,
-        ].join(' · '),
-      ),
-    ];
+    // ── Build step list from segments (rich breakdown) ───────────────────
+    final List<RouteStep> steps = _buildSteps(r, modes, timeStr, distanceStr);
 
     final List<List<double>> polyline = _extractPolyline(r);
 
@@ -174,15 +201,83 @@ class ApiClient {
       safetyNote: safetyNote,
       steps: steps,
       polyline: polyline,
-      // Back-end does not yet expose explicit commuter/ligtas tags.
       commuterTags: const [],
       ligtasTags: const [],
-      // ── Live risk warnings from /api/routes pipeline ──────────────────────
-      seismicWarning:  r['seismic_warning']  as String?,
-      floodWarning:    r['flood_warning']    as String?,
-      crimeWarning:    r['crime_warning']    as String?,
+      seismicWarning: r['seismic_warning'] as String?,
+      floodWarning: r['flood_warning'] as String?,
+      crimeWarning: r['crime_warning'] as String?,
       profileWarnings: r['profile_warnings'] as List<dynamic>?,
+      routeCrimeZones: (r['route_crime_zones'] is List)
+          ? (r['route_crime_zones'] as List)
+                .whereType<Map<String, dynamic>>()
+                .toList()
+          : null,
+      floodZonesMap: (r['flood_zones_map'] is List)
+          ? (r['flood_zones_map'] as List)
+                .whereType<Map<String, dynamic>>()
+                .toList()
+          : null,
     );
+  }
+
+  /// Build a step list from backend segment data.
+  /// Falls back to a single summary step when no segments are present.
+  List<RouteStep> _buildSteps(
+    Map<String, dynamic> r,
+    String modes,
+    String timeStr,
+    String distanceStr,
+  ) {
+    final segments = r['segments'];
+    if (segments is List && segments.isNotEmpty) {
+      final steps = <RouteStep>[];
+      for (final seg in segments) {
+        if (seg is! Map<String, dynamic>) continue;
+        final type = (seg['type'] ?? '').toString();
+        final label = (seg['label'] ?? '').toString();
+        if (label.isEmpty && type.isEmpty) continue;
+
+        final String title;
+        final String desc;
+        switch (type) {
+          case 'walk':
+            title = label.isNotEmpty ? label : 'Walk';
+            final walkDist = seg['distance']?.toString() ?? '';
+            desc = walkDist.isNotEmpty ? walkDist : '';
+            break;
+          case 'train':
+            title = label.isNotEmpty ? label : 'Train';
+            final stations = seg['stations'] as List?;
+            final sc = stations?.length ?? 0;
+            desc = sc > 1 ? '$sc stations' : '';
+            break;
+          case 'jeepney':
+            title = label.isNotEmpty ? label : 'Jeepney';
+            desc = '';
+            break;
+          case 'bus':
+            title = label.isNotEmpty ? label : 'Bus';
+            desc = '';
+            break;
+          default:
+            title = label.isNotEmpty ? label : type;
+            desc = '';
+        }
+        steps.add(RouteStep(title: title, description: desc, vehicleName: type));
+      }
+      if (steps.isNotEmpty) return steps;
+    }
+
+    // Fallback single step
+    return [
+      RouteStep(
+        title: modes,
+        description: [
+          if (timeStr.isNotEmpty) timeStr,
+          if (distanceStr.isNotEmpty) distanceStr,
+        ].join(' · '),
+      ),
+    ];
   }
 
   List<List<double>> _extractPolyline(Map<String, dynamic> r) {
@@ -211,7 +306,9 @@ class ApiClient {
           final sc = seg['coords'];
           if (sc is List && sc.isNotEmpty) {
             // Either [[lat,lon], ...] or [[[lat,lon],...], ...]
-            if (sc.first is List && (sc.first as List).isNotEmpty && (sc.first as List).first is List) {
+            if (sc.first is List &&
+                (sc.first as List).isNotEmpty &&
+                (sc.first as List).first is List) {
               for (final sub in sc) {
                 if (sub is List) {
                   for (final p in sub) {
@@ -267,13 +364,14 @@ class ApiClient {
     return total.round();
   }
 
-  String _tagFromModeLabel(String modeLabel) {
-    final lower = modeLabel.toLowerCase();
-    if (lower.contains('fastest')) return 'fastest';
-    if (lower.contains('balanced')) return 'balanced';
-    if (lower.contains('only route')) return 'balanced';
-    if (lower.contains('alternate')) return 'moderate';
-    return 'balanced';
+  /// Derive a RouteModel tag from the backend `tag` field (if present)
+  /// or from the safety score as a fallback.
+  String _tagFromScore(int safetyScore, String? backendTag) {
+    if (backendTag != null && backendTag.isNotEmpty) return backendTag;
+    if (safetyScore >= 85) return 'safest';
+    if (safetyScore >= 75) return 'balanced';
+    if (safetyScore >= 65) return 'moderate';
+    return 'dangerous';
   }
 
   double? _toDouble(dynamic v) {
@@ -323,10 +421,7 @@ class ApiClient {
       final resp = await http.post(
         _uri('/api/auth/login'),
         headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'username': username,
-          'password': password,
-        }),
+        body: jsonEncode({'username': username, 'password': password}),
       );
 
       final decoded = jsonDecode(resp.body);
@@ -347,10 +442,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      await http.post(
-        _uri('/api/auth/logout'),
-        headers: headers,
-      );
+      await http.post(_uri('/api/auth/logout'), headers: headers);
     } catch (_) {
       // Logout errors are non-fatal, just best-effort
     }
@@ -364,10 +456,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/user/current'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/user/current'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch user data');
@@ -388,10 +477,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/reports'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/reports'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch reports');
@@ -410,7 +496,7 @@ class ApiClient {
   /// Submit a community report.
   Future<Map<String, dynamic>> submitReport({
     required double lat,
-    required double lng,
+    required double lon,
     required String reportType,
     required String description,
     String? token,
@@ -422,11 +508,11 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/report'),  // Note: check if backend uses /report or /api/report
+        _uri('/api/report'),
         headers: headers,
         body: jsonEncode({
           'lat': lat,
-          'lon': lng,
+          'lon': lon,
           'report_type': reportType,
           'description': description,
         }),
@@ -473,10 +559,10 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/safety?lat=$lat&lon=$lon'),
-        headers: headers,
-      );
+      final uri = Uri.parse(
+        '$baseUrl/api/safety',
+      ).replace(queryParameters: {'lat': '$lat', 'lon': '$lon'});
+      final resp = await http.get(uri, headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch safety data');
@@ -516,10 +602,14 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/safe-spots/flutter?lat=$lat&lon=$lon&radius=$radiusMeters'),
-        headers: headers,
+      final uri = Uri.parse('$baseUrl/api/safe-spots/flutter').replace(
+        queryParameters: {
+          'lat': '$lat',
+          'lon': '$lon',
+          'radius': '$radiusMeters',
+        },
       );
+      final resp = await http.get(uri, headers: headers);
 
       if (resp.statusCode != 200) {
         return {'ok': false, 'spots': []};
@@ -541,10 +631,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/report-types'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/report-types'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch report types');
@@ -572,10 +659,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/history'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/history'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch route history');
@@ -654,6 +738,7 @@ class ApiClient {
   /// ────────────────────────────────────────────────────────────────────────
 
   /// Fetch trusted SOS contacts for the current user.
+  /// Returns empty list if unauthenticated or endpoint unavailable.
   Future<List<Map<String, dynamic>>> getSosContacts({String? token}) async {
     try {
       final headers = {
@@ -661,14 +746,11 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/sos/contacts'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/sos/contacts'), headers: headers);
 
-      if (resp.statusCode != 200) {
-        throw Exception('Failed to fetch SOS contacts');
-      }
+      // 401 = session not established yet — not an error, just not logged in
+      if (resp.statusCode == 401) return [];
+      if (resp.statusCode != 200) return [];
 
       final decoded = jsonDecode(resp.body);
       if (decoded is Map<String, dynamic>) {
@@ -679,7 +761,7 @@ class ApiClient {
       }
       return [];
     } catch (e) {
-      rethrow;
+      return []; // silently degrade — SOS contacts are non-critical on load
     }
   }
 
@@ -822,10 +904,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(
-        _uri('/api/settings'),
-        headers: headers,
-      );
+      final resp = await http.get(_uri('/api/settings'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch settings');
@@ -860,10 +939,8 @@ class ApiClient {
         'show_weather_banner': showWeatherBanner,
         'show_crime_banner': showCrimeBanner,
         'show_flood_banner': showFloodBanner,
-        if (displayName != null) ...
-          {'display_name': displayName},
-        if (email != null) ...
-          {'email': email},
+        if (displayName != null) ...{'display_name': displayName},
+        if (email != null) ...{'email': email},
       };
 
       final resp = await http.post(
@@ -882,40 +959,63 @@ class ApiClient {
     }
   }
 
-  /// Submit a community report (JSON API version).
-  /// Note: This fixes the endpoint path to /api/report (JSON version).
-  Future<Map<String, dynamic>> submitReportJson({
+  // ── Reverse geocoding & autocomplete ──────────────────────────────────────
+
+  /// GET /api/reverse?lat=&lon=
+  /// Returns { "address": "string" }
+  Future<Map<String, dynamic>> reverseGeocode({
     required double lat,
     required double lon,
-    required String reportType,
-    required String description,
     String? token,
   }) async {
-    try {
-      final headers = {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      };
+    final uri = Uri.parse(
+      '$baseUrl/api/reverse',
+    ).replace(queryParameters: {'lat': '$lat', 'lon': '$lon'});
+    final resp = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 8));
+    _checkStatus(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
 
-      final resp = await http.post(
-        _uri('/api/report'),  // JSON API version
-        headers: headers,
-        body: jsonEncode({
-          'lat': lat,
-          'lon': lon,
-          'report_type': reportType,
-          'description': description,
-        }),
-      );
+  /// GET /api/suggest?q=
+  /// Returns list of Nominatim place objects:
+  ///   [{ display_name, address: { road, suburb, city }, lat, lon }, ...]
+  Future<List<Map<String, dynamic>>> suggestLocations({
+    required String query,
+    String? token,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/api/suggest',
+    ).replace(queryParameters: {'q': query});
+    final resp = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 6));
+    _checkStatus(resp);
+    final list = jsonDecode(resp.body) as List;
+    return list.cast<Map<String, dynamic>>();
+  }
 
-      final decoded = jsonDecode(resp.body);
-      if (resp.statusCode != 200) {
-        throw Exception(decoded['message'] ?? 'Failed to submit report');
-      }
+  /// GET /api/mmda
+  /// Returns { coding, closures, closures_count, mmda_banner }
+  Future<Map<String, dynamic>> getMmda({String? token}) async {
+    final resp = await http
+        .get(Uri.parse('$baseUrl/api/mmda'), headers: _headers(token))
+        .timeout(const Duration(seconds: 8));
+    _checkStatus(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
 
-      return decoded;
-    } catch (e) {
-      rethrow;
+  // ── Private helpers ────────────────────────────────────────────────────────
+
+  Map<String, String> _headers(String? token) => {
+    'Content-Type': 'application/json',
+    if (token != null) 'Authorization': 'Bearer $token',
+  };
+
+  void _checkStatus(http.Response resp) {
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw Exception('Backend returned ${resp.statusCode}');
     }
   }
 
@@ -969,21 +1069,4 @@ class ApiClient {
     }
   }
 
-  /// Reverse-geocode a lat/lon to a human-readable address label.
-  /// Returns an empty string on failure.
-  Future<String> reverseGeocode({
-    required double lat,
-    required double lon,
-  }) async {
-    try {
-      final resp = await http
-          .get(_uri('/api/reverse?lat=$lat&lon=$lon'))
-          .timeout(const Duration(seconds: 6));
-      if (resp.statusCode != 200) return '';
-      final decoded = jsonDecode(resp.body);
-      return decoded['address']?.toString() ?? '';
-    } catch (_) {
-      return '';
-    }
-  }
 }

@@ -5,25 +5,21 @@ import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
 import '../../core/theme_controller.dart';
 import '../../models/explore_models.dart';
-import '../../data/mock_data.dart';
 import '../../core/session_manager.dart';
 import '../../core/api_client.dart';
 
 // ── Safety overlay models ─────────────────────────────────────────────────────
-// BACKEND: populate these from your API responses.
-// HotspotModel  → GET /api/safety/hotspots
-// PoiModel      → GET /api/poi?types=hospital,police,fire
-// AdvisoryModel → GET /api/advisories/active
-
 class HotspotModel {
   final double lat, lng;
-  final double radiusMeters; // how wide the danger circle is
-  final String label;        // e.g. 'High Crime Risk'
-  final Color  color;        // e.g. AppColors.safeRed.withValues(alpha:0.25)
+  final double radiusMeters;
+  final String label;
+  final Color color;
   const HotspotModel({
-    required this.lat, required this.lng,
-    required this.radiusMeters, required this.label,
-    this.color = const Color(0x33DC2626), // default: translucent red
+    required this.lat,
+    required this.lng,
+    required this.radiusMeters,
+    required this.label,
+    this.color = const Color(0x33DC2626),
   });
 }
 
@@ -31,10 +27,12 @@ class PoiModel {
   final double lat, lng;
   final String label;
   final IconData icon;
-  final Color  color;
+  final Color color;
   const PoiModel({
-    required this.lat, required this.lng,
-    required this.label, required this.icon,
+    required this.lat,
+    required this.lng,
+    required this.label,
+    required this.icon,
     this.color = const Color(0xFF0D9E9E),
   });
 }
@@ -44,9 +42,72 @@ class AdvisoryModel {
   final String type; // 'info' | 'warning' | 'danger'
   const AdvisoryModel({required this.message, this.type = 'warning'});
 }
-// ─────────────────────────────────────────────────────────────────────────────
+
+// ── MMDA status model ─────────────────────────────────────────────────────────
+class MmdaStatus {
+  final String? codingMessage; // e.g. "Plate ending 1 & 2 banned today 7am–8pm"
+  final bool isCoded;
+  final int closuresCount;
+  const MmdaStatus({
+    this.codingMessage,
+    this.isCoded = false,
+    this.closuresCount = 0,
+  });
+}
+
+// ── Report incident types ─────────────────────────────────────────────────────
+class ReportType {
+  final String key;
+  final String label;
+  final String icon; // emoji from backend
+  const ReportType({required this.key, required this.label, this.icon = '⚠️'});
+}
 
 class ExploreController extends ChangeNotifier {
+  ExploreController() {
+    _initLocation();
+  }
+
+  Future<void> _initLocation() async {
+    final perm = await Geolocator.checkPermission();
+
+    if (perm == LocationPermission.always ||
+        perm == LocationPermission.whileInUse) {
+      // Already granted — silently load location, keep popup hidden
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+        _hasLocation = true;
+
+        try {
+          final token = await SessionManager.instance.getAuthToken();
+          final rev = await ApiClient.instance.reverseGeocode(
+            lat: _lat!,
+            lon: _lng!,
+            token: token,
+          );
+          final address = rev['address'] as String? ?? '';
+          _currentLocationText = address.isNotEmpty
+              ? address
+              : '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
+        } catch (_) {
+          _currentLocationText =
+              '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
+        }
+      } catch (_) {
+        // Couldn't get position even with permission — leave popup hidden,
+        // user can still type manually
+      }
+    } else {
+      // Not yet granted — show the enable location popup
+      _locationPopupVisible = true;
+    }
+    notifyListeners();
+  }
+
   // ── App state ──────────────────────────────────────────────────
   AppState _state = AppState.state1;
   AppState get state => _state;
@@ -57,7 +118,7 @@ class ExploreController extends ChangeNotifier {
   }
 
   // ── Location ───────────────────────────────────────────────────
-  bool _locationPopupVisible = true;
+  bool _locationPopupVisible = false;
   bool get locationPopupVisible => _locationPopupVisible;
 
   bool _hasLocation = false;
@@ -68,12 +129,13 @@ class ExploreController extends ChangeNotifier {
   double? get lng => _lng;
 
   String _toastMsg = '';
-  String _toastType = 'teal'; // 'teal' | 'green' | 'red'
+  String _toastType = 'teal';
   bool _toastVisible = false;
   String get toastMsg => _toastMsg;
   String get toastType => _toastType;
   bool get toastVisible => _toastVisible;
 
+  // ── GPS + reverse-geocode into the "Current location" field ───
   Future<void> requestLocation() async {
     showToast('Requesting location…', 'teal');
     try {
@@ -94,13 +156,37 @@ class ExploreController extends ChangeNotifier {
       _lng = pos.longitude;
       _hasLocation = true;
       _locationPopupVisible = false;
+
+      // ── Reverse-geocode → fill "Current location" text field ──
+      // Calls GET /api/reverse?lat=&lon= which proxies Nominatim.
+      // Falls back to coordinates string if the call fails.
+      try {
+        final token = await SessionManager.instance.getAuthToken();
+        final rev = await ApiClient.instance.reverseGeocode(
+          lat: _lat!,
+          lon: _lng!,
+          token: token,
+        );
+        final address = rev['address'] as String? ?? '';
+        if (address.isNotEmpty) {
+          _currentLocationText = address;
+        } else {
+          _currentLocationText =
+              '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
+        }
+      } catch (_) {
+        _currentLocationText =
+            '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
+      }
+
       showToast('Location enabled', 'green');
       notifyListeners();
       // Reverse-geocode coordinates to a human-readable address label
-      final addr = await ApiClient.instance.reverseGeocode(
+      final rev = await ApiClient.instance.reverseGeocode(
         lat: pos.latitude,
         lon: pos.longitude,
       );
+      final addr = rev['address'] as String? ?? '';
       if (addr.isNotEmpty) {
         _currentLocationText = addr;
         notifyListeners();
@@ -109,6 +195,50 @@ class ExploreController extends ChangeNotifier {
       showToast('Could not get location — enter manually', 'red');
       _locationPopupVisible = false;
       notifyListeners();
+    }
+  }
+
+  /// Called by the teal GPS icon inside the search pill/overlay.
+  /// Gets GPS position, reverse-geocodes it, fills the origin field,
+  /// then returns so the caller can open the search screen.
+  Future<void> useCurrentLocationAsOrigin() async {
+    showToast('Getting your location…', 'teal');
+    try {
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.deniedForever) {
+        showToast('Location permission denied — enter manually', 'red');
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      _lat = pos.latitude;
+      _lng = pos.longitude;
+      _hasLocation = true;
+
+      try {
+        final token = await SessionManager.instance.getAuthToken();
+        final rev = await ApiClient.instance.reverseGeocode(
+          lat: _lat!,
+          lon: _lng!,
+          token: token,
+        );
+        final address = rev['address'] as String? ?? '';
+        _currentLocationText = address.isNotEmpty
+            ? address
+            : '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
+      } catch (_) {
+        _currentLocationText =
+            '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
+      }
+
+      showToast('Location set', 'green');
+      notifyListeners();
+    } catch (e) {
+      showToast('Could not get location', 'red');
     }
   }
 
@@ -135,60 +265,75 @@ class ExploreController extends ChangeNotifier {
   void toggleLigtasMode() {
     _ligtasModeOn = !_ligtasModeOn;
     showToast(_ligtasModeOn ? 'Ligtas Mode ON' : 'Ligtas Mode OFF', 'teal');
-    _applyFilters(); // FIX: re-sort/filter routes when ligtas mode changes
+    _applyFilters();
     notifyListeners();
   }
 
   // ── Safety overlays ────────────────────────────────────────────
-  // These lists are empty by default. Call the fetch methods below
-  // once the backend endpoints are ready.
-
   List<HotspotModel> hotspots = [];
-  List<PoiModel>     pois     = [];
-  AdvisoryModel?     advisory;
+  List<PoiModel> pois = [];
+  AdvisoryModel? advisory;
 
-  /// BACKEND HOOK ─────────────────────────────────────────────────
-  /// Call after map loads or when the user moves to a new area.
-  ///   GET /api/safety/hotspots?lat=&lng=&radius=
-  ///   Response: [{ lat, lng, radius_meters, label, severity }]
-  /// ──────────────────────────────────────────────────────────────
   void setHotspots(List<HotspotModel> data) {
     hotspots = data;
     notifyListeners();
   }
 
-  /// BACKEND HOOK ─────────────────────────────────────────────────
-  /// Call after map loads or on area change.
-  ///   GET /api/poi?lat=&lng=&types=hospital,police,fire
-  ///   Response: [{ lat, lng, label, type }]
-  /// Map `type` to an icon:
-  ///   'hospital' → Icons.local_hospital_rounded
-  ///   'police'   → Icons.local_police_rounded
-  ///   'fire'     → Icons.fire_truck_rounded
-  /// ──────────────────────────────────────────────────────────────
   void setPois(List<PoiModel> data) {
     pois = data;
     notifyListeners();
   }
 
-  /// BACKEND HOOK ─────────────────────────────────────────────────
-  /// Call on app launch and periodically (e.g. every 30 min).
-  ///   GET /api/advisories/active
-  ///   Response: { message, type } | null
-  /// Pass null to clear the banner.
-  /// ──────────────────────────────────────────────────────────────
   void setAdvisory(AdvisoryModel? data) {
     advisory = data;
     notifyListeners();
   }
 
+  // ── MMDA banner ────────────────────────────────────────────────
+  MmdaStatus _mmdaStatus = const MmdaStatus();
+  MmdaStatus get mmdaStatus => _mmdaStatus;
+
+  /// Fetch MMDA number-coding + road-closure status.
+  /// Call once after login/app resume (data refreshes itself server-side).
+  /// GET /api/mmda  →  { coding, closures, closures_count }
+  Future<void> fetchMmdaStatus() async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      final data = await ApiClient.instance.getMmda(token: token);
+      final coding = data['coding'] as Map?;
+      final closures = (data['closures'] as List?)?.length ?? 0;
+      if (coding != null && coding['is_coded'] == true) {
+        _mmdaStatus = MmdaStatus(
+          codingMessage: coding['message'] as String? ?? '',
+          isCoded: true,
+          closuresCount: closures,
+        );
+        // Surface as advisory if there's an active coding restriction
+        if (_mmdaStatus.codingMessage != null &&
+            _mmdaStatus.codingMessage!.isNotEmpty &&
+            advisory == null) {
+          setAdvisory(
+            AdvisoryModel(
+              message: '🚦 MMDA: ${_mmdaStatus.codingMessage}',
+              type: 'warning',
+            ),
+          );
+        }
+      } else {
+        _mmdaStatus = MmdaStatus(closuresCount: closures);
+      }
+      notifyListeners();
+    } catch (_) {
+      // MMDA is optional — silently degrade
+    }
+  }
+
   /// Fetch safety overlay data from backend for a given location.
-  /// Populates hotspots (earthquake circles), POIs (safe spots), and advisory.
-  ///
-  /// Called after routes are fetched in [searchRoutes].
+  /// Populates hotspots (earthquake + report circles), POIs (safe spots),
+  /// and the advisory banner.
   ///
   /// BACKEND ENDPOINTS USED:
-  ///   GET /api/safety?lat=&lon=              → weather, crime, flood penalties + advisory
+  ///   GET /api/safety?lat=&lon=              → weather, crime, flood, seismic + advisory
   ///   GET /api/safe-spots/flutter?lat=&lon=  → hospital, police, fire, pharmacy markers
   Future<void> fetchSafetyOverlays({
     required double lat,
@@ -197,7 +342,6 @@ class ExploreController extends ChangeNotifier {
     try {
       final token = await SessionManager.instance.getAuthToken();
 
-      // ── 1. Fetch area safety data (weather / crime / flood / seismic) ────────
       final safetyData = await ApiClient.instance.getSafety(
         lat: lat,
         lon: lon,
@@ -205,51 +349,58 @@ class ExploreController extends ChangeNotifier {
       );
 
       final newHotspots = <HotspotModel>[];
-      final newPois     = <PoiModel>[];
+      final newPois = <PoiModel>[];
 
       if (safetyData['ok'] == true) {
-        // ── Community reports → hotspot circles ──────────────────────────────
+        // ── Community reports → hotspot circles ──────────────────
         final reports = safetyData['reports'] as List? ?? [];
         for (final report in reports) {
           if (report is Map<String, dynamic>) {
-            final rLat  = (report['lat']  as num?)?.toDouble() ?? 0.0;
-            final rLon  = (report['lon']  as num?)?.toDouble() ?? 0.0;
+            final rLat = (report['lat'] as num?)?.toDouble() ?? 0.0;
+            final rLon = (report['lon'] as num?)?.toDouble() ?? 0.0;
             final label = report['label'] as String? ?? 'Safety Alert';
             final color = _colorFromReportType(report['type'] as String? ?? '');
-            newHotspots.add(HotspotModel(
-              lat: rLat, lng: rLon,
-              radiusMeters: 200,
-              label: label, color: color,
-            ));
+            newHotspots.add(
+              HotspotModel(
+                lat: rLat,
+                lng: rLon,
+                radiusMeters: 200,
+                label: label,
+                color: color,
+              ),
+            );
           }
         }
 
-        // ── Seismic circles from /api/safety seismic block ───────────────────
-        // Each earthquake gets a translucent circle scaled to its damage radius.
+        // ── Seismic circles ───────────────────────────────────────
         final seismicBlock = safetyData['seismic'] as Map? ?? {};
-        final quakeList    = seismicBlock['earthquakes'] as List? ?? [];
+        final quakeList = seismicBlock['earthquakes'] as List? ?? [];
         for (final eq in quakeList) {
           if (eq is Map<String, dynamic>) {
-            final eqLat    = (eq['lat']       as num?)?.toDouble();
-            final eqLon    = (eq['lon']       as num?)?.toDouble();
+            final eqLat = (eq['lat'] as num?)?.toDouble();
+            final eqLon = (eq['lon'] as num?)?.toDouble();
             final radiusKm = (eq['radius_km'] as num?)?.toDouble() ?? 20.0;
-            final mag      = (eq['magnitude'] as num?)?.toDouble() ?? 0.0;
-            final severity = eq['severity']   as String? ?? 'moderate';
+            final mag = (eq['magnitude'] as num?)?.toDouble() ?? 0.0;
+            final severity = eq['severity'] as String? ?? 'moderate';
             if (eqLat == null || eqLon == null) continue;
-            newHotspots.add(HotspotModel(
-              lat: eqLat, lng: eqLon,
-              radiusMeters: radiusKm * 1000,
-              label: 'M$mag Earthquake',
-              color: _colorFromEqSeverity(severity),
-            ));
+            newHotspots.add(
+              HotspotModel(
+                lat: eqLat,
+                lng: eqLon,
+                radiusMeters: radiusKm * 1000,
+                label: 'M$mag Earthquake',
+                color: _colorFromEqSeverity(severity),
+              ),
+            );
           }
         }
 
-        // ── Advisory banner logic ─────────────────────────────────────────────
-        final crimePenalty  = safetyData['crime']?['penalty']    as int? ?? 0;
-        final floodPenalty  = safetyData['flood']?['penalty']    as int? ?? 0;
-        final weatherRisk   = safetyData['weather']?['risk_level'] as String? ?? 'clear';
-        final seismicCount  = seismicBlock['count'] as int? ?? 0;
+        // ── Advisory banner logic ─────────────────────────────────
+        final crimePenalty = safetyData['crime']?['penalty'] as int? ?? 0;
+        final floodPenalty = safetyData['flood']?['penalty'] as int? ?? 0;
+        final weatherRisk =
+            safetyData['weather']?['risk_level'] as String? ?? 'clear';
+        final seismicCount = seismicBlock['count'] as int? ?? 0;
 
         AdvisoryModel? newAdvisory;
         if (crimePenalty > 15) {
@@ -274,30 +425,39 @@ class ExploreController extends ChangeNotifier {
           );
         }
 
-        setAdvisory(newAdvisory);
+        if (newAdvisory != null) setAdvisory(newAdvisory);
       }
 
-      // ── 2. Fetch safe-spot POIs (hospitals, police, fire stations, etc.) ────
-      final spotsData = await ApiClient.instance.getSafeSpots(
-        lat: lat,
-        lon: lon,
-        token: token,
-      );
-      final spotList = spotsData['spots'] as List? ?? [];
-      for (final spot in spotList) {
-        if (spot is Map<String, dynamic>) {
-          final sLat  = (spot['lat'] as num?)?.toDouble();
-          final sLon  = (spot['lon'] as num?)?.toDouble();
-          final label = spot['label'] as String? ?? spot['name'] as String? ?? 'Safe Spot';
-          final type  = spot['type']  as String? ?? '';
-          if (sLat == null || sLon == null) continue;
-          newPois.add(PoiModel(
-            lat: sLat, lng: sLon,
-            label: label,
-            icon: _iconForSpotType(type),
-            color: _colorForSpotType(type),
-          ));
+      // ── Safe spots → PoiModel markers ───────────────────────────
+      try {
+        final spotsData = await ApiClient.instance.getSafeSpots(
+          lat: lat,
+          lon: lon,
+          token: token,
+        );
+
+        if (spotsData['ok'] == true) {
+          final spotList = spotsData['spots'] as List? ?? [];
+          for (final spot in spotList) {
+            if (spot is Map<String, dynamic>) {
+              final sLat = (spot['lat'] as num?)?.toDouble() ?? 0.0;
+              final sLon = (spot['lon'] as num?)?.toDouble() ?? 0.0;
+              final type = spot['type'] as String? ?? '';
+              final label = spot['label'] as String? ?? 'Safe Spot';
+              newPois.add(
+                PoiModel(
+                  lat: sLat,
+                  lng: sLon,
+                  label: label,
+                  icon: _iconForSpotType(type),
+                  color: _colorForSpotType(type),
+                ),
+              );
+            }
+          }
         }
+      } catch (_) {
+        // Safe spots are optional — silently degrade
       }
 
       setHotspots(newHotspots);
@@ -307,48 +467,62 @@ class ExploreController extends ChangeNotifier {
     }
   }
 
-  // ── Earthquake severity → translucent map circle color ──────────────────────
+  // ── Color helpers ───────────────────────────────────────────────
   Color _colorFromEqSeverity(String severity) {
     switch (severity) {
-      case 'critical': return const Color(0x556C1A1A);
-      case 'high':     return const Color(0x44E74C3C);
-      case 'moderate': return const Color(0x33E67E22);
-      default:         return const Color(0x22F39C12);
+      case 'critical':
+        return const Color(0x556C1A1A);
+      case 'high':
+        return const Color(0x44E74C3C);
+      case 'moderate':
+        return const Color(0x33E67E22);
+      default:
+        return const Color(0x22F39C12);
     }
   }
 
-  // ── Safe-spot type → Flutter IconData ───────────────────────────────────────
-  // Must match the OSM amenity `type` strings returned by safe_spots.py.
   IconData _iconForSpotType(String type) {
     switch (type) {
-      case 'hospital':         return Icons.local_hospital_rounded;
-      case 'clinic':           return Icons.local_hospital_outlined;
-      case 'pharmacy':         return Icons.medical_services_rounded;
-      case 'police':           return Icons.local_police_rounded;
-      case 'fire_station':     return Icons.fire_truck_rounded;
-      case 'barangay_hall':    return Icons.account_balance_rounded;
-      case 'community_centre': return Icons.people_rounded;
+      case 'hospital':
+        return Icons.local_hospital_rounded;
+      case 'clinic':
+        return Icons.local_hospital_outlined;
+      case 'pharmacy':
+        return Icons.medical_services_rounded;
+      case 'police':
+        return Icons.local_police_rounded;
+      case 'fire_station':
+        return Icons.fire_truck_rounded;
+      case 'barangay_hall':
+        return Icons.account_balance_rounded;
+      case 'community_centre':
+        return Icons.people_rounded;
       case 'convenience':
-      case 'supermarket':      return Icons.store_rounded;
-      default:                 return Icons.place_rounded;
+      case 'supermarket':
+        return Icons.store_rounded;
+      default:
+        return Icons.place_rounded;
     }
   }
 
-  // ── Safe-spot type → map marker color ───────────────────────────────────────
   Color _colorForSpotType(String type) {
     switch (type) {
       case 'hospital':
-      case 'clinic':           return const Color(0xFFE74C3C);
-      case 'pharmacy':         return const Color(0xFF27AE60);
-      case 'police':           return const Color(0xFF2980B9);
-      case 'fire_station':     return const Color(0xFFE67E22);
+      case 'clinic':
+        return const Color(0xFFE74C3C);
+      case 'pharmacy':
+        return const Color(0xFF27AE60);
+      case 'police':
+        return const Color(0xFF2980B9);
+      case 'fire_station':
+        return const Color(0xFFE67E22);
       case 'barangay_hall':
-      case 'community_centre': return const Color(0xFF8E44AD);
-      default:                 return const Color(0xFF0D9E9E);
+      case 'community_centre':
+        return const Color(0xFF8E44AD);
+      default:
+        return const Color(0xFF0D9E9E);
     }
   }
-
-
 
   Color _colorFromReportType(String type) {
     switch (type.toLowerCase()) {
@@ -363,26 +537,83 @@ class ExploreController extends ChangeNotifier {
     }
   }
 
+  // ── Safe spots toggle ─────────────────────────────────────────
+  bool _safeSpotsVisible = false;
+  bool get safeSpotsVisible => _safeSpotsVisible;
+
+  void toggleSafeSpots() {
+    _safeSpotsVisible = !_safeSpotsVisible;
+    showToast(
+      _safeSpotsVisible ? 'Safe spots shown' : 'Safe spots hidden',
+      'teal',
+    );
+    notifyListeners();
+  }
+
+  void setSafeSpotsVisible(bool v) {
+    if (_safeSpotsVisible == v) return;
+    _safeSpotsVisible = v;
+    notifyListeners();
+  }
+
+  // ── Transport mode ─────────────────────────────────────────────
+  // 'transit' | 'walk' | 'car' | 'motorcycle'
+  String _activeMode = 'transit';
+  String get activeMode => _activeMode;
+
+  void setMode(String mode) {
+    _activeMode = mode;
+    notifyListeners();
+  }
+
+  // ── Resolved geocoded coordinates from last route search ──────
+  // Populated from orig_lat/orig_lon/dest_lat/dest_lon in API response.
+  // Used by _MapLayer to place the A and B pins accurately.
+  double? _resolvedOrigLat, _resolvedOrigLon;
+  double? _resolvedDestLat, _resolvedDestLon;
+  double? get resolvedOrigLat => _resolvedOrigLat;
+  double? get resolvedOrigLon => _resolvedOrigLon;
+  double? get resolvedDestLat => _resolvedDestLat;
+  double? get resolvedDestLon => _resolvedDestLon;
+
   // ── Search inputs ──────────────────────────────────────────────
-  String _currentLocationText = ''; // Updated: was _originText
-  String _destinationText = '';     // Updated: was _destText
-  bool   _miniCurrentFocused = true; // Updated: was _miniOriginFocused
+  String _currentLocationText = '';
+  String _destinationText = '';
+  bool _miniCurrentFocused = true;
 
   String get currentLocationText => _currentLocationText;
   String get destinationText => _destinationText;
-  
-  // Keep old getters for backward compatibility
+
+  // Backward-compat getters
   String get originText => _currentLocationText;
   String get destText => _destinationText;
-  bool   get miniOriginFocused => _miniCurrentFocused;
+  bool get miniOriginFocused => _miniCurrentFocused;
 
-  void setCurrentLocationText(String v) { _currentLocationText = v; notifyListeners(); }
-  void setDestinationText(String v) { _destinationText = v; notifyListeners(); }
-  
-  // Keep old setters for backward compatibility
-  void setOriginText(String v)  { _currentLocationText = v; notifyListeners(); }
-  void setDestText(String v)    { _destinationText   = v; notifyListeners(); }
-  void setMiniFocus(bool current){ _miniCurrentFocused = current; notifyListeners(); }
+  void setCurrentLocationText(String v) {
+    _currentLocationText = v;
+    notifyListeners();
+  }
+
+  void setDestinationText(String v) {
+    _destinationText = v;
+    notifyListeners();
+  }
+
+  // Backward-compat setters
+  void setOriginText(String v) {
+    _currentLocationText = v;
+    notifyListeners();
+  }
+
+  void setDestText(String v) {
+    _destinationText = v;
+    notifyListeners();
+  }
+
+  void setMiniFocus(bool current) {
+    _miniCurrentFocused = current;
+    notifyListeners();
+  }
 
   void openMiniState({bool focusDest = true}) {
     _miniCurrentFocused = !focusDest;
@@ -399,83 +630,135 @@ class ExploreController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Live autocomplete (calls GET /api/suggest?q=) ──────────────
+  Future<List<Map<String, dynamic>>> suggestLocations(String query) async {
+    if (query.length < 3) return [];
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      final results = await ApiClient.instance.suggestLocations(
+        query: query,
+        token: token,
+      );
+      return results;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ── Route search ───────────────────────────────────────────────
   Future<void> searchRoutes() async {
-    // Both fields should be filled to search
     if (_currentLocationText.isEmpty || _destinationText.isEmpty) {
-      if (_currentLocationText.isEmpty) {
-        showToast('Please enter your current location', 'red');
-      } else {
-        showToast('Please enter your destination', 'red');
-      }
+      showToast(
+        _currentLocationText.isEmpty
+            ? 'Please enter your current location'
+            : 'Please enter your destination',
+        'red',
+      );
       return;
     }
     _state = AppState.state2;
     showToast('Finding routes...', 'teal');
     notifyListeners();
 
-    // Attempt to fetch live routes from the Flask backend WITH alerts.
     try {
+      // Build request body — include vulnerable profile and GPS coords if available
+      final extraParams = <String, dynamic>{};
+      if (_activeVulnerableProfile != null) {
+        extraParams['vulnerable_profile'] = _activeVulnerableProfile;
+      }
+      if (_lat != null && _lng != null) {
+        extraParams['orig_coords'] = {'lat': _lat, 'lon': _lng};
+      }
+
       final response = await ApiClient.instance.searchRoutesWithAlerts(
         origin: _currentLocationText,
         destination: _destinationText,
-        mode: 'commute',
+        mode: _activeMode,
+        extraParams: extraParams,
       );
 
-      final routes = (response['routes'] as List?)?.cast<RouteModel>() ?? [];
+      final rawRoutes = response['routes'];
+      final routes = rawRoutes is List<RouteModel>
+          ? rawRoutes
+          : (rawRoutes as List?)?.whereType<RouteModel>().toList() ?? [];
 
       if (routes.isNotEmpty) {
         setAllRoutes(routes);
 
-        // ── Store all alert data from /api/routes ───────────────────────────
+        // Store server-resolved geocoded coordinates for map pins
+        _resolvedOrigLat = (response['orig_lat'] as num?)?.toDouble();
+        _resolvedOrigLon = (response['orig_lon'] as num?)?.toDouble();
+        _resolvedDestLat = (response['dest_lat'] as num?)?.toDouble();
+        _resolvedDestLon = (response['dest_lon'] as num?)?.toDouble();
+        notifyListeners(); // repaint map with A/B pins immediately
+
         setAlertData(
-          incidents:         (response['incidents'] as List?)?.cast<Map<String, dynamic>>() ?? [],
-          mmdaBanner:        response['mmda_banner']?.toString() ?? '',
+          incidents:
+              (response['incidents'] as List?)?.cast<Map<String, dynamic>>() ??
+              [],
+          mmdaBanner: response['mmda_banner']?.toString() ?? '',
           mmdaClosuresCount: response['mmda_closures_count'] as int? ?? 0,
-          earthquakes:       (response['earthquakes'] as List?)?.cast<Map<String, dynamic>>() ?? [],
-          seismicBanner:     response['seismic_banner']?.toString() ?? '',
-          weatherRisk:       response['weather_risk']?.toString() ?? 'clear',
-          floodRisk:         response['flood_risk']?.toString() ?? 'none',
+          earthquakes:
+              (response['earthquakes'] as List?)
+                  ?.cast<Map<String, dynamic>>() ??
+              [],
+          seismicBanner: response['seismic_banner']?.toString() ?? '',
+          weatherRisk: response['weather_risk']?.toString() ?? 'clear',
+          floodRisk: response['flood_risk']?.toString() ?? 'none',
         );
 
-        // ── Earthquake circles from /api/routes payload ─────────────────────
-        // /api/routes now includes lat, lon, radius_km, severity per quake.
-        // We build HotspotModel circles immediately — no extra network call.
-        final eqList = (response['earthquakes'] as List?)
-            ?.cast<Map<String, dynamic>>() ?? [];
+        // ── Earthquake circles from /api/routes ─────────────────
+        final eqList =
+            (response['earthquakes'] as List?)?.cast<Map<String, dynamic>>() ??
+            [];
         final eqHotspots = <HotspotModel>[];
         for (final eq in eqList) {
-          final eqLat    = (eq['lat']       as num?)?.toDouble();
-          final eqLon    = (eq['lon']       as num?)?.toDouble();
+          final eqLat = (eq['lat'] as num?)?.toDouble();
+          final eqLon = (eq['lon'] as num?)?.toDouble();
           final radiusKm = (eq['radius_km'] as num?)?.toDouble() ?? 20.0;
-          final mag      = (eq['magnitude'] as num?)?.toDouble() ?? 0.0;
-          final severity = eq['severity']   as String? ?? 'moderate';
+          final mag = (eq['magnitude'] as num?)?.toDouble() ?? 0.0;
+          final severity = eq['severity'] as String? ?? 'moderate';
           if (eqLat == null || eqLon == null) continue;
-          eqHotspots.add(HotspotModel(
-            lat: eqLat, lng: eqLon,
-            radiusMeters: radiusKm * 1000,
-            label: 'M$mag Earthquake',
-            color: _colorFromEqSeverity(severity),
-          ));
+          eqHotspots.add(
+            HotspotModel(
+              lat: eqLat,
+              lng: eqLon,
+              radiusMeters: radiusKm * 1000,
+              label: 'M$mag Earthquake',
+              color: _colorFromEqSeverity(severity),
+            ),
+          );
         }
         if (eqHotspots.isNotEmpty) setHotspots(eqHotspots);
 
-        // ── Advisory banners from route-level risk data ─────────────────────
+        // ── Advisory from route-level risk ───────────────────────
         final seismicBannerText = response['seismic_banner']?.toString() ?? '';
-        final wRisk             = response['weather_risk']?.toString() ?? 'clear';
-        if (seismicBannerText.isNotEmpty) {
-          setAdvisory(const AdvisoryModel(
-            message: 'Recent earthquake activity detected near your route.',
-            type: 'warning',
-          ));
+        final wRisk = response['weather_risk']?.toString() ?? 'clear';
+        // Show MMDA advisory if closures were found (overrides weather)
+        if (_mmdaBanner.isNotEmpty && advisory == null) {
+          setAdvisory(
+            const AdvisoryModel(
+              message: 'MMDA road closures are active — check route details.',
+              type: 'warning',
+            ),
+          );
+        } else if (seismicBannerText.isNotEmpty) {
+          setAdvisory(
+            const AdvisoryModel(
+              message: 'Recent earthquake activity detected near your route.',
+              type: 'warning',
+            ),
+          );
         } else if (wRisk == 'storm' || wRisk == 'heavy_rain') {
-          setAdvisory(AdvisoryModel(
-            message: 'Severe weather detected — travel with caution.',
-            type: wRisk == 'storm' ? 'danger' : 'warning',
-          ));
+          setAdvisory(
+            AdvisoryModel(
+              message: 'Severe weather detected — travel with caution.',
+              type: wRisk == 'storm' ? 'danger' : 'warning',
+            ),
+          );
         }
 
-        // ── Fetch safe-spot POIs + full area safety overlays ────────────────
-        // Runs after routes are shown — does not block the route list UI.
+        // ── Fetch safe-spot POIs + full area safety overlays ─────
         final safeLat = _lat ?? 14.5995;
         final safeLon = _lng ?? 120.9842;
         await fetchSafetyOverlays(lat: safeLat, lon: safeLon);
@@ -483,9 +766,11 @@ class ExploreController extends ChangeNotifier {
         return;
       }
 
-      // No routes returned – fall back to the built-in mock routes
-      // so the UI remains usable.
-      setAllRoutes(mockRoutes);
+      // No routes found — clear routes, show empty state (do NOT fall back to mock)
+      // Surface the backend's own error message (e.g. "No route found near your
+      // origin/destination") so the user sees something actionable.
+      final backendError = response['error'] as String?;
+      setAllRoutes([]);
       setAlertData(
         incidents: [],
         mmdaBanner: '',
@@ -495,11 +780,19 @@ class ExploreController extends ChangeNotifier {
         weatherRisk: 'clear',
         floodRisk: 'none',
       );
-      showToast('No routes from server — showing sample routes', 'teal');
-    } catch (_) {
-      // On any error (offline, server down, bad JSON), keep the existing
-      // mock behaviour and surface a gentle message.
-      _allRoutes = mockRoutes;
+      showToast(
+        (backendError != null && backendError.isNotEmpty)
+            ? backendError
+            : 'No routes found — try a more specific destination',
+        'teal',
+      );
+    } catch (e, stack) {
+      debugPrint('[searchRoutes] ERROR: $e');
+      debugPrint('[searchRoutes] STACK: $stack');
+      // On error: keep whatever routes exist but don't inject mock data.
+      // The map will still show the A/B pins via resolvedOrig/Dest coords if
+      // geocoding already happened before the route fetch failed.
+      _allRoutes = [];
       _applyFilters();
       setAlertData(
         incidents: [],
@@ -510,7 +803,7 @@ class ExploreController extends ChangeNotifier {
         weatherRisk: 'clear',
         floodRisk: 'none',
       );
-      showToast('Could not reach server — using sample routes', 'red');
+      showToast('Could not reach server — check connection', 'red');
       notifyListeners();
     }
   }
@@ -520,79 +813,90 @@ class ExploreController extends ChangeNotifier {
     _destinationText = '';
     _state = AppState.state1;
     _activeRoute = null;
-    _filteredRoutes = List.from(_allRoutes); // reset to full list
+    _filteredRoutes = List.from(_allRoutes);
+    advisory = null;
+    _resolvedOrigLat = null;
+    _resolvedOrigLon = null;
+    _resolvedDestLat = null;
+    _resolvedDestLon = null;
     showToast('Search cleared', 'teal');
     notifyListeners();
   }
 
   // ── Filters ────────────────────────────────────────────────────
-  List<String> commuterFilters  = [];
+  List<String> commuterFilters = [];
   List<String> transportFilters = [];
-  List<String> ligtasFilters    = [];
-  List<String> preferenceFilters = []; // NEW: Route preferences (safest, fastest, cheapest, balanced, moderate)
+  List<String> ligtasFilters = [];
+  List<String> preferenceFilters = [];
 
   bool get hasFilters =>
-      commuterFilters.isNotEmpty || transportFilters.isNotEmpty || 
-      ligtasFilters.isNotEmpty || preferenceFilters.isNotEmpty;
+      commuterFilters.isNotEmpty ||
+      transportFilters.isNotEmpty ||
+      ligtasFilters.isNotEmpty ||
+      preferenceFilters.isNotEmpty;
 
-  // ── Survey defaults ───────────────────────────────────────────
-  // Called once by SurveyView on finish. Seeds the filter lists with the
-  // user's onboarding answers so they show up pre-selected in the explore
-  // filter panel without the user having to set them again.
-  //
-  // BACKEND: call this after a successful POST /api/user/survey response,
-  // passing the values confirmed by the server rather than raw local state.
-  // Key values must match the keys in mock_data.dart:
-  //   commuterTypes → commuterFilters (e.g. ['student', 'women'])
-  //   transport    → transportFilters (e.g. 'jeep', 'bus', 'walk')
-  //   safety       → ligtasFilters    (e.g. 'dark', 'crime', 'flooding')
   void setSurveyDefaults({
     List<String> commuterTypes = const [],
-    List<String> transport     = const [],
-    List<String> safety        = const [],
+    List<String> transport = const [],
+    List<String> safety = const [],
   }) {
     commuterFilters = List.of(commuterTypes);
     transportFilters = List.of(transport);
-    ligtasFilters    = List.of(safety);
+    ligtasFilters = List.of(safety);
     _applyFilters();
     notifyListeners();
   }
 
   void toggleFilter(String group, String key) {
     List<String> list;
-    if (group == 'commuter') { list = commuterFilters; }
-    else if (group == 'transport') { list = transportFilters; }
-    else if (group == 'ligtas') { list = ligtasFilters; }
-    else { 
-      // Preference filters work like radio buttons - only one can be selected
+    if (group == 'commuter') {
+      list = commuterFilters;
+    } else if (group == 'transport') {
+      list = transportFilters;
+    } else if (group == 'ligtas') {
+      list = ligtasFilters;
+    } else {
+      // Preference filters are radio-button style — only one active
       if (preferenceFilters.contains(key)) {
         preferenceFilters.remove(key);
       } else {
-        preferenceFilters.clear(); // Clear all others
-        preferenceFilters.add(key); // Add only this one
+        preferenceFilters
+          ..clear()
+          ..add(key);
       }
       _applyFilters();
       notifyListeners();
       return;
     }
-
-    if (list.contains(key)) { list.remove(key); } else { list.add(key); }
-    _applyFilters();  // FIX: recompute routes on every filter change
+    if (list.contains(key)) {
+      list.remove(key);
+    } else {
+      list.add(key);
+    }
+    _applyFilters();
     notifyListeners();
   }
 
   void removeFilter(String group, String key) {
-    if (group == 'commuter') { commuterFilters.remove(key); }
-    else if (group == 'transport') { transportFilters.remove(key); }
-    else if (group == 'ligtas') { ligtasFilters.remove(key); }
-    else { preferenceFilters.remove(key); }
-    _applyFilters();  // FIX: recompute routes on every filter removal
+    if (group == 'commuter') {
+      commuterFilters.remove(key);
+    } else if (group == 'transport') {
+      transportFilters.remove(key);
+    } else if (group == 'ligtas') {
+      ligtasFilters.remove(key);
+    } else {
+      preferenceFilters.remove(key);
+    }
+    _applyFilters();
     notifyListeners();
   }
 
   void applyFilters() {
-    final total = commuterFilters.length + transportFilters.length + 
-                  ligtasFilters.length + preferenceFilters.length;
+    final total =
+        commuterFilters.length +
+        transportFilters.length +
+        ligtasFilters.length +
+        preferenceFilters.length;
     showToast(total > 0 ? 'Filters applied' : 'No filters active', 'teal');
     _applyFilters();
     notifyListeners();
@@ -608,18 +912,59 @@ class ExploreController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Routes ─────────────────────────────────────────────────────
+  // ── Vulnerable commuter profile ────────────────────────────────
+  // Stored locally + sent to /api/routes as `vulnerable_profile`.
+  // The backend (vulnerable_profiles.py) applies extra safety penalties
+  // and generates profile-specific warnings per route.
+  String?
+  _activeVulnerableProfile; // 'senior' | 'pwd' | 'women' | 'child' | null
+  String? get activeVulnerableProfile => _activeVulnerableProfile;
 
-  // All available routes. When the backend is ready, replace the body of
-  // this getter (or call setAllRoutes()) with real API data.
-  List<RouteModel> _allRoutes = mockRoutes;
+  void setVulnerableProfile(String? profile) {
+    _activeVulnerableProfile = profile;
+    final label = _profileLabel(profile);
+    showToast(
+      profile != null ? '$label mode active' : 'Profile cleared',
+      'teal',
+    );
+    // Re-search if we already have a destination so the backend re-applies
+    // the new profile's penalties to the current route set.
+    if (_currentLocationText.isNotEmpty && _destinationText.isNotEmpty) {
+      searchRoutes();
+    }
+    notifyListeners();
+  }
+
+  String _profileLabel(String? p) {
+    switch (p) {
+      case 'senior':
+        return '🧓 Senior';
+      case 'pwd':
+        return '♿ PWD';
+      case 'women':
+        return '👩 Women\'s Safety';
+      case 'child':
+        return '🎒 Child/Student';
+      default:
+        return 'Profile';
+    }
+  }
+
+  // ── Rain active flag (drives flood zone visibility on map) ───
+  // True when weather_risk is light_rain / rain / heavy_rain / storm.
+  bool get isRaining {
+    const rainyLevels = {'light_rain', 'rain', 'heavy_rain', 'storm'};
+    return rainyLevels.contains(_weatherRisk);
+  }
+
+  // ── Routes ─────────────────────────────────────────────────────
+  List<RouteModel> _allRoutes = [];
   List<RouteModel> get allRoutes => _allRoutes;
 
-  // The currently displayed (filtered) route list — what the UI binds to.
-  List<RouteModel> _filteredRoutes = mockRoutes;
+  List<RouteModel> _filteredRoutes = [];
   List<RouteModel> get routes => _filteredRoutes;
 
-  // ── WHAT NEEDS CONNECTION 🔗: Incident & Alert Data ──────────────────────
+  // ── Alert data ─────────────────────────────────────────────────
   List<Map<String, dynamic>> _incidents = [];
   List<Map<String, dynamic>> get incidents => _incidents;
 
@@ -635,25 +980,18 @@ class ExploreController extends ChangeNotifier {
   String _seismicBanner = '';
   String get seismicBanner => _seismicBanner;
 
-  String _weatherRisk = 'clear';  // clear, rain, storm, etc.
+  String _weatherRisk = 'clear';
   String get weatherRisk => _weatherRisk;
 
-  String _floodRisk = 'none';  // none, low, moderate, high
+  String _floodRisk = 'none';
   String get floodRisk => _floodRisk;
 
-  /// BACKEND HOOK ─────────────────────────────────────────────────────────────
-  /// Call this from your API layer to swap in real routes.
-  /// Example:
-  ///   final data = await routeApi.search(origin, dest);
-  ///   ctrl.setAllRoutes(data.map(RouteModel.fromJson).toList());
-  /// ──────────────────────────────────────────────────────────────────────────
   void setAllRoutes(List<RouteModel> newRoutes) {
     _allRoutes = newRoutes;
     _applyFilters();
     notifyListeners();
   }
 
-  /// Set alert data from API response (incidents, MMDA, earthquakes, etc.)
   void setAlertData({
     required List<Map<String, dynamic>> incidents,
     required String mmdaBanner,
@@ -673,82 +1011,57 @@ class ExploreController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Core filtering engine — runs every time filters or ligtas mode change.
-  /// 
-  /// HOW IT WORKS (mock mode):
-  ///   • commuterFilters → matched against route.commuterTags (List< String >)
-  ///   • transportFilters → matched against route.modes (String contains check)
-  ///   • preferenceFilters → sorting/prioritization by route characteristics
-  ///   • ligtasFilters → only applied when ligtasModeOn; matched against route.ligtasTags
-  ///   • If no filters are active → show all routes
-  ///   • ligtasModeOn with no ligtas filters → boost safety-sorted routes to top
-  ///
-  /// BACKEND HOOK ─────────────────────────────────────────────────────────────
-  /// Replace or extend the body below with your real filtering/ranking logic.
-  /// The signature stays the same — just populate _filteredRoutes differently.
-  /// For preference filters, you can either:
-  ///   1. Sort routes based on preference (safest → by safetyScore, fastest → by minutes)
-  ///   2. Or use these as ranking signals in your backend route recommendation API
-  /// ──────────────────────────────────────────────────────────────────────────
   void _applyFilters() {
     List<RouteModel> result = List.from(_allRoutes);
 
-    // 1. Commuter filter — keep routes that support ANY selected commuter type
     if (commuterFilters.isNotEmpty) {
-      result = result.where((r) =>
-        commuterFilters.any((f) => r.commuterTags.contains(f))
-      ).toList();
+      result = result
+          .where((r) => commuterFilters.any((f) => r.commuterTags.contains(f)))
+          .toList();
     }
 
-    // 2. Transport filter — keep routes whose modes string contains ANY selected mode
     if (transportFilters.isNotEmpty) {
       result = result.where((r) {
         final modesLower = r.modes.toLowerCase();
-        return transportFilters.any((f) => modesLower.contains(f.toLowerCase()));
+        return transportFilters.any(
+          (f) => modesLower.contains(f.toLowerCase()),
+        );
       }).toList();
     }
 
-    // 3. Ligtas features filter — only active when ligtas mode is ON
     if (_ligtasModeOn && ligtasFilters.isNotEmpty) {
-      result = result.where((r) =>
-        ligtasFilters.any((f) => r.ligtasTags.contains(f))
-      ).toList();
+      result = result
+          .where((r) => ligtasFilters.any((f) => r.ligtasTags.contains(f)))
+          .toList();
     }
 
-    // 4. Preference filter — sort/prioritize based on user preference
-    //    BACKEND: Replace with your ranking algorithm or API parameter
     if (preferenceFilters.isNotEmpty) {
-      final pref = preferenceFilters.first; // Using first preference if multiple selected
+      final pref = preferenceFilters.first;
       if (pref == 'safest') {
         result.sort((a, b) => b.safetyScore.compareTo(a.safetyScore));
       } else if (pref == 'fastest') {
         result.sort((a, b) => a.minutes.compareTo(b.minutes));
       } else if (pref == 'cheapest') {
-        // Sort by fare (lowest first)
         result.sort((a, b) => a.fare.compareTo(b.fare));
       } else if (pref == 'balanced') {
-        // Balanced approach: normalize and combine safety, speed, and cost
         result.sort((a, b) {
-          final aScore = (a.safetyScore / 100) - (a.minutes / 120) - (a.fare / 100);
-          final bScore = (b.safetyScore / 100) - (b.minutes / 120) - (b.fare / 100);
-          return bScore.compareTo(aScore); // Higher balanced score is better
+          final aScore =
+              (a.safetyScore / 100) - (a.minutes / 120) - (a.fare / 100);
+          final bScore =
+              (b.safetyScore / 100) - (b.minutes / 120) - (b.fare / 100);
+          return bScore.compareTo(aScore);
         });
       } else if (pref == 'moderate') {
-        // Moderate preference: favor mid-range routes (not extreme in any dimension)
-        result.sort((a, b) {
-          final aVariance = _calculateVariance(a);
-          final bVariance = _calculateVariance(b);
-          return aVariance.compareTo(bVariance); // Lower variance = more moderate
-        });
+        result.sort(
+          (a, b) => _calculateVariance(a).compareTo(_calculateVariance(b)),
+        );
       }
     }
 
-    // 5. Ligtas mode ON (no ligtas filters, no preference filters) → sort by safety score descending
     if (_ligtasModeOn && preferenceFilters.isEmpty) {
       result.sort((a, b) => b.safetyScore.compareTo(a.safetyScore));
     }
 
-    // 6. If nothing matched, fall back to all routes with a toast
     if (result.isEmpty && hasFilters) {
       result = List.from(_allRoutes);
       showToast('No routes match filters — showing all', 'teal');
@@ -800,65 +1113,85 @@ class ExploreController extends ChangeNotifier {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Icon
                 Container(
-                  width: 44, height: 44,
+                  width: 44,
+                  height: 44,
                   decoration: const BoxDecoration(
                     color: AppColors.redDim,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.stop_circle_outlined,
-                    color: AppColors.safeRed, size: 22),
+                  child: const Icon(
+                    Icons.stop_circle_outlined,
+                    color: AppColors.safeRed,
+                    size: 22,
+                  ),
                 ),
                 const SizedBox(height: 14),
                 Text(
                   'Stop Navigation?',
                   style: GoogleFonts.plusJakartaSans(
-                    fontSize: 17, fontWeight: FontWeight.w800,
-                    color: AppColors.text(isDark)),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.text(isDark),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   'Are you sure you want to stop? This will end your current route navigation.',
                   style: GoogleFonts.plusJakartaSans(
-                    fontSize: 13, color: AppColors.text2(isDark), height: 1.5),
+                    fontSize: 13,
+                    color: AppColors.text2(isDark),
+                    height: 1.5,
+                  ),
                 ),
                 const SizedBox(height: 24),
-                Row(children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.text2(isDark),
-                        side: BorderSide(color: AppColors.border(isDark)),
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.text2(isDark),
+                          side: BorderSide(color: AppColors.border(isDark)),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: Text(
+                          'Cancel',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
-                      onPressed: () => Navigator.of(dialogContext).pop(),
-                      child: Text('Cancel',
-                        style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.safeRed,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.safeRed,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.of(dialogContext).pop();
+                          stopNavigation();
+                        },
+                        child: Text(
+                          'Stop Route',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
-                      onPressed: () {
-                        Navigator.of(dialogContext).pop();
-                        stopNavigation();
-                      },
-                      child: Text('Stop Route',
-                        style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
                     ),
-                  ),
-                ]),
+                  ],
+                ),
               ],
             ),
           ),
@@ -873,27 +1206,213 @@ class ExploreController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Map zoom (passed to view) ───────────────────────────────────
+  // ── Map zoom ───────────────────────────────────────────────────
   int _mapZoom = 14;
   int get mapZoom => _mapZoom;
-  void zoomIn()  { _mapZoom = (_mapZoom + 1).clamp(3, 19); notifyListeners(); }
-  void zoomOut() { _mapZoom = (_mapZoom - 1).clamp(3, 19); notifyListeners(); }
+  void zoomIn() {
+    _mapZoom = (_mapZoom + 1).clamp(3, 19);
+    notifyListeners();
+  }
 
-  // ── Helper methods for preference filters ──────────────────────
+  void zoomOut() {
+    _mapZoom = (_mapZoom - 1).clamp(3, 19);
+    notifyListeners();
+  }
 
-  /// Calculate variance for moderate filter (lower = more moderate/balanced)
-  /// BACKEND: Replace with your own balanced scoring algorithm
+  // ── Report incident ────────────────────────────────────────────
+  // Report types are fetched from GET /api/report-types on first open.
+  List<ReportType> _reportTypes = const [
+    ReportType(key: 'crime', label: 'Crime', icon: '🚨'),
+    ReportType(key: 'flood', label: 'Flooding', icon: '🌊'),
+    ReportType(key: 'accident', label: 'Accident', icon: '🚗'),
+    ReportType(key: 'hazard', label: 'Road Hazard', icon: '⚠️'),
+  ];
+  List<ReportType> get reportTypes => _reportTypes;
+  bool _reportTypesLoaded = false;
+
+  /// Fetch report type options from backend (cached after first call).
+  /// GET /api/report-types → [{ key, label, icon }]
+  Future<void> loadReportTypes() async {
+    if (_reportTypesLoaded) return;
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      final types = await ApiClient.instance.getReportTypes(token: token);
+      if (types.isNotEmpty) {
+        _reportTypes = types
+            .map(
+              (t) => ReportType(
+                key: t['key'] as String? ?? '',
+                label: t['label'] as String? ?? '',
+                icon: t['icon'] as String? ?? '⚠️',
+              ),
+            )
+            .where((t) => t.key.isNotEmpty)
+            .toList();
+        _reportTypesLoaded = true;
+        notifyListeners();
+      }
+    } catch (_) {
+      // Keep default hardcoded types on failure
+    }
+  }
+
+  /// Submit a community incident report.
+  /// POST /report  →  { ok, message }
+  Future<bool> submitReport({
+    required String reportType,
+    required double lat,
+    required double lon,
+    required String description,
+  }) async {
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      final result = await ApiClient.instance.submitReport(
+        reportType: reportType,
+        lat: lat,
+        lon: lon,
+        description: description,
+        token: token,
+      );
+      final ok = result['ok'] == true;
+      showToast(
+        result['message'] as String? ??
+            (ok ? 'Report submitted!' : 'Failed to submit'),
+        ok ? 'green' : 'red',
+      );
+      return ok;
+    } catch (e) {
+      showToast('Could not submit report', 'red');
+      return false;
+    }
+  }
+
+  // ── SOS ────────────────────────────────────────────────────────
+  bool _sosSending = false;
+  bool get sosSending => _sosSending;
+
+  /// Trigger SOS: logs the event with current GPS coords + active route summary.
+  /// POST /api/sos  →  { ok, message, share_link }
+  Future<void> triggerSos(BuildContext context) async {
+    if (_sosSending) return;
+    _sosSending = true;
+    showToast('Sending SOS…', 'red');
+    notifyListeners();
+
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      final lat = _lat ?? 0.0;
+      final lon = _lng ?? 0.0;
+      final routeSummary = _activeRoute?.modes ?? '';
+
+      final result = await ApiClient.instance.triggerSos(
+        lat: lat,
+        lon: lon,
+        message: 'SOS from Ligtas app',
+        routeSummary: routeSummary,
+        token: token,
+      );
+
+      _sosSending = false;
+      notifyListeners();
+
+      if (result['ok'] == true) {
+        final shareLink = result['share_link'] as String? ?? '';
+        _showSosSuccessDialog(context, shareLink);
+      } else {
+        showToast(result['message'] as String? ?? 'SOS failed', 'red');
+      }
+    } catch (e) {
+      _sosSending = false;
+      showToast('Could not send SOS', 'red');
+      notifyListeners();
+    }
+  }
+
+  void _showSosSuccessDialog(BuildContext context, String shareLink) {
+    final isDark = context.read<ThemeController>().isDark;
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: AppColors.card(isDark),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.border(isDark)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: const BoxDecoration(
+                  color: Color(0x22DC2626),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.emergency_rounded,
+                  color: Color(0xFFDC2626),
+                  size: 28,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'SOS Sent',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text(isDark),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Your trusted contacts have been alerted with your location.',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 13,
+                  color: AppColors.text2(isDark),
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.teal,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: Text(
+                    'OK',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Helper ─────────────────────────────────────────────────────
   double _calculateVariance(RouteModel route) {
-    // Normalize each metric to 0-1 scale, then calculate variance
     final normalizedSafety = route.safetyScore / 100;
-    final normalizedTime = 1 - (route.minutes / 120); // Invert so lower is better
-    final normalizedCost = 1 - (route.fare / 100); // Invert so lower is better
-    
+    final normalizedTime = 1 - (route.minutes / 120);
+    final normalizedCost = 1 - (route.fare / 100);
     final mean = (normalizedSafety + normalizedTime + normalizedCost) / 3;
-    final variance = ((normalizedSafety - mean).abs() + 
-                      (normalizedTime - mean).abs() + 
-                      (normalizedCost - mean).abs()) / 3;
-    
-    return variance;
+    return ((normalizedSafety - mean).abs() +
+            (normalizedTime - mean).abs() +
+            (normalizedCost - mean).abs()) /
+        3;
   }
 }

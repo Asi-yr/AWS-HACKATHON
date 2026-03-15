@@ -6,6 +6,7 @@ print("[DEBUG] [INIT] Starting application initialization...")
 t_init_start = time.time()
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
+from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from navigation import geocode_location, get_navigation_data
 from branca.element import Element
@@ -82,6 +83,7 @@ print(f"[DEBUG] [INIT] Database initialization took {time.time() - t_db_init:.4f
 
 app = Flask(__name__)
 app.secret_key = 'saferoute_super_secret_key'
+CORS(app)  # ← Allow Flutter Web (and other origins) to call this API
 
 print(f"[DEBUG] [INIT] Application setup complete in {time.time() - t_init_start:.4f}s")
 
@@ -1972,8 +1974,17 @@ def api_safety():
         'seismic': {
             'count':      len(quakes),
             'earthquakes': [
-                {'magnitude': e['magnitude'], 'place': e['place'],
-                 'severity': e['severity'], 'tsunami': e['tsunami']}
+                {
+                    'magnitude': e['magnitude'],
+                    'place':     e['place'],
+                    'severity':  e['severity'],
+                    'tsunami':   e['tsunami'],
+                    # Flutter HotspotModel needs these for map circles
+                    'lat':       e['lat'],
+                    'lon':       e['lon'],
+                    'radius_km': e['radius_km'],
+                    'color':     e['color'],
+                }
                 for e in quakes[:3]
             ],
         },
@@ -2183,7 +2194,8 @@ def api_safe_spots_flutter():
         return jsonify({'ok': False, 'error': str(e), 'spots': []}), 500
 
 
-
+@app.route('/api/safe-spots', methods=['GET'])
+def api_safe_spots():
     """Safe spots (police, hospitals, fire stations, etc.) near a coordinate."""
     t_start = time.time()
     print("[DEBUG][api_safe_spots] Incoming query...")
@@ -2192,7 +2204,6 @@ def api_safe_spots_flutter():
         lon    = float(request.args.get('lon', 120.9842))
         radius = int(request.args.get('radius', 1500))
         print(f"[DEBUG] [api_safe_spots] Parameters -> lat: {lat}, lon: {lon}, radius: {radius}")
-        
         spots  = get_safe_spots_near(lat, lon, radius_m=radius)
         print(f"[DEBUG][api_safe_spots] Retrieved {len(spots)} spots in {time.time() - t_start:.4f}s")
         return jsonify({'spots': spots, 'count': len(spots)})
@@ -2297,4 +2308,4 @@ def rss_feed():
 
 if __name__ == '__main__':
     print("[DEBUG] [MAIN] Starting Flask app loop via main block...")
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)

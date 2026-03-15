@@ -47,10 +47,20 @@ class RouteModel {
   //   floodWarning    ← noah.py       (apply_route_flood_analysis)
   //   crimeWarning    ← crime_data.py (apply_route_crime_to_routes)
   //   profileWarnings ← vulnerable_profiles.py (list of strings)
-  final String?        seismicWarning;
-  final String?        floodWarning;
-  final String?        crimeWarning;
+  final String? seismicWarning;
+  final String? floodWarning;
+  final String? crimeWarning;
   final List<dynamic>? profileWarnings;
+
+  // ── Map overlay zone data (populated by _routeFromApi in api_client.dart) ──
+  //   routeCrimeZones ← route_crime_zones from backend
+  //     each entry: { risk: 'high'|'moderate', name, summary,
+  //                   coords: [latMin, latMax, lonMin, lonMax] }
+  //   floodZonesMap   ← flood_zones_map from backend
+  //     each entry: { lat, lon, risk: 'high'|'moderate'|'low',
+  //                   label, depth_m, rain_active }
+  final List<Map<String, dynamic>>? routeCrimeZones;
+  final List<Map<String, dynamic>>? floodZonesMap;
 
   const RouteModel({
     required this.id,
@@ -62,31 +72,60 @@ class RouteModel {
     required this.safetyNote,
     required this.steps,
     required this.polyline,
-    this.commuterTags    = const [],
-    this.ligtasTags      = const [],
+    this.commuterTags = const [],
+    this.ligtasTags = const [],
     // Warning fields — null by default so all existing mock data is unaffected.
     this.seismicWarning,
     this.floodWarning,
     this.crimeWarning,
     this.profileWarnings,
+    this.routeCrimeZones,
+    this.floodZonesMap,
   });
 
   SafetyMeta get safetyMeta {
-    if (safetyScore >= 85) return SafetyMeta(color: AppColors.safeGreen, label: 'Safe');
-    if (safetyScore >= 70) return SafetyMeta(color: AppColors.safeAmber, label: 'Moderate');
+    if (safetyScore >= 85)
+      return SafetyMeta(color: AppColors.safeGreen, label: 'Safe');
+    if (safetyScore >= 70)
+      return SafetyMeta(color: AppColors.safeAmber, label: 'Moderate');
     return SafetyMeta(color: AppColors.safeRed, label: 'Caution');
   }
 
   TagMeta get tagMeta {
     const map = {
-      'fastest':   TagMeta(bg: AppColors.tagFastest,  fg: Colors.white,       label: 'Fastest'),
-      'balanced':  TagMeta(bg: AppColors.tagBalanced,  fg: Colors.white,       label: 'Balanced'),
-      'cheapest':  TagMeta(bg: AppColors.tagCheapest,  fg: Color(0xFF0F1F35), label: 'Cheapest'),
-      'safest':    TagMeta(bg: AppColors.tagSafest,    fg: Color(0xFF0F1F35), label: 'Safest'),
-      'moderate':  TagMeta(bg: AppColors.tagModerate,  fg: Colors.white,       label: 'Moderate'),
-      'dangerous': TagMeta(bg: AppColors.tagDanger,    fg: Colors.white,       label: 'Dangerous'),
+      'fastest': TagMeta(
+        bg: AppColors.tagFastest,
+        fg: Colors.white,
+        label: 'Fastest',
+      ),
+      'balanced': TagMeta(
+        bg: AppColors.tagBalanced,
+        fg: Colors.white,
+        label: 'Balanced',
+      ),
+      'cheapest': TagMeta(
+        bg: AppColors.tagCheapest,
+        fg: Color(0xFF0F1F35),
+        label: 'Cheapest',
+      ),
+      'safest': TagMeta(
+        bg: AppColors.tagSafest,
+        fg: Color(0xFF0F1F35),
+        label: 'Safest',
+      ),
+      'moderate': TagMeta(
+        bg: AppColors.tagModerate,
+        fg: Colors.white,
+        label: 'Moderate',
+      ),
+      'dangerous': TagMeta(
+        bg: AppColors.tagDanger,
+        fg: Colors.white,
+        label: 'Dangerous',
+      ),
     };
-    return map[tag] ?? TagMeta(bg: AppColors.teal, fg: Colors.white, label: tag);
+    return map[tag] ??
+        TagMeta(bg: AppColors.teal, fg: Colors.white, label: tag);
   }
 }
 
@@ -109,7 +148,11 @@ class FilterOption {
   final String key;
   final String label;
   final IconData icon;
-  const FilterOption({required this.key, required this.label, required this.icon});
+  const FilterOption({
+    required this.key,
+    required this.label,
+    required this.icon,
+  });
 }
 
 // ── Address Suggestion ───────────────────────────────────────────
@@ -130,10 +173,14 @@ class MiniItem {
 
   IconData get icon {
     switch (type) {
-      case MiniItemType.clock: return Icons.history_rounded;
-      case MiniItemType.home:  return Icons.home_rounded;
-      case MiniItemType.heart: return Icons.favorite_rounded;
-      case MiniItemType.pin:   return Icons.place_rounded;
+      case MiniItemType.clock:
+        return Icons.history_rounded;
+      case MiniItemType.home:
+        return Icons.home_rounded;
+      case MiniItemType.heart:
+        return Icons.favorite_rounded;
+      case MiniItemType.pin:
+        return Icons.place_rounded;
     }
   }
 }
