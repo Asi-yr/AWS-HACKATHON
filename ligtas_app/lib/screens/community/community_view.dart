@@ -1065,14 +1065,6 @@ class _PostCardState extends State<_PostCard> {
                   ),
                 ),
             ]),
-            const SizedBox(width: 16),
-            Row(children: [
-              Icon(Icons.chat_bubble_outline, size: 17, color: t.text2),
-              const SizedBox(width: 5),
-              Text('${p.comments}',
-                  style: t.body(
-                      size: 11, color: t.text2, w: FontWeight.w700)),
-            ]),
             const Spacer(),
             Icon(Icons.share_outlined, size: 17, color: t.text2),
           ]),
