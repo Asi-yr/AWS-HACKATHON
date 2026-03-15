@@ -151,6 +151,7 @@ class ProfileController extends ChangeNotifier {
       history = TravelHistory(saved: const [], history: routes);
     } catch (e) {
       debugPrint('[ProfileController] Error loading travel history: $e');
+      showToast('Could not load travel history', 'red');
     } finally {
       isLoadingHistory = false;
       notifyListeners();
@@ -382,11 +383,15 @@ class ProfileController extends ChangeNotifier {
   Future<void> loadSosContacts() async {
     try {
       final token = await SessionManager.instance.getAuthToken();
-      if (token == null || token.isEmpty) return;
+      if (token == null || token.isEmpty) {
+        showToast('Not logged in', 'red');
+        return;
+      }
       _sosContacts = await ApiClient.instance.getSosContacts(token: token);
       notifyListeners();
     } catch (e) {
       debugPrint('[ProfileController] Error loading SOS contacts: $e');
+      showToast('Could not load SOS contacts', 'red');
     }
   }
 

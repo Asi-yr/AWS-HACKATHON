@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/app_colors.dart';
-import '../../core/app_tab_controller.dart';
 import '../../core/custom_theme.dart';
 import '../../models/travel_history_model.dart';
 import '../../models/user_model.dart';
@@ -43,16 +42,6 @@ class _ProfileBody extends StatelessWidget {
               _StatsRow(),
               const SectionLabel('SAFETY & NAVIGATION'),
               SettingsCard(children: [
-                ToggleRow(
-                  icon: Icons.security_rounded, 
-                  title: 'AI Safety Assistant', 
-                  subtitle: 'Real-time incident detection', 
-                  value: ctrl.user.preferences.aiSafety, 
-                  onChanged: (_) => ctrl.toggleAiSafety()
-                ),
-                const RowDivider(),
-                ChevronRow(icon: Icons.download_for_offline_rounded, title: 'Offline Maps', subtitle: 'Manage downloaded regions', trailing: '1.2 GB', onTap: ctrl.showComingSoon),
-                const RowDivider(),
                 ChevronRow(icon: Icons.history_rounded, title: 'Travel History', subtitle: 'Past routes and safety logs', onTap: ctrl.openTravelHistory),
               ]),
               const SectionLabel('PREFERENCES'),
@@ -64,8 +53,6 @@ class _ProfileBody extends StatelessWidget {
                   value: Theme.of(context).brightness == Brightness.dark,
                   onChanged: (_) => ctrl.toggleTheme(context),
                 ),
-                const RowDivider(),
-                ChevronRow(icon: Icons.notifications_rounded, title: 'Notifications', subtitle: 'Alerts and announcements', onTap: () => context.read<AppTabController>().switchTo(1)),
               ]),
               const SectionLabel('EMERGENCY'),
               SettingsCard(children: [
