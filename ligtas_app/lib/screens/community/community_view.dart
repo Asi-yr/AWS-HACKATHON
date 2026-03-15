@@ -308,7 +308,7 @@ class CommunityView extends StatefulWidget {
 
 class _CommunityViewState extends State<CommunityView> {
   List<_Post> _posts = [];
-  List<_Notif> _notifs = [];
+  final List<_Notif> _notifs = [];
   _Category _activeCategory = _Category.all;
   bool _isLoading = true;
   List<Map<String, dynamic>> _reportTypes = [];
