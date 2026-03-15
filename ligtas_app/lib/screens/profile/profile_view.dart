@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -142,8 +143,11 @@ class _ProfileHero extends StatelessWidget {
               shape: BoxShape.circle,
               border: Border.all(color: AppColors.primaryTeal(context.isDark), width: 2.5)),
             child: ClipOval(child: user.avatarUrl != null
-              ? Image.network(user.avatarUrl!, fit: BoxFit.cover,
-                  errorBuilder: (c, e, s) => _fallback())
+              ? (user.avatarUrl!.startsWith('http')
+                  ? Image.network(user.avatarUrl!, fit: BoxFit.cover,
+                      errorBuilder: (c, e, s) => _fallback())
+                  : Image.file(File(user.avatarUrl!), fit: BoxFit.cover,
+                      errorBuilder: (c, e, s) => _fallback()))
               : _fallback()),
           ),
           Positioned(bottom: 0, right: 0,
@@ -292,8 +296,11 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                   shape: BoxShape.circle,
                   border: Border.all(color: AppColors.primaryTeal(context.isDark), width: 2.5)),
                 child: ClipOval(child: ctrl.user.avatarUrl != null
-                  ? Image.network(ctrl.user.avatarUrl!, fit: BoxFit.cover,
-                      errorBuilder: (c, e, s) => _avatarFallback())
+                  ? (ctrl.user.avatarUrl!.startsWith('http')
+                      ? Image.network(ctrl.user.avatarUrl!, fit: BoxFit.cover,
+                          errorBuilder: (c, e, s) => _avatarFallback())
+                      : Image.file(File(ctrl.user.avatarUrl!), fit: BoxFit.cover,
+                          errorBuilder: (c, e, s) => _avatarFallback()))
                   : _avatarFallback()),
               ),
               Positioned.fill(child: ClipOval(child: Container(

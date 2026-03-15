@@ -136,7 +136,7 @@ class ProfileController extends ChangeNotifier {
           origin: item['origin']?.toString() ?? 'Unknown',
           destination: item['destination']?.toString() ?? 'Unknown',
           modes: item['commuterType']?.toString() ?? 'commute',
-          minutes: (item['routeCount'] as num?)?.round() ?? 0,  // Use route count as placeholder
+          minutes: 0,  // Duration not provided by history API
           fare: 0,  // Not provided by API
           safetyScore: 75,  // Default neutral score
           safetyNote: 'Previous route search',
@@ -370,7 +370,7 @@ class ProfileController extends ChangeNotifier {
       }
       
       await ApiClient.instance.clearRouteHistory(token: token);
-      history = TravelHistory.mock();  // Reset to empty
+      history = const TravelHistory(saved: [], history: []);
       showToast("Travel history cleared", "teal");
       notifyListeners();
     } catch (e) {
