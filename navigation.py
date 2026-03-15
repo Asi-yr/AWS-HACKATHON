@@ -272,7 +272,7 @@ def _fetch_osrm_foot(olon, olat, dlon, dlat):
         print(f"[DEBUG][{fn}]   Trying URL {idx+1}/{len(urls)}: {url[:80]}...")
         try:
             t_req = time.time()
-            r = requests.get(url, headers=hdrs, timeout=6).json()
+            r = requests.get(url, headers=hdrs, timeout=10).json()
             print(f"[DEBUG][{fn}]   URL {idx+1} responded in {time.time()-t_req:.3f}s  code={r.get('code')}")
             if r.get('code') == 'Ok' and r.get('routes'):
                 print(f"[DEBUG][{fn}]   OK  routes={len(r['routes'])}  total={time.time()-t_start:.3f}s")
@@ -784,7 +784,7 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon):
         print(f"[DEBUG][{fn}]   STRATEGY 1 (OSRM driving) → {url[:90]}...")
         try:
             t_req = time.time()
-            r = requests.get(url, timeout=7, headers={'User-Agent': 'SafeRouteAI/1.0'}).json()
+            r = requests.get(url, timeout=15, headers={'User-Agent': 'SafeRouteAI/1.0'}).json()
             print(f"[DEBUG][{fn}]   STRATEGY 1 responded in {time.time()-t_req:.3f}s  code={r.get('code')}")
             if r.get('code') == 'Ok' and r.get('routes'):
                 coords = [[pt[1], pt[0]] for pt in r['routes'][0]['geometry']['coordinates']]
@@ -2260,12 +2260,46 @@ def get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, f
         print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
         return r
 
-    # ── Multimodal (transit / train_jeepney / train_bus) ──────────────────────
-    if ctype in ('transit', 'train_jeepney', 'train_bus'):
+    # ── Walk ──────────────────────────────────────────────────────────────────────
+    if ctype in ('walk', 'walking', 'foot', 'pedestrian'):
+        print(f"[DEBUG][{fn}] Branch: WALK → get_walk_route()")
+        r = get_walk_route(orig_lon, orig_lat, dest_lon, dest_lat)
+        _tag_routes(r.get('routes', []), 'walk', 'Walking', '#2ecc71')
+        print(f"[DEBUG][{fn}] Done  elapsed={time.time()-t_start:.3f}s")
+        print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
+        return r
+
+    # ── Car / driving ─────────────────────────────────────────────────────────────
+    if ctype in ('car', 'drive', 'driving', 'auto'):
+        print(f"[DEBUG][{fn}] Branch: CAR → get_car_route()")
+        r = get_car_route(orig_lon, orig_lat, dest_lon, dest_lat)
+        _tag_routes(r.get('routes', []), 'car', 'Car', '#3498db')
+        print(f"[DEBUG][{fn}] Done  elapsed={time.time()-t_start:.3f}s")
+        print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
+        return r
+
+    # ── Motorcycle ────────────────────────────────────────────────────────────────
+    if ctype in ('motorcycle', 'motor', 'motorbike', 'bike', 'moto'):
+        print(f"[DEBUG][{fn}] Branch: MOTORCYCLE → get_motorcycle_route()")
+        r = get_motorcycle_route(orig_lon, orig_lat, dest_lon, dest_lat)
+        _tag_routes(r.get('routes', []), 'motorcycle', 'Motorcycle', '#8e44ad')
+        print(f"[DEBUG][{fn}] Done  elapsed={time.time()-t_start:.3f}s")
+        print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
+        return r
+
+    # ── Generic commute (alias for transit) ───────────────────────────────────────
+    if ctype == 'commute':
+        print(f"[DEBUG][{fn}] Branch: COMMUTE (alias → transit)")
+        ctype = 'transit'
+        # fall-through intentional — handled by the multimodal block below
+    # Multimodal fall-through for commute↓
+
+    # ── Multimodal (transit / train_jeepney / train_bus / commute) ───────────────
+    if ctype in ('transit', 'train_jeepney', 'train_bus', 'commute'):
         print(f"[DEBUG][{fn}] Branch: MULTIMODAL ({ctype})")
         surface_modes = []
-        if ctype in ('transit', 'train_jeepney'): surface_modes.append('jeepney')
-        if ctype in ('transit', 'train_bus'):     surface_modes.append('bus')
+        if ctype in ('transit', 'train_jeepney', 'commute'): surface_modes.append('jeepney')
+        if ctype in ('transit', 'train_bus', 'commute'):     surface_modes.append('bus')
         surface_modes.append('train')
         if not surface_modes:
             surface_modes = ['jeepney', 'bus', 'train']
@@ -2305,16 +2339,21 @@ def get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, f
             has_train = any(s['type'] == 'train'   for s in segs)
             has_bus   = any(s['type'] == 'bus'     for s in segs)
             has_jeep  = any(s['type'] == 'jeepney' for s in segs)
+            num_jeep_segs = sum(1 for s in segs if s['type'] == 'jeepney')
             if has_train:
                 label = 'Train + Connect' if (has_bus or has_jeep) else 'Train'
                 r.setdefault('mode_label', label)
                 r.setdefault('mode_label_color', '#27ae60')
             elif has_bus and has_jeep:
-                r.setdefault('mode_label', 'Jeepney+Bus')
+                r.setdefault('mode_label', 'Jeepney + Bus')
                 r.setdefault('mode_label_color', '#2980b9')
             elif has_bus:
                 r.setdefault('mode_label', 'Bus')
                 r.setdefault('mode_label_color', '#16a085')
+            elif num_jeep_segs >= 2:
+                # Two-jeepney transfer route — label clearly to distinguish from direct
+                r.setdefault('mode_label', 'Jeepney (Transfer)')
+                r.setdefault('mode_label_color', '#d35400')
             else:
                 r.setdefault('mode_label', 'Jeepney')
                 r.setdefault('mode_label_color', '#e67e22')

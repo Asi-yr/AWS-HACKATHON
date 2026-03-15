@@ -497,7 +497,46 @@ class _SuggestionDrawer extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: ctrl.routes.isEmpty
+          child: ctrl.isLoadingRoutes
+              // ── Loading state ──────────────────────────────────────────
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          width: 36,
+                          height: 36,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            color: AppColors.teal,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Finding safe routes…',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.teal,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Checking crime, flood & traffic data',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            color: AppColors.text2(isDark),
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ctrl.routes.isEmpty
+              // ── Empty / no-routes state ────────────────────────────────
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -587,6 +626,7 @@ class _SuggestionDrawer extends StatelessWidget {
                     ),
                   ),
                 )
+              // ── Route list ────────────────────────────────────────────
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   itemCount: ctrl.routes.length,
@@ -767,7 +807,11 @@ class _DetailsPanelState extends State<_DetailsPanel> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            ctrl.mmdaBanner,
+                            ctrl.mmdaBanner
+                                .replaceAll(RegExp(r'<[^>]*>'), '')
+                                .replaceAll('&nbsp;', ' ')
+                                .replaceAll('&amp;', '&')
+                                .trim(),
                             style: GoogleFonts.plusJakartaSans(
                               fontSize: 11,
                               color: const Color(0xFF856404),
@@ -824,9 +868,17 @@ class _DetailsPanelState extends State<_DetailsPanel> {
                   children: [
                     _statBox('${route.minutes} min', 'Duration', isDark),
                     const SizedBox(width: 8),
-                    _statBox('₱${route.fare}', 'Fare', isDark),
+                    _statBox(
+                      route.fare > 0 ? '₱${route.fare}' : '—',
+                      'Fare',
+                      isDark,
+                    ),
                     const SizedBox(width: 8),
-                    _statBox('5.8 km', 'Distance', isDark),
+                    _statBox(
+                      route.distance.isNotEmpty ? route.distance : '—',
+                      'Distance',
+                      isDark,
+                    ),
                   ],
                 ),
                 // ── Live risk warnings from backend ─────────────────────
@@ -930,6 +982,25 @@ class _DetailsPanelState extends State<_DetailsPanel> {
       stepIcon = Icons.directions_bus_rounded;
       stepColor = AppColors.teal;
     }
+
+    // ── Per-step crime pill ───────────────────────────────────────────────────
+    final risk = step.crimeRisk;
+    final showCrime = risk != null && risk != 'none' && risk.isNotEmpty;
+    final crimeColor = switch (risk) {
+      'high' => const Color(0xFFE74C3C),
+      'moderate' => const Color(0xFFF59E0B),
+      _ => const Color(0xFF27AE60),
+    };
+    final crimeLabel = switch (risk) {
+      'high' => '⚠ High crime risk along this segment',
+      'moderate' => '⚠ Moderate crime risk along this segment',
+      _ => 'Low crime risk',
+    };
+    // Use the specific note from crime_zones.json when available
+    final crimeText = (step.crimeNote != null && step.crimeNote!.isNotEmpty)
+        ? step.crimeNote!
+        : crimeLabel;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -952,7 +1023,9 @@ class _DetailsPanelState extends State<_DetailsPanel> {
               if (index < total - 1)
                 Container(
                   width: 2,
-                  height: 40,
+                  // Taller connector when the crime pill is visible so the
+                  // timeline doesn't crowd the pill below.
+                  height: showCrime ? 58 : 40,
                   color: AppColors.border(isDark),
                 ),
             ],
@@ -979,6 +1052,31 @@ class _DetailsPanelState extends State<_DetailsPanel> {
                     color: AppColors.text2(isDark),
                   ),
                 ),
+                if (showCrime) ...[
+                  const SizedBox(height: 5),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: crimeColor.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: crimeColor.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Text(
+                      crimeText,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: crimeColor,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -2145,36 +2243,44 @@ class _MapLayer extends StatefulWidget {
 }
 
 class _MapLayerState extends State<_MapLayer> {
-  // Track the last set of resolved coords so we only fit-bounds once per
-  // new pair, not on every rebuild.
   double? _lastOrigLat, _lastOrigLon, _lastDestLat, _lastDestLon;
+  // Track active route ID to re-fit camera and redraw when user selects a route
+  String? _lastActiveRouteId;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Safe hook: fires after every provider-triggered rebuild, but NOT
-    // during the build phase, so we can schedule a post-frame callback here.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _fitBoundsIfNewPins();
+      if (mounted) _fitBoundsIfChanged();
     });
   }
 
-  void _fitBoundsIfNewPins() {
+  void _fitBoundsIfChanged() {
     if (!mounted) return;
     final ctrl = context.read<ExploreController>();
     final oLat = ctrl.resolvedOrigLat;
     final oLon = ctrl.resolvedOrigLon;
     final dLat = ctrl.resolvedDestLat;
     final dLon = ctrl.resolvedDestLon;
+    final activeId = ctrl.activeRoute?.id;
 
-    // Need at least one complete pin to do anything
     final hasOrig = oLat != null && oLon != null;
     final hasDest = dLat != null && dLon != null;
-    if (!hasOrig && !hasDest) {
-      debugPrint('[_MapLayer] _fitBoundsIfNewPins: no coords yet, skipping');
-      return;
-    }
+    if (!hasOrig && !hasDest) return;
 
+<<<<<<< HEAD
+    bool near(double? a, double? b) =>
+        a == b || (a != null && b != null && (a - b).abs() < 0.00005);
+
+    final pinsChanged =
+        !(near(oLat, _lastOrigLat) &&
+            near(oLon, _lastOrigLon) &&
+            near(dLat, _lastDestLat) &&
+            near(dLon, _lastDestLon));
+    final routeChanged = activeId != _lastActiveRouteId;
+
+    if (!pinsChanged && !routeChanged) return;
+=======
     // Skip if nothing has meaningfully changed (< 5m tolerance)
     bool near(double? a, double? b) =>
         a == b || (a != null && b != null && (a - b).abs() < 0.00005);
@@ -2184,24 +2290,84 @@ class _MapLayerState extends State<_MapLayer> {
         near(dLon, _lastDestLon)) {
       return;
     }
+>>>>>>> 25fba3834ec43cd9d4a04dcacb03da8957f0aaa5
 
     _lastOrigLat = oLat;
     _lastOrigLon = oLon;
     _lastDestLat = dLat;
     _lastDestLon = dLon;
+    _lastActiveRouteId = activeId;
 
-    final double targetLat;
-    final double targetLon;
-    final double zoom;
+    // When a specific route is tapped, fit camera to its full polyline extent
+    if (routeChanged && ctrl.activeRoute != null) {
+      final poly = ctrl.activeRoute!.polyline;
+      if (poly.length >= 2) {
+        var minLat = poly.first[0], maxLat = poly.first[0];
+        var minLon = poly.first[1], maxLon = poly.first[1];
+        for (final p in poly) {
+          if (p[0] < minLat) minLat = p[0];
+          if (p[0] > maxLat) maxLat = p[0];
+          if (p[1] < minLon) minLon = p[1];
+          if (p[1] > maxLon) maxLon = p[1];
+        }
+        final cLat = (minLat + maxLat) / 2;
+        final cLon = (minLon + maxLon) / 2;
+        final span = [
+          (maxLat - minLat),
+          (maxLon - minLon),
+        ].reduce((a, b) => a > b ? a : b);
+        final zoom = span < 0.01
+            ? 15.0
+            : span < 0.03
+            ? 14.0
+            : span < 0.07
+            ? 13.0
+            : span < 0.15
+            ? 12.0
+            : span < 0.35
+            ? 11.0
+            : 10.0;
+        try {
+          widget.mapCtrl.move(LatLng(cLat, cLon), zoom);
+        } catch (_) {}
+        return;
+      }
+    }
 
+    if (!pinsChanged) return;
+
+    // Default: fit between origin and destination pins
+    final double targetLat, targetLon, zoom;
     if (hasOrig && hasDest) {
+<<<<<<< HEAD
+      targetLat = (oLat! + dLat!) / 2;
+      targetLon = (oLon! + dLon!) / 2;
+      final span = [
+=======
       // Both pins — center between them at a zoom that shows both
       targetLat = (oLat + dLat) / 2;
       targetLon = (oLon + dLon) / 2;
       final maxDiff = [
+>>>>>>> 25fba3834ec43cd9d4a04dcacb03da8957f0aaa5
         (oLat - dLat).abs(),
         (oLon - dLon).abs(),
       ].reduce((a, b) => a > b ? a : b);
+<<<<<<< HEAD
+      zoom = span < 0.01
+          ? 15.0
+          : span < 0.03
+          ? 14.0
+          : span < 0.07
+          ? 13.0
+          : span < 0.15
+          ? 12.0
+          : span < 0.35
+          ? 11.0
+          : 10.0;
+    } else if (hasDest) {
+      targetLat = dLat!;
+      targetLon = dLon!;
+=======
       if (maxDiff < 0.01) {
         zoom = 15;
       } else if (maxDiff < 0.03) {
@@ -2219,26 +2385,38 @@ class _MapLayerState extends State<_MapLayer> {
       // Only dest so far — center on it
       targetLat = dLat;
       targetLon = dLon;
+>>>>>>> 25fba3834ec43cd9d4a04dcacb03da8957f0aaa5
       zoom = 14;
     } else {
-      // Only origin so far — center on it
       targetLat = oLat!;
       targetLon = oLon!;
       zoom = 14;
     }
-
-    debugPrint(
-      '[_MapLayer] Moving camera → ($targetLat, $targetLon) z=$zoom  orig=($oLat,$oLon) dest=($dLat,$dLon)',
-    );
     try {
       widget.mapCtrl.move(LatLng(targetLat, targetLon), zoom);
-    } catch (e) {
-      debugPrint('[_MapLayer] mapCtrl.move failed: $e');
+    } catch (_) {}
+  }
+
+  // ── Segment type → map line color ──────────────────────────────────────────
+  static Color _segColor(String type) {
+    switch (type) {
+      case 'walk':
+        return const Color(0xFF7F8C8D); // grey
+      case 'jeepney':
+        return const Color(0xFFE67E22); // orange
+      case 'bus':
+        return const Color(0xFF16A085); // teal
+      case 'train':
+        return const Color(0xFF27AE60); // green
+      case 'road':
+      case 'car':
+        return const Color(0xFF2980B9); // blue
+      default:
+        return const Color(0xFF2980B9);
     }
   }
 
-  // ── Safety score → line colour (mirrors safetyLineColor in JS) ─────────────
-  // ── Flood risk → colour (mirrors blueColors in JS) ─────────────────────────
+  // ── Flood risk → colour ─────────────────────────────────────────────────────
   static Color _floodColor(String risk) {
     switch (risk) {
       case 'high':
@@ -2250,7 +2428,7 @@ class _MapLayerState extends State<_MapLayer> {
     }
   }
 
-  // ── Crime risk → colour (mirrors _zoneStyle in JS) ─────────────────────────
+  // ── Crime risk → colour ─────────────────────────────────────────────────────
   static Color _crimeColor(String risk) {
     return risk == 'high' ? const Color(0xFFCB4335) : const Color(0xFFB7950B);
   }
@@ -2297,21 +2475,109 @@ class _MapLayerState extends State<_MapLayer> {
     final ctrl = context.watch<ExploreController>();
     final active = ctrl.activeRoute;
 
-    // ── 1. Build polylines for ALL routes ─────────────────────────────────────
+    // ── 1. Route polylines — per-segment color by transport mode ─────────────
+    // Mode colors: walk=grey, jeepney=orange, bus=teal, train=green, car=blue
+    // Inactive routes: thin, semi-transparent, per-index color
+    // Active route: white outline + per-segment colors on top
     final polylines = <Polyline>[];
 
-    for (final route in ctrl.routes) {
-      final isActive = active != null && route.id == active.id;
-      final opacity = isActive ? 1.0 : 0.18;
-      final fallbackC = route.safetyMeta.color;
+    // Per-index fallback colors so routes are visually distinct when same mode
+    const indexColors = [
+      Color(0xFF2980B9), // blue
+      Color(0xFFE67E22), // orange
+      Color(0xFF27AE60), // green
+      Color(0xFF8E44AD), // purple
+    ];
 
+    // Draw inactive routes first (underneath active)
+    for (var i = 0; i < ctrl.routes.length; i++) {
+      final route = ctrl.routes[i];
+      final isActive = active != null && route.id == active.id;
+      if (isActive) continue;
       final pts = route.polyline.map((p) => LatLng(p[0], p[1])).toList();
       if (pts.length >= 2) {
         polylines.add(
           Polyline(
             points: pts,
-            color: fallbackC.withValues(alpha: opacity),
-            strokeWidth: isActive ? 5.5 : 3.5,
+            color: indexColors[i % indexColors.length].withValues(alpha: 0.38),
+            strokeWidth: 3.0,
+          ),
+        );
+      }
+    }
+
+    // Draw active route last (on top) with segment-by-segment coloring
+    if (active != null) {
+      final activePts = active.polyline.map((p) => LatLng(p[0], p[1])).toList();
+      if (activePts.length >= 2) {
+        // White outline for legibility over map tiles
+        polylines.add(
+          Polyline(
+            points: activePts,
+            color: Colors.white.withValues(alpha: 0.65),
+            strokeWidth: 8.5,
+          ),
+        );
+      }
+
+      // Use rawSegments for exact per-segment coloring
+      final segs = active.rawSegments;
+      if (segs != null && segs.isNotEmpty) {
+        for (final seg in segs) {
+          final type = (seg['type'] ?? '').toString();
+          final sc = seg['coords'];
+          final segPts = <LatLng>[];
+
+          if (sc is List) {
+            // Handle flat [[lat,lon],...] or nested train [[[lat,lon],...],...]
+            if (sc.isNotEmpty && sc.first is List) {
+              final first = sc.first as List;
+              if (first.isNotEmpty && first.first is List) {
+                // Nested (train segments)
+                for (final sub in sc) {
+                  if (sub is List) {
+                    for (final p in sub) {
+                      if (p is List && p.length >= 2) {
+                        final lat = (p[0] as num?)?.toDouble();
+                        final lon = (p[1] as num?)?.toDouble();
+                        if (lat != null && lon != null)
+                          segPts.add(LatLng(lat, lon));
+                      }
+                    }
+                  }
+                }
+              } else {
+                // Flat
+                for (final p in sc) {
+                  if (p is List && p.length >= 2) {
+                    final lat = (p[0] as num?)?.toDouble();
+                    final lon = (p[1] as num?)?.toDouble();
+                    if (lat != null && lon != null)
+                      segPts.add(LatLng(lat, lon));
+                  }
+                }
+              }
+            }
+          }
+
+          if (segPts.length < 2) continue;
+          final color = _segColor(type);
+          final isWalk = type == 'walk';
+          polylines.add(
+            Polyline(
+              points: segPts,
+              color: isWalk ? color.withValues(alpha: 0.75) : color,
+              strokeWidth: isWalk ? 3.0 : 5.5,
+            ),
+          );
+        }
+      } else if (activePts.length >= 2) {
+        // Fallback: draw full polyline in safety color
+        polylines.add(
+          Polyline(
+            points: activePts,
+            color: active.safetyMeta.color,
+            strokeWidth: 5.5,
           ),
         );
       }
@@ -2349,13 +2615,13 @@ class _MapLayerState extends State<_MapLayer> {
         );
       }
 
-      // Flood zones from route — only shown when actively raining (mirrors index.html logic)
+      // Flood zones — ONLY show when it is actively raining
       for (final zone in (active.floodZonesMap ?? [])) {
-        // rain_active field: if present, honour it; if absent, check controller's weatherRisk
-        final rainActive = zone['rain_active'] is bool
-            ? zone['rain_active'] as bool
+        // rain_active from backend overrides; fall back to weatherRisk check
+        final bool showFlood = zone['rain_active'] is bool
+            ? (zone['rain_active'] as bool)
             : ctrl.isRaining;
-        if (!rainActive) continue;
+        if (!showFlood) continue;
         final lat = (zone['lat'] as num?)?.toDouble();
         final lon = (zone['lon'] as num?)?.toDouble();
         if (lat == null || lon == null) continue;

@@ -55,7 +55,7 @@ class ApiClient {
             ...?extraParams,
           }),
         )
-        .timeout(const Duration(seconds: 90));
+        .timeout(const Duration(seconds: 180));
 
     // ── Never throw on HTTP errors — always return a usable map ──────────
     // The controller checks routes.isEmpty and surfaces the error as a toast.
@@ -148,7 +148,7 @@ class ApiClient {
               'mode': mode,
             }),
           )
-          .timeout(const Duration(seconds: 90));
+          .timeout(const Duration(seconds: 180));
 
       if (resp.statusCode != 200) return const [];
 
@@ -175,16 +175,52 @@ class ApiClient {
     final String distanceStr = (r['distance'] ?? '').toString();
     final int minutes = _parseMinutes(timeStr);
 
-    // ── Fare: backend sends either a plain num OR { display, value } ──────
+    // Fare: attach_fares() in features.py overwrites route fare with a dict:
+    //   { display: '₱13–₱18', min_fare: 13.0, max_fare: 18.0, note: '...', unit: 'PHP' }
+    // When commuter_type has no fare rule (was missing 'transit'), returns:
+    //   { display: 'N/A (private)', min_fare: null, ... }
+    // We handle all cases and suppress non-useful display strings.
     final fareRaw = r['fare'];
     final int fare;
+    String fareDisplay = '';
+
     if (fareRaw is num) {
       fare = fareRaw.round();
+      fareDisplay = fare > 0 ? '₱$fare' : '';
     } else if (fareRaw is Map) {
-      final v = fareRaw['value'];
-      fare = v is num ? v.round() : 0;
+      final minFare = fareRaw['min_fare'];
+      final maxFare = fareRaw['max_fare'];
+      final displayStr = (fareRaw['display'] ?? '').toString();
+
+      // min_fare is None/null for private modes — treat as 0
+      if (minFare == null) {
+        fare = 0;
+        // Suppress unhelpful strings like "N/A (private)"
+        fareDisplay = '';
+      } else if (minFare is num) {
+        fare = minFare.round();
+        // Use range display if available e.g. "₱13–₱18"
+        if (displayStr.isNotEmpty &&
+            !displayStr.contains('N/A') &&
+            !displayStr.contains('private')) {
+          fareDisplay = displayStr;
+        } else if (maxFare is num && maxFare.round() != fare) {
+          fareDisplay = '₱$fare–₱${maxFare.round()}';
+        } else {
+          fareDisplay = fare > 0 ? '₱$fare' : '';
+        }
+      } else {
+        fare = 0;
+        fareDisplay = '';
+      }
+    } else if (fareRaw is String) {
+      // Plain string e.g. "PHP 17.71"
+      final cleaned = fareRaw.replaceAll(RegExp(r'[^\d.]'), '');
+      fare = double.tryParse(cleaned)?.round() ?? 0;
+      fareDisplay = fare > 0 ? '₱$fare' : '';
     } else {
       fare = 0;
+      fareDisplay = '';
     }
 
     final numScore = r['safety_score'] ?? 75;
@@ -194,17 +230,35 @@ class ApiClient {
         (r['mode_label'] ?? r['route_name'] ?? 'Route ${index + 1}').toString();
     final String modes = modeLabelRaw;
 
-    final String tag = _tagFromScore(safetyScore, r['tag'] as String?);
+    // Position-based tag: route 0 = Fastest, 1 = Balanced, 2 = Safest
+    final String tag = _tagFromIndex(index, safetyScore, r['tag'] as String?);
 
-    final String safetyNote =
-        (r['safety_note'] ??
-                'Safety score $safetyScore based on live risk data.')
-            .toString();
+    // Strip any HTML tags from backend banner strings leaking into text fields
+    final String safetyNote = _stripHtml(
+      (r['safety_note'] ?? 'Safety score $safetyScore based on live risk data.')
+          .toString(),
+    );
+
+    // Flood warning: only show if it indicates active flooding, not just
+    // "flood-prone area — not currently raining" which is misleading
+    final rawFlood = r['flood_warning'] as String?;
+    final String? floodWarning =
+        (rawFlood != null &&
+            rawFlood.isNotEmpty &&
+            !rawFlood.toLowerCase().contains('not currently raining'))
+        ? rawFlood
+        : null;
 
     // ── Build step list from segments (rich breakdown) ───────────────────
     final List<RouteStep> steps = _buildSteps(r, modes, timeStr, distanceStr);
 
     final List<List<double>> polyline = _extractPolyline(r);
+
+    // Store raw segments for per-segment map coloring
+    final rawSegsJson = r['segments'];
+    final List<Map<String, dynamic>>? rawSegments = (rawSegsJson is List)
+        ? rawSegsJson.whereType<Map<String, dynamic>>().toList()
+        : null;
 
     // ── Merge endpoint crime warning + route-path zone warning ──────────────
     // crime_warning    → set by apply_crime_both_ends()  (origin/dest risk)
@@ -220,15 +274,18 @@ class ApiClient {
       modes: modes,
       minutes: minutes,
       fare: fare,
+      fareDisplay: fareDisplay,
       safetyScore: safetyScore,
       tag: tag,
       safetyNote: safetyNote,
       steps: steps,
       polyline: polyline,
+      distance: distanceStr,
+      rawSegments: rawSegments,
       commuterTags: const [],
       ligtasTags: const [],
       seismicWarning: r['seismic_warning'] as String?,
-      floodWarning: r['flood_warning'] as String?,
+      floodWarning: floodWarning,
       crimeWarning: crimeWarning,
       profileWarnings: r['profile_warnings'] as List<dynamic>?,
       routeCrimeZones: (r['route_crime_zones'] is List)
@@ -258,7 +315,7 @@ class ApiClient {
       for (final seg in segments) {
         if (seg is! Map<String, dynamic>) continue;
         final type = (seg['type'] ?? '').toString();
-        final label = (seg['label'] ?? '').toString();
+        final label = _stripHtml((seg['label'] ?? '').toString());
         if (label.isEmpty && type.isEmpty) continue;
 
         final String title;
@@ -288,7 +345,13 @@ class ApiClient {
             desc = '';
         }
         steps.add(
-          RouteStep(title: title, description: desc, vehicleName: type),
+          RouteStep(
+            title: title,
+            description: desc,
+            vehicleName: type,
+            crimeRisk: seg['crime_risk'] as String?,
+            crimeNote: seg['crime_note'] as String?,
+          ),
         );
       }
       if (steps.isNotEmpty) return steps;
@@ -392,6 +455,24 @@ class ApiClient {
 
   /// Derive a RouteModel tag from the backend `tag` field (if present)
   /// or from the safety score as a fallback.
+  String _tagFromIndex(int index, int safetyScore, String? backendTag) {
+    if (backendTag != null &&
+        backendTag.isNotEmpty &&
+        ['fastest', 'balanced', 'safest', 'cheapest'].contains(backendTag)) {
+      return backendTag;
+    }
+    switch (index) {
+      case 0:
+        return 'fastest';
+      case 1:
+        return 'balanced';
+      case 2:
+        return 'safest';
+      default:
+        return safetyScore >= 75 ? 'balanced' : 'moderate';
+    }
+  }
+
   String _tagFromScore(int safetyScore, String? backendTag) {
     if (backendTag != null && backendTag.isNotEmpty) return backendTag;
     if (safetyScore >= 85) return 'safest';
@@ -403,10 +484,21 @@ class ApiClient {
   double? _toDouble(dynamic v) {
     if (v is double) return v;
     if (v is int) return v.toDouble();
-    if (v is String) {
-      return double.tryParse(v);
-    }
+    if (v is String) return double.tryParse(v);
     return null;
+  }
+
+  /// Strip HTML tags and decode common entities — cleans backend banner strings
+  /// that occasionally leak into plain-text fields like safetyNote or labels.
+  static String _stripHtml(String raw) {
+    return raw
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .trim();
   }
 
   /// Merges two nullable warning strings into one, separated by a newline.

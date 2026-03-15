@@ -9,10 +9,22 @@ class RouteStep {
   final String title;
   final String description;
   final String vehicleName;
+
+  /// Per-step crime risk injected by annotate_segments_with_crime() on the
+  /// backend. Values: 'high' | 'moderate' | 'low' | 'none' | null.
+  /// Null means the backend has not annotated this step (e.g. mock data).
+  final String? crimeRisk;
+
+  /// Short human-readable note from crime_zones.json for this segment.
+  /// Empty string when the zone has no summary or risk is 'none'.
+  final String? crimeNote;
+
   const RouteStep({
     required this.title,
     this.description = '',
     this.vehicleName = '',
+    this.crimeRisk,
+    this.crimeNote,
   });
 }
 
@@ -21,6 +33,9 @@ class RouteModel {
   final String modes;
   final int minutes;
   final int fare;
+
+  /// Human-readable fare range e.g. "₱13–₱18" from backend estimate_fare()
+  final String fareDisplay;
   final int safetyScore;
   final String tag;
   final String safetyNote;
@@ -47,6 +62,12 @@ class RouteModel {
   //   floodWarning    ← noah.py       (apply_route_flood_analysis)
   //   crimeWarning    ← crime_data.py (apply_route_crime_to_routes)
   //   profileWarnings ← vulnerable_profiles.py (list of strings)
+  /// Human-readable distance e.g. "7.1 km" from backend
+  final String distance;
+
+  /// Raw segment list for per-segment map coloring
+  final List<Map<String, dynamic>>? rawSegments;
+
   final String? seismicWarning;
   final String? floodWarning;
   final String? crimeWarning;
@@ -67,11 +88,14 @@ class RouteModel {
     required this.modes,
     required this.minutes,
     required this.fare,
+    this.fareDisplay = '',
     required this.safetyScore,
     required this.tag,
     required this.safetyNote,
     required this.steps,
     required this.polyline,
+    this.distance = '',
+    this.rawSegments,
     this.commuterTags = const [],
     this.ligtasTags = const [],
     // Warning fields — null by default so all existing mock data is unaffected.
