@@ -145,6 +145,9 @@ class ExploreController extends ChangeNotifier {
   AppState _state = AppState.state1;
   AppState get state => _state;
 
+  bool _isLoadingRoutes = false;
+  bool get isLoadingRoutes => _isLoadingRoutes;
+
   void setState(AppState s) {
     _state = s;
     notifyListeners();
@@ -682,6 +685,9 @@ class ExploreController extends ChangeNotifier {
       return;
     }
     _state = AppState.state2;
+    _isLoadingRoutes = true;
+    _allRoutes = [];
+    _filteredRoutes = [];
     showToast('Finding routes...', 'teal');
     notifyListeners();
 
@@ -880,16 +886,20 @@ class ExploreController extends ChangeNotifier {
           );
         }
 
-        // ── Fetch safe-spot POIs + full area safety overlays ─────
-        final safeLat = _lat ?? 14.5995;
-        final safeLon = _lng ?? 120.9842;
+        // ── Fetch safe-spot POIs along the route midpoint ────────
+        // Use the midpoint of the first route's polyline so POIs are
+        // centred on the actual route, not the user's GPS position.
+        final poly = routes.first.polyline;
+        final midIdx = poly.length ~/ 2;
+        final safeLat = poly.isNotEmpty ? poly[midIdx][0] : (_lat ?? 14.5995);
+        final safeLon = poly.isNotEmpty ? poly[midIdx][1] : (_lng ?? 120.9842);
         await fetchSafetyOverlays(lat: safeLat, lon: safeLon);
 
         return;
       }
 
-      // No routes found — but still capture geocoded coords from the backend
-      // so A/B pins appear even when no route could be computed.
+      // No routes found
+      _isLoadingRoutes = false;
       final apiOrigLat = (response['orig_lat'] as num?)?.toDouble();
       final apiOrigLon = (response['orig_lon'] as num?)?.toDouble();
       final apiDestLat = (response['dest_lat'] as num?)?.toDouble();
@@ -925,9 +935,7 @@ class ExploreController extends ChangeNotifier {
     } catch (e, stack) {
       debugPrint('[searchRoutes] ERROR: $e');
       debugPrint('[searchRoutes] STACK: $stack');
-      // On error: keep whatever routes exist but don't inject mock data.
-      // The map will still show the A/B pins via resolvedOrig/Dest coords if
-      // geocoding already happened before the route fetch failed.
+      _isLoadingRoutes = false;
       _allRoutes = [];
       _applyFilters();
       setAlertData(
@@ -949,6 +957,7 @@ class ExploreController extends ChangeNotifier {
     _destinationText = '';
     _state = AppState.state1;
     _activeRoute = null;
+    _isLoadingRoutes = false;
     _filteredRoutes = List.from(_allRoutes);
     advisory = null;
     _resolvedOrigLat = null;
@@ -1124,7 +1133,12 @@ class ExploreController extends ChangeNotifier {
 
   void setAllRoutes(List<RouteModel> newRoutes) {
     _allRoutes = newRoutes;
+    _isLoadingRoutes = false;
     _applyFilters();
+    // Auto-select the first route so the map draws it immediately on load
+    if (newRoutes.isNotEmpty) {
+      _activeRoute = _allRoutes.first;
+    }
     notifyListeners();
   }
 
@@ -1210,7 +1224,13 @@ class ExploreController extends ChangeNotifier {
   RouteModel? get activeRoute => _activeRoute;
 
   void selectRoute(RouteModel r) {
-    _activeRoute = r;
+    // Resolve from _allRoutes by ID so the exact same object reference is used
+    // everywhere — this ensures route.id == active.id always matches correctly
+    // in _MapLayerState after _applyFilters() creates new list copies.
+    _activeRoute = _allRoutes.firstWhere(
+      (route) => route.id == r.id,
+      orElse: () => r,
+    );
     _state = AppState.state3;
     SessionManager.instance.setHasActiveRoute(false);
     notifyListeners();
@@ -1338,6 +1358,10 @@ class ExploreController extends ChangeNotifier {
 
   void backToRoutes() {
     _state = AppState.state2;
+    // Keep first route selected so polylines remain visible on the map
+    if (_activeRoute == null && _allRoutes.isNotEmpty) {
+      _activeRoute = _allRoutes.first;
+    }
     SessionManager.instance.setHasActiveRoute(false);
     notifyListeners();
   }

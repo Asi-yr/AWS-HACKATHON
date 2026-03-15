@@ -103,6 +103,13 @@ def check_mapbox_token() -> dict:
         return {"ok": False, "status": 0, "error": str(e)}
 
 
+# ── In-process coordinate cache for flood lookups ────────────────────────────
+# Key: (rounded lat to 3dp, rounded lon to 3dp) — ~110m grid resolution,
+# fine enough to distinguish flood zones, coarse enough to get cache hits
+# along a polyline where successive points are metres apart.
+_FLOOD_PT_CACHE: dict = {}
+
+
 def get_flood_risk_at(lat: float, lon: float, layer: str = _DEFAULT_LAYER) -> dict:
     """
     Query NOAH flood hazard at a coordinate using Mapbox Tilequery API.
@@ -121,6 +128,11 @@ def get_flood_risk_at(lat: float, lon: float, layer: str = _DEFAULT_LAYER) -> di
           "error":      str or None,
         }
     """
+    # Cache hit — identical coordinates within ~110m return same result
+    _cache_key = (round(lat, 3), round(lon, 3))
+    if _cache_key in _FLOOD_PT_CACHE:
+        return _FLOOD_PT_CACHE[_cache_key]
+
     url = _TILEQUERY_URL.format(
         layers=_FLOOD_LAYERS,
         lon=round(lon, 7),
@@ -177,9 +189,12 @@ def get_flood_risk_at(lat: float, lon: float, layer: str = _DEFAULT_LAYER) -> di
             depth_m = 0.2
 
         risk = _depth_to_risk(depth_m)
-        return _flood_result(risk, depth_m)
+        result = _flood_result(risk, depth_m)
+        _FLOOD_PT_CACHE[_cache_key] = result
+        return result
 
     except requests.exceptions.Timeout:
+        # Don't cache errors — transient failures should retry
         return _flood_error("NOAH tilequery timed out.")
     except requests.exceptions.ConnectionError:
         return _flood_error("Could not reach Mapbox/NOAH.")
@@ -337,10 +352,22 @@ def check_route_flood_zones(route_coords: list, weather: dict, sample_every_n: i
     total_penalty = 0
     risk_levels  = ["none", "low", "moderate", "high"]
 
-    for i, coord in enumerate(sampled):
-        lat, lon = coord[0], coord[1]
-        flood_result = get_flood_risk_at(lat, lon)
+    # ── Parallel flood queries ────────────────────────────────────────────────
+    # Each point is an independent Mapbox tilequery — run them concurrently
+    # so 20 points at 8s timeout finishes in ~8s instead of up to 160s.
+    import concurrent.futures as _cf
 
+    def _query_point(args):
+        i, coord = args
+        lat, lon = coord[0], coord[1]
+        result = get_flood_risk_at(lat, lon)
+        return i, lat, lon, result
+
+    workers = min(10, len(sampled))
+    with _cf.ThreadPoolExecutor(max_workers=workers) as pool:
+        point_results = list(pool.map(_query_point, enumerate(sampled)))
+
+    for i, lat, lon, flood_result in point_results:
         if not flood_result.get("ok") or flood_result.get("risk_level") == "none":
             continue
 
