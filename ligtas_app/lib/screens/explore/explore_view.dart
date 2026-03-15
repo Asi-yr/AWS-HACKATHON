@@ -2268,7 +2268,6 @@ class _MapLayerState extends State<_MapLayer> {
     final hasDest = dLat != null && dLon != null;
     if (!hasOrig && !hasDest) return;
 
-<<<<<<< HEAD
     bool near(double? a, double? b) =>
         a == b || (a != null && b != null && (a - b).abs() < 0.00005);
 
@@ -2280,17 +2279,6 @@ class _MapLayerState extends State<_MapLayer> {
     final routeChanged = activeId != _lastActiveRouteId;
 
     if (!pinsChanged && !routeChanged) return;
-=======
-    // Skip if nothing has meaningfully changed (< 5m tolerance)
-    bool near(double? a, double? b) =>
-        a == b || (a != null && b != null && (a - b).abs() < 0.00005);
-    if (near(oLat, _lastOrigLat) &&
-        near(oLon, _lastOrigLon) &&
-        near(dLat, _lastDestLat) &&
-        near(dLon, _lastDestLon)) {
-      return;
-    }
->>>>>>> 25fba3834ec43cd9d4a04dcacb03da8957f0aaa5
 
     _lastOrigLat = oLat;
     _lastOrigLon = oLon;
@@ -2339,35 +2327,13 @@ class _MapLayerState extends State<_MapLayer> {
     // Default: fit between origin and destination pins
     final double targetLat, targetLon, zoom;
     if (hasOrig && hasDest) {
-<<<<<<< HEAD
-      targetLat = (oLat! + dLat!) / 2;
-      targetLon = (oLon! + dLon!) / 2;
-      final span = [
-=======
       // Both pins — center between them at a zoom that shows both
       targetLat = (oLat + dLat) / 2;
       targetLon = (oLon + dLon) / 2;
       final maxDiff = [
->>>>>>> 25fba3834ec43cd9d4a04dcacb03da8957f0aaa5
         (oLat - dLat).abs(),
         (oLon - dLon).abs(),
       ].reduce((a, b) => a > b ? a : b);
-<<<<<<< HEAD
-      zoom = span < 0.01
-          ? 15.0
-          : span < 0.03
-          ? 14.0
-          : span < 0.07
-          ? 13.0
-          : span < 0.15
-          ? 12.0
-          : span < 0.35
-          ? 11.0
-          : 10.0;
-    } else if (hasDest) {
-      targetLat = dLat!;
-      targetLon = dLon!;
-=======
       if (maxDiff < 0.01) {
         zoom = 15;
       } else if (maxDiff < 0.03) {
@@ -2385,7 +2351,6 @@ class _MapLayerState extends State<_MapLayer> {
       // Only dest so far — center on it
       targetLat = dLat;
       targetLon = dLon;
->>>>>>> 25fba3834ec43cd9d4a04dcacb03da8957f0aaa5
       zoom = 14;
     } else {
       targetLat = oLat!;
