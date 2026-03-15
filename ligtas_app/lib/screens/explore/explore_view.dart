@@ -2505,8 +2505,9 @@ class _MapLayerState extends State<_MapLayer> {
                       if (p is List && p.length >= 2) {
                         final lat = (p[0] as num?)?.toDouble();
                         final lon = (p[1] as num?)?.toDouble();
-                        if (lat != null && lon != null)
+                        if (lat != null && lon != null) {
                           segPts.add(LatLng(lat, lon));
+                        }
                       }
                     }
                   }
@@ -2517,8 +2518,9 @@ class _MapLayerState extends State<_MapLayer> {
                   if (p is List && p.length >= 2) {
                     final lat = (p[0] as num?)?.toDouble();
                     final lon = (p[1] as num?)?.toDouble();
-                    if (lat != null && lon != null)
+                    if (lat != null && lon != null) {
                       segPts.add(LatLng(lat, lon));
+                    }
                   }
                 }
               }
