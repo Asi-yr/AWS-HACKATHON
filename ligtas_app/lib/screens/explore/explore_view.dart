@@ -2176,13 +2176,14 @@ class _MapLayerState extends State<_MapLayer> {
     }
 
     // Skip if nothing has meaningfully changed (< 5m tolerance)
-    bool _near(double? a, double? b) =>
+    bool near(double? a, double? b) =>
         a == b || (a != null && b != null && (a - b).abs() < 0.00005);
-    if (_near(oLat, _lastOrigLat) &&
-        _near(oLon, _lastOrigLon) &&
-        _near(dLat, _lastDestLat) &&
-        _near(dLon, _lastDestLon))
+    if (near(oLat, _lastOrigLat) &&
+        near(oLon, _lastOrigLon) &&
+        near(dLat, _lastDestLat) &&
+        near(dLon, _lastDestLon)) {
       return;
+    }
 
     _lastOrigLat = oLat;
     _lastOrigLon = oLon;
@@ -2195,28 +2196,29 @@ class _MapLayerState extends State<_MapLayer> {
 
     if (hasOrig && hasDest) {
       // Both pins — center between them at a zoom that shows both
-      targetLat = (oLat! + dLat!) / 2;
-      targetLon = (oLon! + dLon!) / 2;
+      targetLat = (oLat + dLat) / 2;
+      targetLon = (oLon + dLon) / 2;
       final maxDiff = [
         (oLat - dLat).abs(),
-        (oLon! - dLon!).abs(),
+        (oLon - dLon).abs(),
       ].reduce((a, b) => a > b ? a : b);
-      if (maxDiff < 0.01)
+      if (maxDiff < 0.01) {
         zoom = 15;
-      else if (maxDiff < 0.03)
+      } else if (maxDiff < 0.03) {
         zoom = 14;
-      else if (maxDiff < 0.07)
+      } else if (maxDiff < 0.07) {
         zoom = 13;
-      else if (maxDiff < 0.15)
+      } else if (maxDiff < 0.15) {
         zoom = 12;
-      else if (maxDiff < 0.35)
+      } else if (maxDiff < 0.35) {
         zoom = 11;
-      else
+      } else {
         zoom = 10;
+      }
     } else if (hasDest) {
       // Only dest so far — center on it
-      targetLat = dLat!;
-      targetLon = dLon!;
+      targetLat = dLat;
+      targetLon = dLon;
       zoom = 14;
     } else {
       // Only origin so far — center on it

@@ -1453,6 +1453,7 @@ class ExploreController extends ChangeNotifier {
 
       if (result['ok'] == true) {
         final shareLink = result['share_link'] as String? ?? '';
+        if (!context.mounted) return;
         _showSosSuccessDialog(context, shareLink);
       } else {
         showToast(result['message'] as String? ?? 'SOS failed', 'red');

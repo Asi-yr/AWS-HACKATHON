@@ -84,10 +84,12 @@ class RouteModel {
   });
 
   SafetyMeta get safetyMeta {
-    if (safetyScore >= 85)
+    if (safetyScore >= 85) {
       return SafetyMeta(color: AppColors.safeGreen, label: 'Safe');
-    if (safetyScore >= 70)
+    }
+    if (safetyScore >= 70) {
       return SafetyMeta(color: AppColors.safeAmber, label: 'Moderate');
+    }
     return SafetyMeta(color: AppColors.safeRed, label: 'Caution');
   }
 
