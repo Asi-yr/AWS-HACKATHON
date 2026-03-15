@@ -1122,7 +1122,7 @@ class _DetailsPanelState extends State<_DetailsPanel> {
           icon: Icons.water_rounded,
           color: const Color(0xFF3B82F6),
           bg: const Color(0x223B82F6),
-          text: flood!,
+          text: flood,
         ),
       );
     }
@@ -2609,8 +2609,9 @@ class _MapLayerState extends State<_MapLayer> {
                     if (p is List && p.length >= 2) {
                       final lat = (p[0] as num?)?.toDouble();
                       final lon = (p[1] as num?)?.toDouble();
-                      if (lat != null && lon != null)
+                      if (lat != null && lon != null) {
                         segPts.add(LatLng(lat, lon));
+                      }
                     }
                   }
                 }
@@ -3054,48 +3055,6 @@ class _MapLayerState extends State<_MapLayer> {
     ),
   );
 
-  // ── Risk label pill (mirrors mkRiskIcon / mkFloodIcon in JS) ──────────────
-  Widget _riskPill(String emoji, String label, Color color) {
-    final short = label.length > 12 ? '${label.substring(0, 11)}…' : label;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.45),
-          width: 1.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: 0.5),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(emoji, style: const TextStyle(fontSize: 10)),
-          const SizedBox(width: 3),
-          Flexible(
-            child: Text(
-              short,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                height: 1,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _dotPin(Color color) => Container(
     width: 12,
     height: 12,
@@ -3161,9 +3120,6 @@ class _MapLayerState extends State<_MapLayer> {
     child: Icon(icon, color: Colors.white, size: 13),
   );
 
-  // Kept for backward compat — no longer called
-  Widget _poiPin(Color color, IconData icon, String label) =>
-      _poiDot(color, icon);
 
   Widget _poiCluster(IconData icon, Color color, int count) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),

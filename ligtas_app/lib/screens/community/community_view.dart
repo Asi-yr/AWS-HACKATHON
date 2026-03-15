@@ -875,15 +875,24 @@ class _NotifBtn extends StatelessWidget {
           Icon(Icons.notifications_rounded, color: teal, size: 18),
           if (unread > 0)
             Positioned(
-              top: 6,
-              right: 6,
+              top: 2,
+              right: 2,
               child: Container(
-                width: 8,
-                height: 8,
+                padding: const EdgeInsets.all(2),
+                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                 decoration: BoxDecoration(
                   color: AppColors.red,
-                  shape: BoxShape.circle,
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: t.card, width: 1.5),
+                ),
+                child: Text(
+                  unread > 99 ? '99+' : '$unread',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
               ),
             ),

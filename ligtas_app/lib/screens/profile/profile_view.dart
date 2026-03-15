@@ -1,10 +1,11 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/app_colors.dart';
+import '../../core/app_tab_controller.dart';
 import '../../core/custom_theme.dart';
-import '../../core/theme_controller.dart';
 import '../../models/travel_history_model.dart';
 import '../../models/user_model.dart';
 import '../../widgets/shared_widgets.dart';
@@ -57,14 +58,14 @@ class _ProfileBody extends StatelessWidget {
               const SectionLabel('PREFERENCES'),
               SettingsCard(children: [
                 ToggleRow(
-                  icon: Icons.dark_mode_rounded, 
-                  title: 'Night Mode', 
-                  subtitle: 'Auto-detect based on sunset', 
-                  value: context.watch<ThemeController>().isDark, 
-                  onChanged: (_) => ctrl.toggleTheme(context)
+                  icon: Icons.dark_mode_rounded,
+                  title: 'Night Mode',
+                  subtitle: 'Switch between light and dark mode',
+                  value: Theme.of(context).brightness == Brightness.dark,
+                  onChanged: (_) => ctrl.toggleTheme(context),
                 ),
                 const RowDivider(),
-                ChevronRow(icon: Icons.notifications_rounded, title: 'Notifications', subtitle: 'Alerts and announcements', onTap: ctrl.showComingSoon),
+                ChevronRow(icon: Icons.notifications_rounded, title: 'Notifications', subtitle: 'Alerts and announcements', onTap: () => context.read<AppTabController>().switchTo(1)),
               ]),
               const SectionLabel('EMERGENCY'),
               SettingsCard(children: [
@@ -122,7 +123,7 @@ class _EditBtn extends StatelessWidget {
           color: AppColors.tealDim,
           border: Border.all(color: t.border)),
         child: Icon(Icons.edit_rounded,
-          color: AppColors.primaryTeal(context.isDark), size: 17),
+          color: AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark), size: 17),
       ),
     );
   }
@@ -131,7 +132,8 @@ class _EditBtn extends StatelessWidget {
 class _ProfileHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final user = context.watch<ProfileController>().user;
+    final ctrl = context.watch<ProfileController>();
+    final user = ctrl.user;
     final t    = context.lt;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 28),
@@ -141,20 +143,14 @@ class _ProfileHero extends StatelessWidget {
             width: 84, height: 84,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: AppColors.primaryTeal(context.isDark), width: 2.5)),
-            child: ClipOval(child: user.avatarUrl != null
-              ? (user.avatarUrl!.startsWith('http')
-                  ? Image.network(user.avatarUrl!, fit: BoxFit.cover,
-                      errorBuilder: (c, e, s) => _fallback())
-                  : Image.file(File(user.avatarUrl!), fit: BoxFit.cover,
-                      errorBuilder: (c, e, s) => _fallback()))
-              : _fallback()),
+              border: Border.all(color: AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark), width: 2.5)),
+            child: ClipOval(child: _buildAvatar(ctrl, user, 40)),
           ),
           Positioned(bottom: 0, right: 0,
             child: Container(
               width: 22, height: 22,
               decoration: BoxDecoration(
-                color: AppColors.primaryTeal(context.isDark),
+                color: AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark),
                 shape: BoxShape.circle),
               child: const Icon(Icons.check_rounded, color: Colors.white, size: 13),
             )),
@@ -166,9 +162,29 @@ class _ProfileHero extends StatelessWidget {
       ]),
     );
   }
-  Widget _fallback() => Container(
+
+  // Priority: local bytes (web+native) → network URL → file path (native only) → icon
+  Widget _buildAvatar(ProfileController ctrl, dynamic user, double iconSize) {
+    if (ctrl.avatarBytes != null) {
+      return Image.memory(ctrl.avatarBytes!, fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => _fallback(iconSize));
+    }
+    if (user.avatarUrl != null) {
+      if (user.avatarUrl!.startsWith('http')) {
+        return Image.network(user.avatarUrl!, fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _fallback(iconSize));
+      }
+      if (!kIsWeb) {
+        return Image.file(File(user.avatarUrl!), fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _fallback(iconSize));
+      }
+    }
+    return _fallback(iconSize);
+  }
+
+  Widget _fallback(double size) => Container(
     color: AppColors.tealDim,
-    child: const Icon(Icons.person_rounded, color: AppColors.teal, size: 40));
+    child: Icon(Icons.person_rounded, color: AppColors.teal, size: size));
 }
 
 class _StatsRow extends StatelessWidget {
@@ -210,15 +226,33 @@ class _StatsRow extends StatelessWidget {
     final color = rank == TrustRank.lighthouse ? AppColors.rankLighthouse
                 : rank == TrustRank.lantern    ? AppColors.rankLantern
                 : AppColors.rankCandle;
-    final icon  = rank == TrustRank.lighthouse ? Icons.wb_sunny_rounded
-                : rank == TrustRank.lantern    ? Icons.flashlight_on_rounded
-                : Icons.local_fire_department_rounded;
+
+    // Emoji icons matching the Flaticon assets:
+    // 🕯️ candle/2136679  🏮 lantern/384412  🗼 lighthouse/4971987
+    final emoji = rank == TrustRank.lighthouse ? '🗼'
+                : rank == TrustRank.lantern    ? '🏮'
+                : '🕯️';
+
     return Expanded(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 14),
         child: Column(children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: 2),
+          // Coloured glow ring behind the emoji
+          Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color.withValues(alpha: 0.12),
+              border: Border.all(color: color.withValues(alpha: 0.35), width: 1.5),
+            ),
+            child: Center(
+              child: Text(emoji,
+                style: const TextStyle(fontSize: 22),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
           Text(rank.label, style: GoogleFonts.plusJakartaSans(
             fontSize: 11, fontWeight: FontWeight.w700, color: color)),
           const SizedBox(height: 1),
@@ -294,14 +328,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                 width: 80, height: 80,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.primaryTeal(context.isDark), width: 2.5)),
-                child: ClipOval(child: ctrl.user.avatarUrl != null
-                  ? (ctrl.user.avatarUrl!.startsWith('http')
-                      ? Image.network(ctrl.user.avatarUrl!, fit: BoxFit.cover,
-                          errorBuilder: (c, e, s) => _avatarFallback())
-                      : Image.file(File(ctrl.user.avatarUrl!), fit: BoxFit.cover,
-                          errorBuilder: (c, e, s) => _avatarFallback()))
-                  : _avatarFallback()),
+                  border: Border.all(color: AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark), width: 2.5)),
+                child: ClipOval(child: _buildEditAvatar(ctrl)),
               ),
               Positioned.fill(child: ClipOval(child: Container(
                 color: Colors.black38,
@@ -344,6 +372,26 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     );
   }
 
+  // Same priority as _ProfileHero: bytes → network → file (native only) → icon
+  Widget _buildEditAvatar(ProfileController ctrl) {
+    if (ctrl.avatarBytes != null) {
+      return Image.memory(ctrl.avatarBytes!, fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => _avatarFallback());
+    }
+    final url = ctrl.user.avatarUrl;
+    if (url != null) {
+      if (url.startsWith('http')) {
+        return Image.network(url, fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _avatarFallback());
+      }
+      if (!kIsWeb) {
+        return Image.file(File(url), fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _avatarFallback());
+      }
+    }
+    return _avatarFallback();
+  }
+
   Widget _avatarFallback() => Container(
     color: AppColors.tealDim,
     child: const Icon(Icons.person_rounded, color: AppColors.teal, size: 36));
@@ -366,7 +414,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
             borderSide: BorderSide(color: t.border)),
           focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: AppColors.primaryTeal(context.isDark), width: 1.5)),
+            borderSide: BorderSide(color: AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark), width: 1.5)),
           filled: true, fillColor: t.bg,
         ),
       ),
@@ -597,17 +645,16 @@ class _EmailScreenState extends State<_EmailScreen> {
                   borderRadius: BorderRadius.circular(10)),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Icon(Icons.info_outline_rounded,
-                    size: 15, color: AppColors.primaryTeal(context.isDark)),
+                    size: 15, color: AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark)),
                   const SizedBox(width: 8),
                   Expanded(child: Text(
-                    'A verification link will be sent to your new email. '
-                    'The change takes effect after you confirm it.',
+                    'Your email will be updated directly after verifying your password.',
                     style: t.body(size: 12, color: t.text2))),
                 ]),
               ),
               const SizedBox(height: 28),
               TealButton(
-                label: 'Send Verification',
+                label: 'Update Email',
                 onTap: () => ctrl.changeEmail(
                   context: context,
                   newEmail:        _newEmail.text.trim(),
@@ -635,7 +682,7 @@ class _TwoFAScreen extends StatelessWidget {
     final ctrl    = context.watch<ProfileController>();
     final t       = context.lt;
     final enabled = ctrl.twoFactorEnabled;
-    final teal    = AppColors.primaryTeal(context.isDark);
+    final teal    = AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark);
     return Positioned.fill(
       child: Material(
         color: t.bg,
@@ -779,7 +826,7 @@ Widget _inputField(String label, TextEditingController c,
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(
-            color: AppColors.primaryTeal(context.isDark), width: 1.5)),
+            color: AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark), width: 1.5)),
         filled: true, fillColor: t.bg,
       ),
     ),
@@ -1012,6 +1059,9 @@ class _TravelHistoryPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = context.watch<ProfileController>();
     final t    = context.lt;
+    final hasHistory = ctrl.history.history.isNotEmpty;
+    final hasSaved   = ctrl.history.saved.isNotEmpty;
+
     return Positioned.fill(
       child: Material(
         color: t.bg,
@@ -1028,19 +1078,92 @@ class _TravelHistoryPanel extends StatelessWidget {
                 child: Icon(Icons.arrow_back_rounded, size: 16, color: t.text),
               ),
             ),
+            // ── Clear history button — only shown when there is history ──
+            trailing: hasHistory && !ctrl.isLoadingHistory
+                ? GestureDetector(
+                    onTap: () => _confirmClear(context, ctrl, t),
+                    child: Container(
+                      width: 32, height: 32,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        color: AppColors.redDim,
+                        border: Border.all(color: AppColors.safeRed.withValues(alpha: 0.35))),
+                      child: Icon(Icons.delete_outline_rounded,
+                        size: 17, color: AppColors.safeRed),
+                    ),
+                  )
+                : null,
           ),
-          Expanded(child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            children: [
-              _subLabel('Saved Routes', t),
-              ...ctrl.history.saved.map((r) => _TravelCard(route: r)),
-              const SizedBox(height: 8),
-              Container(height: 1, color: t.divider),
-              const SizedBox(height: 16),
-              _subLabel('History', t),
-              ...ctrl.history.history.map((r) => _TravelCard(route: r)),
-            ],
-          )),
+
+          // ── Loading spinner ────────────────────────────────────────────
+          if (ctrl.isLoadingHistory)
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 28, height: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: AppColors.teal,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text('Loading history…',
+                      style: t.body(size: 13, color: t.text2)),
+                  ],
+                ),
+              ),
+            )
+
+          // ── Empty state ────────────────────────────────────────────────
+          else if (!hasHistory && !hasSaved)
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 56, height: 56,
+                      decoration: BoxDecoration(
+                        color: AppColors.tealDim,
+                        borderRadius: BorderRadius.circular(16)),
+                      child: Icon(Icons.history_rounded,
+                        color: AppColors.teal, size: 28)),
+                    const SizedBox(height: 14),
+                    Text('No travel history yet',
+                      style: t.title(size: 15)),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Routes you search will appear here.',
+                      style: t.body(size: 13, color: t.text2),
+                      textAlign: TextAlign.center),
+                  ],
+                ),
+              ),
+            )
+
+          // ── History list ───────────────────────────────────────────────
+          else
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                children: [
+                  if (hasSaved) ...[
+                    _subLabel('Saved Routes', t),
+                    ...ctrl.history.saved.map((r) => _TravelCard(route: r)),
+                    const SizedBox(height: 8),
+                    Container(height: 1, color: t.divider),
+                    const SizedBox(height: 16),
+                  ],
+                  if (hasHistory) ...[
+                    _subLabel('History', t),
+                    ...ctrl.history.history.map((r) => _TravelCard(route: r)),
+                  ],
+                ],
+              ),
+            ),
         ]),
       ),
     );
@@ -1052,6 +1175,40 @@ class _TravelHistoryPanel extends StatelessWidget {
       fontSize: 12, fontWeight: FontWeight.w700,
       color: t.text3, letterSpacing: 0.06)),
   );
+
+  void _confirmClear(BuildContext context, ProfileController ctrl, dynamic t) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: t.card,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Clear History',
+          style: GoogleFonts.plusJakartaSans(
+            fontWeight: FontWeight.w800, fontSize: 16, color: t.text)),
+        content: Text(
+          'This will permanently delete all your route history. This cannot be undone.',
+          style: GoogleFonts.plusJakartaSans(fontSize: 13, color: t.text2)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel',
+              style: GoogleFonts.plusJakartaSans(
+                fontWeight: FontWeight.w700, color: t.text2)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ctrl.clearTravelHistory();
+            },
+            child: Text('Clear',
+              style: GoogleFonts.plusJakartaSans(
+                fontWeight: FontWeight.w700,
+                color: AppColors.safeRed)),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _TravelCard extends StatelessWidget {
@@ -1062,7 +1219,7 @@ class _TravelCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = context.read<ProfileController>();
     final t    = context.lt;
-    final iconColor = route.saved ? AppColors.yellow : AppColors.primaryTeal(context.isDark);
+    final iconColor = route.saved ? AppColors.yellow : AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark);
     return GestureDetector(
       onTap: () => showModalBottomSheet(
         context: context,
@@ -1227,7 +1384,7 @@ class _StepRow extends StatelessWidget {
         Container(
           width: 26, height: 26,
           decoration: BoxDecoration(
-            color: AppColors.primaryTeal(context.isDark),
+            color: AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark),
             shape: BoxShape.circle),
           child: Center(child: Text('${index + 1}',
             style: GoogleFonts.plusJakartaSans(

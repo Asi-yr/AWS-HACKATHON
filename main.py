@@ -83,7 +83,7 @@ print(f"[DEBUG] [INIT] Database initialization took {time.time() - t_db_init:.4f
 
 app = Flask(__name__)
 app.secret_key = 'saferoute_super_secret_key'
-CORS(app)  # ← Allow Flutter Web (and other origins) to call this API
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
 
 print(f"[DEBUG] [INIT] Application setup complete in {time.time() - t_init_start:.4f}s")
 
@@ -965,52 +965,48 @@ def api_register():
     t_start = time.time()
     print("[DEBUG] [api_register] POST /api/auth/register hit")
     try:
-        data = request.json
+        data     = request.json
         username = data.get('username', '').strip()
         password = data.get('password', '').strip()
-        email = data.get('email', '').strip()
-        
+        email    = data.get('email',    '').strip()
+
         if not username or not password:
             print("[DEBUG] [api_register] Missing username or password")
             return jsonify({'ok': False, 'message': 'Username and password required'}), 400
-        
+
         if len(password) < 6:
-            print("[DEBUG] [api_register] Password too short for '{username}'")
             return jsonify({'ok': False, 'message': 'Password must be at least 6 characters'}), 400
-        
+
         print(f"[DEBUG] [api_register] Attempting registration for: '{username}'")
         conn, c = chDB_perf.get_db_connection()
         chDB_perf.execute_query(c, "SELECT * FROM users WHERE username=?", (username,))
-        
+
         if c.fetchone():
             print(f"[DEBUG] [api_register] Username '{username}' already exists")
-            c.close()
-            conn.close()
+            c.close(); conn.close()
             return jsonify({'ok': False, 'message': 'Username already in use'}), 409
-        
+
         # Create new user
         hashed_pw = generate_password_hash(password)
         chDB_perf.execute_query(c, "INSERT INTO users (username, password) VALUES (?, ?)",
                                 (username, hashed_pw))
         conn.commit()
-        
+
         # Initialize user profile
         save_user_profile(chDB_perf, username, username, email)
-        
-        c.close()
-        conn.close()
-        
+        c.close(); conn.close()
+
         # Auto-login after registration
         session['user'] = username
         print(f"[DEBUG] [api_register] Registration successful for '{username}'. Time: {time.time() - t_start:.4f}s")
-        
+
         return jsonify({
-            'ok': True,
+            'ok':      True,
             'message': 'Registration successful',
-            'user': username,
-            'token': username,
+            'user':    username,
+            'token':   username,
         }), 201
-        
+
     except Exception as e:
         print(f"[DEBUG] [api_register] Exception: {e}")
         return jsonify({'ok': False, 'message': str(e)}), 500
@@ -1276,6 +1272,63 @@ def api_change_password():
         return jsonify({'ok': False, 'message': str(e)}), 500
 
 
+@app.route('/api/auth/change-email', methods=['POST'])
+def api_change_email():
+    """
+    JSON API endpoint for Flutter email change.
+    Requires the user's current password to confirm identity before
+    updating the email — no verification link, just a direct DB update.
+    Body: { current_password, new_email }
+    """
+    print("[DEBUG] [api_change_email] POST /api/auth/change-email hit")
+
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+
+    username = token if token else session.get('user')
+
+    if not username:
+        print("[DEBUG] [api_change_email] Unauthorized")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+
+    try:
+        data             = request.get_json() or {}
+        current_password = data.get('current_password', '').strip()
+        new_email        = data.get('new_email', '').strip()
+
+        if not current_password or not new_email:
+            return jsonify({'ok': False, 'message': 'Current password and new email are required'}), 400
+
+        # Basic email format check
+        import re
+        if not re.fullmatch(r'[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}', new_email):
+            return jsonify({'ok': False, 'message': 'Invalid email address format'}), 400
+
+        # Verify current password before making any changes
+        conn, c = chDB_perf.get_db_connection()
+        chDB_perf.execute_query(c, "SELECT password FROM users WHERE username=?", (username,))
+        row = c.fetchone()
+        c.close(); conn.close()
+
+        if not row or not check_password_hash(row[0], current_password):
+            print(f"[DEBUG] [api_change_email] Wrong password for '{username}'")
+            return jsonify({'ok': False, 'message': 'Current password is incorrect'}), 401
+
+        # Password confirmed — update the email in the user profile
+        profile = get_user_profile(chDB_perf, username)
+        display_name = profile.get('display_name', username)
+        save_user_profile(chDB_perf, username, display_name, new_email)
+
+        print(f"[DEBUG] [api_change_email] Email updated for '{username}' to '{new_email}'")
+        return jsonify({'ok': True, 'message': 'Email updated successfully'}), 200
+
+    except Exception as e:
+        print(f"[DEBUG] [api_change_email] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
 @app.route('/api/history', methods=['GET'])
 def api_history():
     """JSON API endpoint for Flutter to fetch route history."""
@@ -1481,41 +1534,19 @@ def get_routes():
         from risk_monitor.noah   import apply_route_flood_analysis
 
         _ct = commuter_type.lower().strip()
-        # Normalise aliases that navigation.py handles with dedicated branches
-        _ct_norm = _ct
-        if _ct in ('commute',):          _ct_norm = 'transit'
-        if _ct in ('walk', 'walking', 'foot', 'pedestrian'): _ct_norm = 'walk'
-        if _ct in ('car', 'drive', 'driving', 'auto'):       _ct_norm = 'car'
-        if _ct in ('motorcycle', 'motor', 'motorbike', 'bike', 'moto'): _ct_norm = 'motorcycle'
-
-        _is_transit = _ct_norm in (
+        _is_transit = _ct in (
             'transit', 'jeepney', 'bus', 'train',
             'jeepney_bus', 'train_jeepney', 'train_bus',
             'lrt1', 'lrt-1', 'lrt2', 'lrt-2',
-            'mrt3', 'mrt-3', 'mrt7', 'pnr',
+            'mrt3', 'mrt-3', 'mrt7', 'pnr', 'commute',
         )
-        _is_road = _ct_norm in ('car', 'motorcycle', 'walk')
-        print(f"[DEBUG] [get_routes] Commuter mode parsed as: '{_ct}' (normalised: '{_ct_norm}'). Is transit: {_is_transit}  Is road: {_is_road}")
+        print(f"[DEBUG] [get_routes] Commuter mode parsed as: '{_ct}'. Is transit: {_is_transit}")
 
-        if _is_road:
-            print("[DEBUG] [get_routes] Road mode — assigning route labels (Fastest / Alternative / Scenic)...")
-            _road_labels = ['Fastest', 'Alternative', 'Scenic']
-            _road_colors = {
-                'walk':       ['#2ecc71', '#27ae60', '#1abc9c'],
-                'car':        ['#3498db', '#1a6fa3', '#0e3d5c'],
-                'motorcycle': ['#8e44ad', '#9b59b6', '#af7ac5'],
-            }
-            _rc = _road_colors.get(_ct_norm, ['#3498db', '#1a6fa3', '#0e3d5c'])
-            for i, r in enumerate(routes):
-                r.setdefault('id', i)
-                r.setdefault('mode_label', _road_labels[i] if i < len(_road_labels) else f'Route {i+1}')
-                r.setdefault('mode_label_color', _rc[i % len(_rc)])
-                if 'safety_score' not in r or r.get('safety_score') is None:
-                    r['safety_score'] = _compute_safety_score(r, commuter_type)
-        elif not _is_transit:
+        if not _is_transit:
             print("[DEBUG] [get_routes] Ranking non-transit routes...")
             routes = rank_routes(routes, commuter_type)
-        elif _is_transit:
+        else:
+            print("[DEBUG] [get_routes] Processing transit-specific formatting and scores...")
             _mode_colors = {
                 'train': '#27ae60', 'lrt1': '#27ae60', 'lrt-1': '#27ae60',
                 'lrt2': '#2980b9', 'lrt-2': '#2980b9',
@@ -1544,199 +1575,133 @@ def get_routes():
         apply_weather_to_routes(routes, weather, commuter_type)
         print(f"[DEBUG] [get_routes] Weather risk gathered and applied in {time.time() - t_weather:.4f}s")
 
-        # ── Parallel enrichment pipeline ─────────────────────────────────
-        # Community reports, crime, flood, incidents, MMDA, seismic, and
-        # vulnerable profile are all independent of each other. Run them
-        # concurrently so total wall time ≈ slowest single task (~10s)
-        # instead of the sum of all tasks (~80s).
-        #
-        # THREAD SAFETY NOTES:
-        #   • routes list is mutated by each worker. Workers touch different
-        #     keys on route dicts so there are no write-write conflicts.
-        #   • nav_response is written only in the main thread after all
-        #     futures complete — workers return their results, never write
-        #     nav_response directly.
-        #   • DB (chDB_perf) uses its own connection pool — safe for concurrent
-        #     reads from multiple threads.
-        # ─────────────────────────────────────────────────────────────────────
-        import concurrent.futures as _cf_enrich
+        print("[DEBUG] [get_routes] Applying flood analysis (NOAH)...")
+        t_flood = time.time()
+        from risk_monitor.noah import apply_route_flood_analysis
+        apply_route_flood_analysis(routes, weather)
+        flood = get_flood_risk_at(orig_lat, orig_lon)
+        print(f"[DEBUG] [get_routes] Flood analysis took {time.time() - t_flood:.4f}s. Orig Flood Risk: {flood.get('risk_level')}")
 
-        t_parallel = time.time()
+        print("[DEBUG] [get_routes] Applying community reports...")
+        t_rep = time.time()
+        apply_reports_to_routes(
+            routes, chDB_perf,
+            orig_lat, orig_lon, dest_lat, dest_lon,
+        )
+        print(f"[DEBUG] [get_routes] Community reports application took {time.time() - t_rep:.4f}s")
 
-        # ── Task A: community reports (fast DB query) ─────────────────────
-        def _task_reports():
-            t = time.time()
-            apply_reports_to_routes(
-                routes, chDB_perf,
+        print("[DEBUG] [get_routes] Analyzing crime risk for routes...")
+        t_crime = time.time()
+        from risk_monitor.crime_data import (
+            get_crime_risk_with_reports, apply_crime_both_ends,
+            scan_route_crime_zones, apply_route_crime_to_routes,
+        )
+        orig_crime = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
+        dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
+
+        for route in routes:
+            wps =[]
+            if route.get("segments"):
+                for seg in route["segments"]:
+                    c = seg.get("coords", [])
+                    if c and isinstance(c[0], list) and isinstance(c[0][0], list):
+                        for sub in c:
+                            wps.extend(sub)
+                    else:
+                        wps.extend(c)
+            if not wps and route.get("coords"):
+                wps = route["coords"]
+            route["route_crime_zones"] = scan_route_crime_zones(wps)
+
+        apply_crime_both_ends(routes, orig_crime, dest_crime, commuter_type)
+        apply_route_crime_to_routes(routes, commuter_type)
+        print(f"[DEBUG] [get_routes] Crime risk analysis completed in {time.time() - t_crime:.4f}s")
+
+        # ── Real-time incidents (GDACS, NDRRMC, ReliefWeb) ────────────────
+        print("[DEBUG] [get_routes] Applying real-time incidents...")
+        t_inc = time.time()
+        try:
+            active_incidents = get_active_incidents()
+            apply_incidents_to_routes(
+                routes, active_incidents,
                 orig_lat, orig_lon, dest_lat, dest_lon,
             )
-            print(f"[DEBUG] [get_routes][parallel] Community reports took {time.time()-t:.4f}s")
+            nav_response["incidents"] = get_incidents_map_data(active_incidents)
+            print(f"[DEBUG][get_routes] Gathered {len(active_incidents)} real-time incidents.")
+        except Exception as _ie:
+            print(f"[DEBUG] [get_routes] [incidents] pipeline error: {_ie}")
+            nav_response["incidents"] = []
+        print(f"[DEBUG][get_routes] Incidents logic took {time.time() - t_inc:.4f}s")
 
-        # ── Task B: crime (coord lookup + optional LLM) ───────────────────
-        def _task_crime():
-            t = time.time()
-            from risk_monitor.crime_data import (
-                get_crime_risk_with_reports, apply_crime_both_ends,
-                scan_route_crime_zones, apply_route_crime_to_routes,
-            )
-            orig_crime = get_crime_risk_with_reports(orig_lat, orig_lon, origin_text or "", chDB_perf)
-            dest_crime = get_crime_risk_with_reports(dest_lat, dest_lon, dest_text or "", chDB_perf)
-            for route in routes:
-                wps = []
-                if route.get("segments"):
-                    for seg in route["segments"]:
-                        c = seg.get("coords", [])
-                        if c and isinstance(c[0], list) and isinstance(c[0][0], list):
-                            for sub in c:
-                                wps.extend(sub)
-                        else:
-                            wps.extend(c)
-                if not wps and route.get("coords"):
-                    wps = route["coords"]
-                route["route_crime_zones"] = scan_route_crime_zones(wps)
-            apply_crime_both_ends(routes, orig_crime, dest_crime, commuter_type)
-            apply_route_crime_to_routes(routes, commuter_type)
-            print(f"[DEBUG] [get_routes][parallel] Crime took {time.time()-t:.4f}s")
+        # ── MMDA: number coding + road closures ───────────────────────────
+        print("[DEBUG][get_routes] Processing MMDA rules...")
+        t_mmda = time.time()
+        try:
+            plate_raw = data.get("plate_last_digit")
+            plate_digit = int(plate_raw) if plate_raw is not None else None
+            apply_mmda_to_routes(routes, plate_digit)
+            mmda_closures = get_road_closures()
+            mmda_coding   = get_number_coding(plate_digit) if plate_digit is not None else None
+            nav_response["mmda_banner"] = get_mmda_banner_html(mmda_coding, mmda_closures)
+            nav_response["mmda_coding"] = mmda_coding
+            nav_response["mmda_closures_count"] = len(mmda_closures)
+        except Exception as _me:
+            print(f"[DEBUG] [get_routes] [mmda] pipeline error: {_me}")
+            nav_response["mmda_banner"] = ""
+        print(f"[DEBUG] [get_routes] MMDA logic took {time.time() - t_mmda:.4f}s")
 
-        # ── Task C: flood (parallelised internally in noah.py) ────────────
-        _flood_result_box = {}
-        def _task_flood():
-            t = time.time()
-            from risk_monitor.noah import apply_route_flood_analysis
-            apply_route_flood_analysis(routes, weather)
-            _flood_result_box["flood"] = get_flood_risk_at(orig_lat, orig_lon)
-            print(f"[DEBUG] [get_routes][parallel] Flood took {time.time()-t:.4f}s")
+        # ── PHIVOLCS: seismic risk ─────────────────────────────────────────
+        print("[DEBUG] [get_routes] Processing PHIVOLCS seismic data...")
+        t_seismic = time.time()
+        try:
+            earthquakes = get_recent_earthquakes(hours_back=12)
+            apply_seismic_to_routes(routes, earthquakes)
+            nav_response["seismic_banner"] = get_seismic_banner_html(earthquakes)
+            nav_response["epicenter_js"]   = get_epicenter_map_js(earthquakes)
+            nav_response["earthquakes"]    =[
+                {
+                    "magnitude": e["magnitude"],
+                    "place":     e["place"],
+                    "severity":  e["severity"],
+                    "time_pht":  e["time_pht"],
+                    "tsunami":   e["tsunami"],
+                    # ── Flutter needs these to build HotspotModel circles ──
+                    "lat":       e["lat"],
+                    "lon":       e["lon"],
+                    "radius_km": e["radius_km"],
+                    "color":     e["color"],
+                }
+                for e in earthquakes
+            ]
+        except Exception as _pe:
+            print(f"[DEBUG][get_routes] [phivolcs] pipeline error: {_pe}")
+            nav_response["seismic_banner"] = ""
+            nav_response["epicenter_js"]   = ""
+        print(f"[DEBUG] [get_routes] Seismic logic took {time.time() - t_seismic:.4f}s")
 
-        # ── Task D: incidents (external HTTP) ────────────────────────────
-        _incidents_box = {}
-        def _task_incidents():
-            t = time.time()
-            try:
-                active_incidents = get_active_incidents()
-                apply_incidents_to_routes(
-                    routes, active_incidents,
-                    orig_lat, orig_lon, dest_lat, dest_lon,
-                )
-                _incidents_box["incidents"] = get_incidents_map_data(active_incidents)
-                _incidents_box["count"]     = len(active_incidents)
-            except Exception as _ie:
-                print(f"[DEBUG] [get_routes][parallel] incidents error: {_ie}")
-                _incidents_box["incidents"] = []
-                _incidents_box["count"]     = 0
-            print(f"[DEBUG] [get_routes][parallel] Incidents took {time.time()-t:.4f}s")
+        print("[DEBUG] [get_routes] Initializing safe_spots_js as empty (loaded via /api/safe-spots/route)...")
+        nav_response['safe_spots_js'] = ''
 
-        # ── Task E: MMDA (Overpass + optional MMDA API) ───────────────────
-        _mmda_box = {}
-        def _task_mmda():
-            t = time.time()
-            try:
-                plate_raw   = data.get("plate_last_digit")
-                plate_digit = int(plate_raw) if plate_raw is not None else None
-                apply_mmda_to_routes(routes, plate_digit)
-                mmda_closures = get_road_closures()
-                mmda_coding   = get_number_coding(plate_digit) if plate_digit is not None else None
-                _mmda_box["banner"]          = get_mmda_banner_html(mmda_coding, mmda_closures)
-                _mmda_box["coding"]          = mmda_coding
-                _mmda_box["closures_count"]  = len(mmda_closures)
-            except Exception as _me:
-                print(f"[DEBUG] [get_routes][parallel] MMDA error: {_me}")
-                _mmda_box["banner"]         = ""
-                _mmda_box["coding"]         = None
-                _mmda_box["closures_count"] = 0
-            print(f"[DEBUG] [get_routes][parallel] MMDA took {time.time()-t:.4f}s")
-
-        # ── Task F: seismic / PHIVOLCS (USGS API) ────────────────────────
-        _seismic_box = {}
-        def _task_seismic():
-            t = time.time()
-            try:
-                earthquakes = get_recent_earthquakes(hours_back=12)
-                apply_seismic_to_routes(routes, earthquakes)
-                _seismic_box["banner"]      = get_seismic_banner_html(earthquakes)
-                _seismic_box["epicenter_js"]= get_epicenter_map_js(earthquakes)
-                _seismic_box["earthquakes"] = [
-                    {
-                        "magnitude": e["magnitude"],
-                        "place":     e["place"],
-                        "severity":  e["severity"],
-                        "time_pht":  e["time_pht"],
-                        "tsunami":   e["tsunami"],
-                        "lat":       e["lat"],
-                        "lon":       e["lon"],
-                        "radius_km": e["radius_km"],
-                        "color":     e["color"],
-                    }
-                    for e in earthquakes
-                ]
-            except Exception as _pe:
-                print(f"[DEBUG] [get_routes][parallel] seismic error: {_pe}")
-                _seismic_box["banner"]       = ""
-                _seismic_box["epicenter_js"] = ""
-                _seismic_box["earthquakes"]  = []
-            print(f"[DEBUG] [get_routes][parallel] Seismic took {time.time()-t:.4f}s")
-
-        # ── Task G: vulnerable profile (pure Python, fast) ────────────────
-        _profile_box = {}
-        def _task_profile():
-            t = time.time()
-            try:
-                profile = data.get("vulnerable_profile", "")
-                if profile and profile in PROFILES:
-                    apply_vulnerable_profile_to_routes(routes, profile, weather)
-                    from risk_monitor.vulnerable_profiles import get_infrastructure_warnings
-                    for route in routes:
-                        coords = get_flat_route_coords(route)
-                        infra_warns = get_infrastructure_warnings(profile, coords)
-                        route.setdefault("profile_warnings", []).extend(infra_warns)
-                    _profile_box["badge"] = get_profile_badge_html(profile)
-                else:
-                    _profile_box["badge"] = ""
-            except Exception as _vpe:
-                print(f"[DEBUG] [get_routes][parallel] profile error: {_vpe}")
-                _profile_box["badge"] = ""
-            print(f"[DEBUG] [get_routes][parallel] Profile took {time.time()-t:.4f}s")
-
-        # ── Crime must finish before flood/incidents read route coords ─────
-        # Run crime first (it writes route_crime_zones which flood/incidents
-        # may read). Everything else is independent.
-        # Phase 1: crime + reports concurrently (both write to route dicts
-        #          on different keys — safe)
-        # Phase 2: flood + incidents + MMDA + seismic + profile concurrently
-        print("[DEBUG] [get_routes] Starting parallel enrichment (phase 1: crime + reports)...")
-        with _cf_enrich.ThreadPoolExecutor(max_workers=2) as _pool1:
-            _f_crime   = _pool1.submit(_task_crime)
-            _f_reports = _pool1.submit(_task_reports)
-            _f_crime.result()    # wait — crime result needed before phase 2
-            _f_reports.result()
-
-        print("[DEBUG] [get_routes] Starting parallel enrichment (phase 2: flood/incidents/mmda/seismic/profile)...")
-        with _cf_enrich.ThreadPoolExecutor(max_workers=5) as _pool2:
-            _f_flood     = _pool2.submit(_task_flood)
-            _f_incidents = _pool2.submit(_task_incidents)
-            _f_mmda      = _pool2.submit(_task_mmda)
-            _f_seismic   = _pool2.submit(_task_seismic)
-            _f_profile   = _pool2.submit(_task_profile)
-            # Wait for all — exceptions are re-raised here
-            for _f in (_f_flood, _f_incidents, _f_mmda, _f_seismic, _f_profile):
-                try:
-                    _f.result()
-                except Exception as _fe:
-                    print(f"[DEBUG] [get_routes][parallel] phase-2 task error: {_fe}")
-
-        print(f"[DEBUG] [get_routes] Parallel enrichment done in {time.time()-t_parallel:.4f}s")
-
-        # ── Merge results from boxes into nav_response ────────────────────
-        flood = _flood_result_box.get("flood", {"risk_level": "none", "ok": False})
-        nav_response["incidents"]          = _incidents_box.get("incidents", [])
-        nav_response["mmda_banner"]        = _mmda_box.get("banner", "")
-        nav_response["mmda_coding"]        = _mmda_box.get("coding")
-        nav_response["mmda_closures_count"]= _mmda_box.get("closures_count", 0)
-        nav_response["seismic_banner"]     = _seismic_box.get("banner", "")
-        nav_response["epicenter_js"]       = _seismic_box.get("epicenter_js", "")
-        nav_response["earthquakes"]        = _seismic_box.get("earthquakes", [])
-        nav_response["profile_badge"]      = _profile_box.get("badge", "")
-        nav_response["safe_spots_js"]      = ""
-        print(f"[DEBUG][get_routes] Gathered {len(nav_response['incidents'])} real-time incidents.")
+        # ── Vulnerable commuter profile ───────────────────────────────────
+        print("[DEBUG][get_routes] Processing vulnerable profile...")
+        t_vuln = time.time()
+        try:
+            profile = data.get("vulnerable_profile", "")
+            if profile and profile in PROFILES:
+                print(f"[DEBUG] [get_routes] Profile found: '{profile}'. Applying to routes.")
+                apply_vulnerable_profile_to_routes(routes, profile, weather)
+                from risk_monitor.vulnerable_profiles import get_infrastructure_warnings
+                for route in routes:
+                    coords = get_flat_route_coords(route)
+                    infra_warns = get_infrastructure_warnings(profile, coords)
+                    route.setdefault("profile_warnings", []).extend(infra_warns)
+                nav_response["profile_badge"] = get_profile_badge_html(profile)
+            else:
+                nav_response["profile_badge"] = ""
+        except Exception as _vpe:
+            print(f"[DEBUG] [get_routes] [vulnerable_profiles] pipeline error: {_vpe}")
+            nav_response["profile_badge"] = ""
+        print(f"[DEBUG] [get_routes] Vulnerable profile logic took {time.time() - t_vuln:.4f}s")
 
         # ── Color each route by safety score ──────────────────────────────
         print("[DEBUG] [get_routes] Resolving route colors based on safety scores...")
@@ -2138,7 +2103,6 @@ def api_community_weather():
     flood    = get_flood_risk_at(lat, lon)
     forecast = get_forecast(lat, lon, days=5)
 
-    # Determine flood warning active
     flood_active = flood.get('risk_level', 'none') not in ('none', 'low')
 
     return jsonify({
@@ -2172,7 +2136,7 @@ def api_community_news():
     GET /api/community/news
     Returns: { ok, items: [ {source, headline, summary, url, published_at, severity} ] }
     """
-    from datetime import datetime, timezone, timedelta
+    from datetime import timezone, timedelta
     _PHT = timezone(timedelta(hours=8))
     now_str = datetime.now(_PHT).strftime('%Y-%m-%d %H:%M PHT')
 
@@ -2196,7 +2160,7 @@ def api_community_news():
     # 2. MMDA road closures
     try:
         closures = get_road_closures()
-        for c in closures[:3]:   # cap at 3 MMDA items
+        for c in closures[:3]:
             items.append({
                 'source':       'MMDA',
                 'headline':     c.get('title', 'Road closure advisory'),
@@ -2211,7 +2175,6 @@ def api_community_news():
     # 3. Real-time incidents (GDACS / USGS / PHIVOLCS)
     try:
         incidents = get_active_incidents(ph_only=True)
-        # Map source names to display labels
         _src_map = {
             'gdacs':    'NDRRMC',
             'usgs':     'PHIVOLCS',
@@ -2219,8 +2182,8 @@ def api_community_news():
             'mmda':     'MMDA',
             'pagasa':   'PAGASA',
         }
-        for inc in incidents[:6]:   # cap at 6 incident items
-            raw_src  = inc.get('source', 'NDRRMC').lower()
+        for inc in incidents[:6]:
+            raw_src   = inc.get('source', 'NDRRMC').lower()
             src_label = _src_map.get(raw_src, inc.get('source', 'NDRRMC'))
             items.append({
                 'source':       src_label,

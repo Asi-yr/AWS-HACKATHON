@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Global theme state — mirrors main.js THEME_KEY logic.
-/// Wrap the app root with ChangeNotifierProvider(create: (_) => ThemeController()).
+/// Global theme state.
+///
+/// Key fix: `notifyListeners()` is called BEFORE the async disk write so the
+/// UI updates instantly — no 50-300 ms delay waiting for SharedPreferences.
 class ThemeController extends ChangeNotifier {
   static const _key = 'ligtas_theme';
 
@@ -19,12 +21,18 @@ class ThemeController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Instantly updates the UI, then saves to disk in the background.
   Future<void> setDark(bool value) async {
+    if (_isDark == value) return;
     _isDark = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, value ? 'dark' : 'light');
-    notifyListeners();
+    notifyListeners(); // ← paint NOW, before any async work
+    _save();           // fire-and-forget disk write
   }
 
   Future<void> toggle() => setDark(!_isDark);
+
+  Future<void> _save() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, _isDark ? 'dark' : 'light');
+  }
 }

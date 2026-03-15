@@ -14,7 +14,7 @@ import 'screens/profile/profile_view.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-  
+
   runApp(
     MultiProvider(
       providers: [
@@ -32,26 +32,35 @@ class LigtasApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final themeController = context.watch<ThemeController>();
-
-    return MaterialApp(
-      title: 'Ligtas',
-      debugShowCheckedModeBanner: false,
-      themeMode: themeController.isDark ? ThemeMode.dark : ThemeMode.light,
-      theme: ThemeData(
-        brightness: Brightness.light,
-        // Add your light theme properties here
+    // ── FIX 1: Selector instead of context.watch ──────────────────────────────
+    // Selector<T, S> only rebuilds when the selected value (isDark) changes.
+    // Unlike context.watch, it won't rebuild if ThemeController ever notifies
+    // for reasons other than isDark changing. It also makes the rebuild scope
+    // explicit and readable.
+    return Selector<ThemeController, bool>(
+      selector: (_, tc) => tc.isDark,
+      builder: (context, isDark, _) => MaterialApp(
+        title: 'Ligtas',
+        debugShowCheckedModeBanner: false,
+        themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+        theme: ThemeData(
+          brightness: Brightness.light,
+          useMaterial3: false,
+        ),
+        darkTheme: ThemeData(
+          brightness: Brightness.dark,
+          useMaterial3: false,
+        ),
+        initialRoute: AppRouter.splash,
+        onGenerateRoute: AppRouter.onGenerateRoute,
       ),
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        // Add your dark theme properties here
-      ),
-      initialRoute: AppRouter.splash,
-      onGenerateRoute: AppRouter.onGenerateRoute,
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RootShell — bottom nav host
+// ─────────────────────────────────────────────────────────────────────────────
 class RootShell extends StatefulWidget {
   const RootShell({super.key});
   @override
@@ -60,45 +69,23 @@ class RootShell extends StatefulWidget {
 
 class _RootShellState extends State<RootShell> {
   int _currentIndex = 0;
-
-  final List<Widget> _pages = [
-    const ExploreView(),
-    const CommunityView(),
-    const ProfileView(),
-  ];
-
-  void _onTabControllerChanged() {
-    final requested = context.read<AppTabController>().index;
-    if (requested != _currentIndex) {
-      _setTab(requested);
-    }
-  }
-
-  void _setTab(int index) {
-    if (index == 0) {
-      context.read<ExploreController>().clearSearch();
-      SessionManager.instance.setLastRoute(AppRouter.explore);
-    } else if (index == 1) {
-      SessionManager.instance.setLastRoute(AppRouter.community);
-    } else if (index == 2) {
-      SessionManager.instance.setLastRoute(AppRouter.profile);
-    }
-    SessionManager.instance.updateLastActive();
-    setState(() => _currentIndex = index);
-  }
+  late final PageController _pageController;
 
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: _currentIndex);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Listen for tab switches triggered externally via AppTabController
       context.read<AppTabController>().addListener(_onTabControllerChanged);
-      // Restore the tab the user was on when the app was last closed.
-      // Splash always enters via /explore, so we set the index ourselves here.
+      // Restore the tab the user was on when the app was last closed
       SessionManager.instance.getLastRoute().then((route) {
         if (!mounted) return;
         if (route == AppRouter.community && _currentIndex != 1) {
+          _pageController.jumpToPage(1);
           setState(() => _currentIndex = 1);
         } else if (route == AppRouter.profile && _currentIndex != 2) {
+          _pageController.jumpToPage(2);
           setState(() => _currentIndex = 2);
         }
       });
@@ -108,36 +95,99 @@ class _RootShellState extends State<RootShell> {
   @override
   void dispose() {
     context.read<AppTabController>().removeListener(_onTabControllerChanged);
+    _pageController.dispose();
     super.dispose();
+  }
+
+  void _onTabControllerChanged() {
+    final requested = context.read<AppTabController>().index;
+    if (requested != _currentIndex) {
+      _onNavTap(requested);
+    }
+  }
+
+  void _onNavTap(int index) {
+    if (index == 0) {
+      context.read<ExploreController>().clearSearch();
+      SessionManager.instance.setLastRoute(AppRouter.explore);
+    } else if (index == 1) {
+      SessionManager.instance.setLastRoute(AppRouter.community);
+    } else if (index == 2) {
+      SessionManager.instance.setLastRoute(AppRouter.profile);
+    }
+    SessionManager.instance.updateLastActive();
+    context.read<AppTabController>().switchTo(index);
+    _pageController.jumpToPage(index);
+    setState(() => _currentIndex = index);
   }
 
   @override
   Widget build(BuildContext context) {
-    // FIX: Watch ThemeController HERE at the shell level, not inside
-    // _LigtasBottomNav. This means the entire Scaffold (nav bar + body)
-    // is rebuilt in the same frame when the theme changes, eliminating
-    // the visual delay where the nav updates before the page content.
-    // ignore: unused_local_variable
-    final _ = context.watch<ThemeController>();
-
+    // ── FIX 2: RootShell has NO ThemeController dependency ───────────────────
+    // RootShell only rebuilds when _currentIndex changes (setState in
+    // _onNavTap). Theme changes propagate through the MaterialApp →
+    // Theme InheritedWidget cascade, not through RootShell rebuilds.
     return Scaffold(
       resizeToAvoidBottomInset: false,
       extendBody: true,
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
+      body: PageView(
+        // ── FIX 3: PageView + keepAlive instead of IndexedStack ───────────────
+        // IndexedStack keeps all 3 pages in the RENDER tree at all times.
+        // On theme change, Flutter repaints all 3 simultaneously, and they
+        // finish at different times depending on subtree depth — that's the
+        // staggered update you see.
+        //
+        // PageView only renders the ACTIVE page. Inactive pages are kept
+        // alive in memory (not destroyed) by AutomaticKeepAliveClientMixin
+        // in _KeepAlivePage, so all state, controllers, and scroll positions
+        // are preserved. But they are NOT in the repaint tree, so theme
+        // changes only repaint the one visible page. No more race condition.
+        controller: _pageController,
+        physics: const NeverScrollableScrollPhysics(), // no swipe between tabs
+        children: const [
+          _KeepAlivePage(child: ExploreView()),
+          _KeepAlivePage(child: CommunityView()),
+          _KeepAlivePage(child: ProfileView()),
+        ],
       ),
       bottomNavigationBar: _LigtasBottomNav(
-          currentIndex: _currentIndex,
-          onTap: (index) {
-            context.read<AppTabController>().switchTo(index);
-            _setTab(index);
-          },
-        ),
+        currentIndex: _currentIndex,
+        onTap: _onNavTap,
+      ),
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// _KeepAlivePage — keeps page state alive when PageView deactivates it
+// ─────────────────────────────────────────────────────────────────────────────
+class _KeepAlivePage extends StatefulWidget {
+  final Widget child;
+  const _KeepAlivePage({required this.child});
+
+  @override
+  State<_KeepAlivePage> createState() => _KeepAlivePageState();
+}
+
+class _KeepAlivePageState extends State<_KeepAlivePage>
+    with AutomaticKeepAliveClientMixin {
+  // wantKeepAlive = true tells PageView: keep this element alive in memory
+  // even when it is not the active page. State, controllers, scroll positions,
+  // and Provider subtrees are all preserved. The page simply stops receiving
+  // build calls and repaints — it does not get destroyed and recreated.
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // required call for AutomaticKeepAliveClientMixin
+    return widget.child;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bottom nav bar
+// ─────────────────────────────────────────────────────────────────────────────
 class _LigtasBottomNav extends StatelessWidget {
   const _LigtasBottomNav({
     required this.currentIndex,
@@ -147,8 +197,6 @@ class _LigtasBottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
 
-  // FIX: Colors are now defined as getters that read from ThemeController,
-  // not hardcoded constants. This makes the nav bar respond to dark/light mode.
   static const _teal = AppColors.tealBright;
   static const _items = [
     _NavItem(label: 'HOME',      icon: Icons.home_outlined,           iconActive: Icons.home_rounded),
@@ -158,14 +206,20 @@ class _LigtasBottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ThemeController is already watched by RootShell, so this widget
-    // rebuilds in the same frame. Use read here to avoid double-watching.
-    final isDark = context.read<ThemeController>().isDark;
-
-    // FIX: Choose colors based on current theme instead of hardcoding dark values.
-    final bgColor    = isDark ? AppColors.cardDark : AppColors.cardLight;
+    // ── FIX 4: Theme.of(context) instead of ThemeController watch ────────────
+    // Theme.of(context) is a zero-cost InheritedWidget lookup — it does NOT
+    // add this widget as a ThemeController listener. Instead it reads the
+    // Theme that MaterialApp already propagated down the tree.
+    //
+    // When isDark changes, MaterialApp (via Selector in LigtasApp) rebuilds
+    // and pushes a new Theme InheritedWidget. Flutter then marks every widget
+    // that called Theme.of(context) as dirty and rebuilds them all in the
+    // SAME FRAME — including this nav bar and the active page. They always
+    // update together, no lag, no race.
+    final isDark      = Theme.of(context).brightness == Brightness.dark;
+    final bgColor     = isDark ? AppColors.cardDark  : AppColors.cardLight;
     final borderColor = isDark ? AppColors.borderDark : AppColors.borderLight;
-    final mutedColor  = isDark ? AppColors.text2Dark : AppColors.text2Light;
+    final mutedColor  = isDark ? AppColors.text2Dark  : AppColors.text2Light;
 
     return Container(
       height: 72,
@@ -214,5 +268,9 @@ class _NavItem {
   final String   label;
   final IconData icon;
   final IconData iconActive;
-  const _NavItem({required this.label, required this.icon, required this.iconActive});
+  const _NavItem({
+    required this.label,
+    required this.icon,
+    required this.iconActive,
+  });
 }

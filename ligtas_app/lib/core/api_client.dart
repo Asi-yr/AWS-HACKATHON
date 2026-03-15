@@ -952,6 +952,39 @@ class ApiClient {
     }
   }
 
+  /// Change user email (requires current password verification).
+  /// Calls POST /api/auth/change-email
+  Future<Map<String, dynamic>> changeEmail({
+    required String currentPassword,
+    required String newEmail,
+    String? token,
+  }) async {
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+      final resp = await http.post(
+        _uri('/api/auth/change-email'),
+        headers: headers,
+        body: jsonEncode({
+          'current_password': currentPassword,
+          'new_email':        newEmail,
+        }),
+      );
+
+      final decoded = jsonDecode(resp.body);
+      if (resp.statusCode != 200) {
+        throw Exception(decoded['message'] ?? 'Email change failed');
+      }
+
+      return decoded;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   /// ────────────────────────────────────────────────────────────────────────
   /// WHAT NEEDS CONNECTION 🔗: SOS Emergency Contact Management
   /// ────────────────────────────────────────────────────────────────────────
