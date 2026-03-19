@@ -60,6 +60,7 @@ from risk_monitor.sos import (
     log_sos_event, get_sos_panel_html,
     get_trusted_contacts_settings_html,
 )
+from llm import get_commuter_advice
 
 USE_MYSQL = False
 print(f"[DEBUG] [INIT] USE_MYSQL is set to: {USE_MYSQL}")
@@ -1749,6 +1750,68 @@ def get_routes():
 
     print(f"[DEBUG][get_routes] Endpoint returning response in {time.time() - t_route_start:.4f}s total.")
     return jsonify(nav_response)
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  AI COMMUTER HELPER
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/ai-commuter', methods=['POST'])
+def ai_commuter():
+    """AI-powered commuter advice built on top of the routing engine.
+    POST /api/ai-commuter
+    Body: { origin, destination, mode (optional), question (optional) }
+    Returns: AI recommendation with ranked route options.
+    """
+    t_start = time.time()
+    print("[DEBUG][ai_commuter] /api/ai-commuter endpoint hit.")
+    data = request.json or {}
+
+    origin_text = data.get('origin', '')
+    dest_text = data.get('destination', '')
+    commuter_type = data.get('mode') or 'transit'
+    user_question = data.get('question', '')
+
+    if not origin_text or not dest_text:
+        return jsonify({'ok': False, 'error': 'Origin and destination are required.'}), 400
+
+    # Step 1: Geocode
+    print(f"[DEBUG][ai_commuter] Geocoding origin='{origin_text}', dest='{dest_text}'")
+    orig_lon, orig_lat = geocode_location(origin_text)
+    dest_lon, dest_lat = geocode_location(dest_text)
+
+    if not orig_lon or not orig_lat:
+        return jsonify({'ok': False, 'error': f"Could not find '{origin_text}'."}), 400
+    if not dest_lon or not dest_lat:
+        return jsonify({'ok': False, 'error': f"Could not find '{dest_text}'."}), 400
+
+    # Step 2: Get routes from the routing engine
+    print("[DEBUG][ai_commuter] Calling get_navigation_data with mode='transit'...")
+    nav = get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, 'transit', [])
+    routes = nav.get('routes', [])
+    print(f"[DEBUG][ai_commuter] Got {len(routes)} transit routes.")
+
+    # Also try the user's requested mode if different
+    if commuter_type != 'transit':
+        print(f"[DEBUG][ai_commuter] Also fetching mode='{commuter_type}'...")
+        nav2 = get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, [])
+        extra = nav2.get('routes', [])
+        # Merge, avoiding duplicates by name
+        seen = {r.get('name') for r in routes}
+        for r in extra:
+            if r.get('name') not in seen:
+                routes.append(r)
+                seen.add(r.get('name'))
+        print(f"[DEBUG][ai_commuter] After merge: {len(routes)} total routes.")
+
+    # Step 3: Get weather context
+    weather = get_weather_risk(orig_lat, orig_lon)
+
+    # Step 4: Ask AI for advice
+    print("[DEBUG][ai_commuter] Calling get_commuter_advice()...")
+    advice = get_commuter_advice(origin_text, dest_text, routes, weather, user_question)
+
+    print(f"[DEBUG][ai_commuter] Done in {time.time() - t_start:.4f}s")
+    return jsonify(advice)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  COMMUNITY REPORTS
