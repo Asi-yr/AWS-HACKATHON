@@ -57,23 +57,30 @@ class _LoginViewState extends State<LoginView> {
   Future<void> _handleLogin() async {
     final username = _emailController.text.trim();
     final password = _passwordController.text;
+    debugPrint('[LOGIN] Attempting login for username: $username');
 
     if (username.isEmpty || password.isEmpty) {
       _showError('Please enter username and password');
+      debugPrint('[LOGIN] Missing username or password');
       return;
     }
 
     setState(() => _isLoading = true);
     try {
+      debugPrint('[LOGIN] Sending login request...');
       final response = await ApiClient.instance.login(
         username: username,
         password: password,
       );
+      debugPrint('[LOGIN] Response: $response');
 
-      if (!mounted) return;
+      if (!mounted) {
+        debugPrint('[LOGIN] Widget not mounted after response');
+        return;
+      }
 
       if (response['ok'] == true && response['token'] != null) {
-        // Save token and user info
+        debugPrint('[LOGIN] Login successful, saving session...');
         await SessionManager.instance.setLoggedIn(
           true,
           token: response['token'],
@@ -81,15 +88,24 @@ class _LoginViewState extends State<LoginView> {
         );
         await SessionManager.instance.setLastRoute(AppRouter.explore);
 
-        if (!mounted) return;
+        if (!mounted) {
+          debugPrint('[LOGIN] Widget not mounted after session save');
+          return;
+        }
         context.read<ExploreController>().loadUserPreferences();
+        debugPrint('[LOGIN] Navigating to explore screen');
         Navigator.pushReplacementNamed(context, AppRouter.explore);
       } else {
+        debugPrint('[LOGIN] Login failed: ${response['message']}');
         _showError(response['message'] ?? 'Login failed');
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        debugPrint('[LOGIN] Widget not mounted after error');
+        return;
+      }
       final msg = e.toString();
+      debugPrint('[LOGIN] Exception: $msg');
       if (msg.contains('SocketException') || msg.contains('Connection refused') || msg.contains('Failed host lookup')) {
         _showError('Cannot reach server. Check your connection.');
       } else {
@@ -97,6 +113,7 @@ class _LoginViewState extends State<LoginView> {
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
+      debugPrint('[LOGIN] Loading state reset');
     }
   }
 
@@ -104,29 +121,37 @@ class _LoginViewState extends State<LoginView> {
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
+    debugPrint('[REGISTER] Attempting registration for name: $name, email: $email');
 
     if (name.isEmpty || email.isEmpty || password.isEmpty) {
       _showError('Please fill all fields');
+      debugPrint('[REGISTER] Missing fields');
       return;
     }
 
     if (password.length < 6) {
       _showError('Password must be at least 6 characters');
+      debugPrint('[REGISTER] Password too short');
       return;
     }
 
     setState(() => _isLoading = true);
     try {
+      debugPrint('[REGISTER] Sending register request...');
       final response = await ApiClient.instance.register(
         username: name,
         password: password,
         email: email,
       );
+      debugPrint('[REGISTER] Response: $response');
 
-      if (!mounted) return;
+      if (!mounted) {
+        debugPrint('[REGISTER] Widget not mounted after response');
+        return;
+      }
 
       if (response['ok'] == true && response['token'] != null) {
-        // Auto-login after successful registration
+        debugPrint('[REGISTER] Registration successful, saving session...');
         await SessionManager.instance.setLoggedIn(
           true,
           token: response['token'],
@@ -134,14 +159,23 @@ class _LoginViewState extends State<LoginView> {
         );
         await SessionManager.instance.setLastRoute(AppRouter.survey);
 
-        if (!mounted) return;
+        if (!mounted) {
+          debugPrint('[REGISTER] Widget not mounted after session save');
+          return;
+        }
+        debugPrint('[REGISTER] Navigating to survey screen');
         Navigator.pushReplacementNamed(context, AppRouter.survey);
       } else {
+        debugPrint('[REGISTER] Registration failed: ${response['message']}');
         _showError(response['message'] ?? 'Registration failed');
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        debugPrint('[REGISTER] Widget not mounted after error');
+        return;
+      }
       final msg = e.toString();
+      debugPrint('[REGISTER] Exception: $msg');
       if (msg.contains('SocketException') || msg.contains('Connection refused') || msg.contains('Failed host lookup')) {
         _showError('Cannot reach server. Check your connection.');
       } else {
@@ -149,13 +183,21 @@ class _LoginViewState extends State<LoginView> {
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
+      debugPrint('[REGISTER] Loading state reset');
     }
   }
 
   void _showError(String message) {
+    debugPrint('[ERROR] $message');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text(message)),
+          ],
+        ),
         backgroundColor: AppColors.safeRed,
         duration: const Duration(seconds: 3),
       ),
@@ -168,105 +210,133 @@ class _LoginViewState extends State<LoginView> {
     return Scaffold(
       backgroundColor: AppColors.bg(isDark),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(28, 48, 28, 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Logo ─────────────────────────────────────────
-              Container(
-                width: 52, height: 52,
-                decoration: BoxDecoration(
-                  color: AppColors.teal,
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [BoxShadow(
-                    color: AppColors.tealGlow,
-                    blurRadius: 20, spreadRadius: 2)],
-                ),
-                child: const Icon(Icons.shield_rounded,
-                  color: Colors.white, size: 28),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                _isLogin ? 'Welcome back.' : 'Create account.',
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 30, fontWeight: FontWeight.w900,
-                  color: AppColors.text(isDark), height: 1.1),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _isLogin
-                  ? 'Sign in to your Ligtas account.'
-                  : 'Join Ligtas and commute safer.',
-                style: GoogleFonts.dmSans(
-                  fontSize: 14, color: AppColors.text2(isDark)),
-              ),
-              const SizedBox(height: 36),
-
-              // ── Sign In / Register tab toggle ─────────────────
-              Container(
-                decoration: BoxDecoration(
-                  color: AppColors.card(isDark),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.border(isDark))),
-                padding: const EdgeInsets.all(4),
-                child: Row(children: [
-                  _tab('Sign In',  _isLogin,  () => setState(() => _isLogin = true),  isDark),
-                  _tab('Register', !_isLogin, () => setState(() => _isLogin = false), isDark),
-                ]),
-              ),
-              const SizedBox(height: 28),
-
-              // ── Fields ────────────────────────────────────────
-              if (!_isLogin) ...[
-                _field('Full Name', Icons.person_outline_rounded, false, _nameController, isDark),
-                const SizedBox(height: 14),
-              ],
-              _field(
-                _isLogin ? 'Username' : 'Email Address',
-                _isLogin ? Icons.person_outline_rounded : Icons.email_outlined,
-                false,
-                _emailController,
-                isDark,
-              ),
-              const SizedBox(height: 14),
-              _field('Password', Icons.lock_outline_rounded, true, _passwordController, isDark),
-              const SizedBox(height: 28),
-
-              // ── Primary CTA ───────────────────────────────────
-              // BACKEND: Connected to /api/auth/login and /api/auth/register
-              _PrimaryButton(
-                label: _isLogin ? 'Sign In' : 'Create Account',
-                isLoading: _isLoading,
-                onTap: _isLoading ? null : (_isLogin ? _handleLogin : _handleRegister),
-              ),
-              const SizedBox(height: 20),
-
-              // ── Divider ───────────────────────────────────────
-              Row(children: [
-                Expanded(child: Divider(color: AppColors.border(isDark))),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text('or',
+        child: Stack(
+          children: [
+            SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(28, 48, 28, 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Logo ─────────────────────────────────────────
+                  Container(
+                    width: 52, height: 52,
+                    decoration: BoxDecoration(
+                      color: AppColors.teal,
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [BoxShadow(
+                        color: AppColors.tealGlow,
+                        blurRadius: 20, spreadRadius: 2)],
+                    ),
+                    child: const Icon(Icons.shield_rounded,
+                      color: Colors.white, size: 28),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    _isLogin ? 'Welcome back.' : 'Create account.',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 30, fontWeight: FontWeight.w900,
+                      color: AppColors.text(isDark), height: 1.1),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _isLogin
+                      ? 'Sign in to your Ligtas account.'
+                      : 'Join Ligtas and commute safer.',
                     style: GoogleFonts.dmSans(
-                      fontSize: 13, color: AppColors.text2(isDark))),
-                ),
-                Expanded(child: Divider(color: AppColors.border(isDark))),
-              ]),
-              const SizedBox(height: 20),
+                      fontSize: 14, color: AppColors.text2(isDark)),
+                  ),
+                  const SizedBox(height: 36),
 
-              // ── Social / OAuth ────────────────────────────────
-              // BACKEND: wire Google OAuth / Firebase here
-              _SocialButton(
-                label: 'Continue with Google',
-                icon: Icons.g_mobiledata_rounded,
-                onTap: () {
-                  // new user  → AppRouter.survey
-                  // returning → AppRouter.explore
-                },
+                  // ── Sign In / Register tab toggle ─────────────────
+                  Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.card(isDark),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border(isDark))),
+                    padding: const EdgeInsets.all(4),
+                    child: Row(children: [
+                      _tab('Sign In',  _isLogin,  () => setState(() => _isLogin = true),  isDark),
+                      _tab('Register', !_isLogin, () => setState(() => _isLogin = false), isDark),
+                    ]),
+                  ),
+                  const SizedBox(height: 28),
+
+                  // ── Fields ────────────────────────────────────────
+                  if (!_isLogin) ...[
+                    _field('Full Name', Icons.person_outline_rounded, false, _nameController, isDark),
+                    const SizedBox(height: 14),
+                  ],
+                  _field(
+                    _isLogin ? 'Username' : 'Email Address',
+                    _isLogin ? Icons.person_outline_rounded : Icons.email_outlined,
+                    false,
+                    _emailController,
+                    isDark,
+                  ),
+                  const SizedBox(height: 14),
+                  _field('Password', Icons.lock_outline_rounded, true, _passwordController, isDark),
+                  const SizedBox(height: 28),
+
+                  // ── Primary CTA ───────────────────────────────────
+                  // BACKEND: Connected to /api/auth/login and /api/auth/register
+                  _PrimaryButton(
+                    label: _isLogin ? 'Sign In' : 'Create Account',
+                    isLoading: _isLoading,
+                    onTap: _isLoading ? null : (_isLogin ? _handleLogin : _handleRegister),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Divider ───────────────────────────────────────
+                  Row(children: [
+                    Expanded(child: Divider(color: AppColors.border(isDark))),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('or',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13, color: AppColors.text2(isDark))),
+                    ),
+                    Expanded(child: Divider(color: AppColors.border(isDark))),
+                  ]),
+                  const SizedBox(height: 20),
+
+                  // ── Social / OAuth ────────────────────────────────
+                  // BACKEND: wire Google OAuth / Firebase here
+                  _SocialButton(
+                    label: 'Continue with Google',
+                    icon: Icons.g_mobiledata_rounded,
+                    onTap: () {
+                      debugPrint('[SOCIAL] Google sign-in tapped');
+                      // new user  → AppRouter.survey
+                      // returning → AppRouter.explore
+                    },
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+            if (_isLoading)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withOpacity(0.18),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 18),
+                        Text(
+                          'Processing... Please wait.',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 15,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

@@ -2731,6 +2731,32 @@ def rss_feed():
     print(f"[DEBUG] [rss_feed] Generated XML output size: {len(xml_str)} chars in {time.time() - t_start:.4f}s")
     return Response(xml_str, mimetype='application/rss+xml; charset=utf-8')
 
+@app.route('/ping', methods=['GET'])
+def ping():
+    """Health-check used by the Flutter app to discover this server on the LAN."""
+    return jsonify({'ok': True}), 200
+
+
 if __name__ == '__main__':
+    import socket
     print("[DEBUG] [MAIN] Starting Flask app loop via main block...")
-    app.run(debug=True)
+
+    # Print every LAN IP so you know exactly what to use on the phone.
+    print("\n" + "="*55)
+    print("  LIGTAS BACKEND — reachable at:")
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None):
+            ip = info[4][0]
+            if ':' not in ip and not ip.startswith('127.'):
+                print(f"    http://{ip}:5000")
+    except Exception:
+        pass
+    print("    http://127.0.0.1:5000  (emulator / same machine)")
+    print("  If the phone can't connect, call:")
+    print("    ApiClient.setManualUrl('http://<IP above>:5000')")
+    print("="*55 + "\n")
+
+    # host='0.0.0.0' = accept connections on ALL interfaces (Wi-Fi, USB, etc.)
+    # Without this Flask only listens on loopback and physical phones can't connect.
+    app.run(host='0.0.0.0', port=5000, debug=True)

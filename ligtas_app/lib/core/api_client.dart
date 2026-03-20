@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -15,21 +16,160 @@ class ApiClient {
   ApiClient._();
   static final ApiClient instance = ApiClient._();
 
-  /// Base URL of the Flask backend.
-  ///
-  /// Android (both emulator & physical device) uses the host machine's
-  /// LAN IP so the phone can reach the dev server over Wi-Fi.
-  /// iOS simulator and web can reach `localhost` directly.
-  static const _lanIp = '192.168.1.3';
+  // ── Dynamic backend discovery ─────────────────────────────────────────────
+  //
+  // HOW IT WORKS:
+  //   Everything runs in ONE parallel batch — no sequential phases wasting time.
+  //   All candidates are fired simultaneously and the first 200 /ping wins.
+  //
+  //   Candidate pool (all probed at once):
+  //     • Manual override  — _manualBaseUrl if set via setManualUrl()
+  //     • Emulator alias   — 10.0.2.2        (Android emulator → host machine)
+  //     • Loopback         — 127.0.0.1        (iOS sim / desktop / web)
+  //     • Full subnet scan — every .1–.254 on every RFC-1918 /24 the phone is on
+  //
+  // TROUBLESHOOTING (corporate/school Wi-Fi that blocks device-to-device):
+  //   If the phone is on a network that isolates devices (common on 10.x.x.x
+  //   enterprise nets), the scan will never find the server.
+  //   Fix: call ApiClient.setManualUrl('http://YOUR_LAPTOP_IP:5000') once at
+  //   app startup (e.g. from a debug settings screen or a .env-style config).
+  //   Your laptop IP: run `ipconfig` (Windows) or `ifconfig` (Mac/Linux) and
+  //   look for the IP on the same Wi-Fi adapter.
 
-  static String get baseUrl {
-    if (!kIsWeb && Platform.isAndroid) {
-      return 'http://$_lanIp:5000';
-    }
-    return 'http://localhost:5000';
+  static String? _cachedBaseUrl;
+  static String? _manualBaseUrl; // set via setManualUrl() to skip discovery
+
+  /// Force a specific server URL — useful when network isolation blocks scanning.
+  /// Call this before any API request, e.g. in main() or a debug settings screen.
+  /// Example: ApiClient.setManualUrl('http://10.143.0.42:5000');
+  static void setManualUrl(String url) {
+    _manualBaseUrl = url;
+    _cachedBaseUrl = url; // cache immediately so next call uses it
+    debugPrint('[API] Manual URL set: $url');
   }
 
-  Uri _uri(String path) => Uri.parse('$baseUrl$path');
+  /// Clear cached URL and re-run discovery on next call.
+  static void resetBaseUrl() {
+    _cachedBaseUrl = null;
+    // Note: _manualBaseUrl is intentionally kept — reset it explicitly if needed.
+  }
+
+  static Future<String> getBaseUrl() async {
+    if (_cachedBaseUrl != null) return _cachedBaseUrl!;
+
+    // Build the full candidate pool — everything probed simultaneously.
+    final candidates = <String>{};
+
+    // Manual override wins immediately if set.
+    if (_manualBaseUrl != null) {
+      _cachedBaseUrl = _manualBaseUrl;
+      debugPrint('[API] ✓ Using manual URL: $_manualBaseUrl');
+      return _manualBaseUrl!;
+    }
+
+    // Known fixed candidates tried first (emulator + loopback via ADB tunnel).
+    candidates.addAll([
+      'http://10.0.2.2:5000',
+      'http://127.0.0.1:5000',
+      'http://localhost:5000',
+    ]);
+
+    // Discover every /24 subnet the phone is on, probe ALL hosts in parallel.
+    final subnets = await _getLocalSubnets();
+    debugPrint('[API] Device subnets: $subnets');
+    for (final s in subnets) {
+      for (int h = 1; h <= 254; h++) candidates.add('http://$s.$h:5000');
+    }
+
+    debugPrint('[API] Probing \${candidates.length} candidates simultaneously...');
+
+    // Fire every candidate at once — 5 s total budget.
+    final found = await _probeAll(candidates.toList(), timeout: const Duration(seconds: 5));
+
+    if (found != null) {
+      _cachedBaseUrl = found;
+      debugPrint('[API] ✓ Backend found at $found');
+      return found;
+    }
+
+    // Nothing responded. Log the subnet so the developer knows what to put in setManualUrl.
+    debugPrint('[API] ✗ Backend not found. Device subnets were: $subnets');
+    debugPrint('[API]   → If on a network that blocks device-to-device traffic,');
+    debugPrint('[API]     call ApiClient.setManualUrl("http://<YOUR_LAPTOP_IP>:5000")');
+    debugPrint('[API]     then restart the app.');
+    _cachedBaseUrl = 'http://localhost:5000';
+    return _cachedBaseUrl!;
+  }
+
+  /// Probe all [urls] simultaneously. Returns the first URL that answers
+  /// HTTP 200 to GET /ping within [timeout], or null if none do.
+  static Future<String?> _probeAll(
+      List<String> urls, {
+        required Duration timeout,
+      }) async {
+    if (urls.isEmpty) return null;
+    final completer = Completer<String?>();
+    int remaining = urls.length;
+
+    for (final url in urls) {
+      http
+          .get(Uri.parse('$url/ping'))
+          .timeout(timeout)
+          .then((resp) {
+        if (!completer.isCompleted && resp.statusCode == 200) {
+          debugPrint('[API] /ping OK → $url');
+          completer.complete(url);
+        }
+      })
+          .catchError((_) {}) // connection refused, timeout, etc. — all silently ignored
+          .whenComplete(() {
+        remaining--;
+        if (remaining == 0 && !completer.isCompleted) {
+          completer.complete(null); // all probes finished, none succeeded
+        }
+      });
+    }
+    return completer.future;
+  }
+
+  /// Returns the /24 subnet prefix for every private IPv4 interface on the device.
+  /// e.g. phone on 10.143.0.55 → returns ['10.143.0'].
+  /// Uses dart:io NetworkInterface — no extra packages needed.
+  static Future<List<String>> _getLocalSubnets() async {
+    final subnets = <String>{};
+    try {
+      final ifaces = await NetworkInterface.list(
+        includeLinkLocal: false,
+        type: InternetAddressType.IPv4,
+      );
+      for (final iface in ifaces) {
+        for (final addr in iface.addresses) {
+          final p = addr.address.split('.');
+          if (p.length != 4) continue;
+          final a = int.tryParse(p[0]) ?? 0;
+          final b = int.tryParse(p[1]) ?? 0;
+          // RFC-1918 private ranges only.
+          if (a == 10 ||
+              a == 192 ||
+              (a == 172 && b >= 16 && b <= 31)) {
+            final prefix = '${p[0]}.${p[1]}.${p[2]}';
+            subnets.add(prefix);
+            debugPrint('[API] Interface ${iface.name}: ${addr.address} → subnet $prefix.0/24');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[API] NetworkInterface.list failed: $e');
+    }
+    return subnets.toList();
+  }
+
+  Future<Uri> _uriAsync(String path) async {
+    final base = await getBaseUrl();
+    return Uri.parse('$base$path');
+  }
+
+  // Use _uriAsync for all URL construction
 
   /// Call the backend `/api/routes` endpoint with full response including alerts.
   /// Returns: {
@@ -46,17 +186,18 @@ class ApiClient {
     String mode = 'commute',
     Map<String, dynamic>? extraParams,
   }) async {
+    final uri = await _uriAsync('/api/routes');
     final resp = await http
         .post(
-          _uri('/api/routes'),
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'origin': origin,
-            'destination': destination,
-            'mode': mode,
-            ...?extraParams,
-          }),
-        )
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'origin': origin,
+        'destination': destination,
+        'mode': mode,
+        ...?extraParams,
+      }),
+    )
         .timeout(const Duration(seconds: 180));
 
     // ── Never throw on HTTP errors — always return a usable map ──────────
@@ -78,10 +219,10 @@ class ApiClient {
       return {
         'routes': <RouteModel>[],
         'error':
-            (decoded['error'] ??
-                    decoded['message'] ??
-                    'No route found (${resp.statusCode})')
-                .toString(),
+        (decoded['error'] ??
+            decoded['message'] ??
+            'No route found (${resp.statusCode})')
+            .toString(),
         'error_type': decoded['error_type']?.toString() ?? '',
         'incidents': <dynamic>[],
         'mmda_banner': '',
@@ -143,14 +284,14 @@ class ApiClient {
     try {
       final resp = await http
           .post(
-            _uri('/api/routes'),
-            headers: const {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'origin': origin,
-              'destination': destination,
-              'mode': mode,
-            }),
-          )
+        await _uriAsync('/api/routes'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'origin': origin,
+          'destination': destination,
+          'mode': mode,
+        }),
+      )
           .timeout(const Duration(seconds: 180));
 
       if (resp.statusCode != 200) return const [];
@@ -230,7 +371,7 @@ class ApiClient {
     final int safetyScore = numScore is num ? numScore.round() : 75;
 
     final String modeLabelRaw =
-        (r['mode_label'] ?? r['route_name'] ?? 'Route ${index + 1}').toString();
+    (r['mode_label'] ?? r['route_name'] ?? 'Route ${index + 1}').toString();
     final String modes = modeLabelRaw;
 
     // Position-based tag: route 0 = Fastest, 1 = Balanced, 2 = Safest
@@ -246,9 +387,9 @@ class ApiClient {
     // "flood-prone area — not currently raining" which is misleading
     final rawFlood = r['flood_warning'] as String?;
     final String? floodWarning =
-        (rawFlood != null &&
-            rawFlood.isNotEmpty &&
-            !rawFlood.toLowerCase().contains('not currently raining'))
+    (rawFlood != null &&
+        rawFlood.isNotEmpty &&
+        !rawFlood.toLowerCase().contains('not currently raining'))
         ? rawFlood
         : null;
 
@@ -293,13 +434,13 @@ class ApiClient {
       profileWarnings: r['profile_warnings'] as List<dynamic>?,
       routeCrimeZones: (r['route_crime_zones'] is List)
           ? (r['route_crime_zones'] as List)
-                .whereType<Map<String, dynamic>>()
-                .toList()
+          .whereType<Map<String, dynamic>>()
+          .toList()
           : null,
       floodZonesMap: (r['flood_zones_map'] is List)
           ? (r['flood_zones_map'] as List)
-                .whereType<Map<String, dynamic>>()
-                .toList()
+          .whereType<Map<String, dynamic>>()
+          .toList()
           : null,
     );
   }
@@ -307,11 +448,11 @@ class ApiClient {
   /// Build a step list from backend segment data.
   /// Falls back to a single summary step when no segments are present.
   List<RouteStep> _buildSteps(
-    Map<String, dynamic> r,
-    String modes,
-    String timeStr,
-    String distanceStr,
-  ) {
+      Map<String, dynamic> r,
+      String modes,
+      String timeStr,
+      String distanceStr,
+      ) {
     final segments = r['segments'];
     if (segments is List && segments.isNotEmpty) {
       final steps = <RouteStep>[];
@@ -555,7 +696,7 @@ class ApiClient {
     for (final variant in variants) {
       try {
         final uri = Uri.parse(
-          '\$baseUrl/api/suggest',
+          '${await getBaseUrl()}/api/suggest',
         ).replace(queryParameters: {'q': variant});
         final resp = await http
             .get(uri, headers: _headers(token))
@@ -613,23 +754,32 @@ class ApiClient {
     String email = '',
   }) async {
     try {
+      final uri = await _uriAsync('/api/auth/register');
       final resp = await http.post(
-        _uri('/api/auth/register'),
+        uri,
         headers: const {'Content-Type': 'application/json'},
         body: jsonEncode({
           'username': username,
           'password': password,
           'email': email,
         }),
-      );
+      ).timeout(const Duration(seconds: 15));
 
       final decoded = jsonDecode(resp.body);
       if (resp.statusCode != 201) {
-        throw Exception(decoded['message'] ?? 'Registration failed');
+        debugPrint('[REGISTER] Error: ${decoded['message']}');
+        return {'ok': false, 'message': decoded['message'] ?? 'Registration failed'};
       }
       return decoded;
+    } on TimeoutException catch (_) {
+      debugPrint('[REGISTER] Timeout');
+      return {'ok': false, 'message': 'Request timed out. Please try again.'};
+    } on SocketException catch (_) {
+      debugPrint('[REGISTER] SocketException');
+      return {'ok': false, 'message': 'Cannot reach server. Check your connection.'};
     } catch (e) {
-      rethrow;
+      debugPrint('[REGISTER] Exception: $e');
+      return {'ok': false, 'message': e.toString().replaceFirst('Exception: ', '')};
     }
   }
 
@@ -639,19 +789,28 @@ class ApiClient {
     required String password,
   }) async {
     try {
+      final uri = await _uriAsync('/api/auth/login');
       final resp = await http.post(
-        _uri('/api/auth/login'),
+        uri,
         headers: const {'Content-Type': 'application/json'},
         body: jsonEncode({'username': username, 'password': password}),
-      );
+      ).timeout(const Duration(seconds: 15));
 
       final decoded = jsonDecode(resp.body);
       if (resp.statusCode != 200) {
-        throw Exception(decoded['message'] ?? 'Login failed');
+        debugPrint('[LOGIN] Error: ${decoded['message']}');
+        return {'ok': false, 'message': decoded['message'] ?? 'Login failed'};
       }
       return decoded;
+    } on TimeoutException catch (_) {
+      debugPrint('[LOGIN] Timeout');
+      return {'ok': false, 'message': 'Request timed out. Please try again.'};
+    } on SocketException catch (_) {
+      debugPrint('[LOGIN] SocketException');
+      return {'ok': false, 'message': 'Cannot reach server. Check your connection.'};
     } catch (e) {
-      rethrow;
+      debugPrint('[LOGIN] Exception: $e');
+      return {'ok': false, 'message': e.toString().replaceFirst('Exception: ', '')};
     }
   }
 
@@ -663,7 +822,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      await http.post(_uri('/api/auth/logout'), headers: headers);
+      await http.post(await _uriAsync('/api/auth/logout'), headers: headers);
     } catch (_) {
       // Logout errors are non-fatal, just best-effort
     }
@@ -677,7 +836,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(_uri('/api/user/current'), headers: headers);
+      final resp = await http.get(await _uriAsync('/api/user/current'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch user data');
@@ -698,7 +857,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(_uri('/api/reports'), headers: headers);
+      final resp = await http.get(await _uriAsync('/api/reports'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch reports');
@@ -729,7 +888,7 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/report'),
+        await _uriAsync('/api/report'),
         headers: headers,
         body: jsonEncode({
           'lat': lat,
@@ -757,7 +916,7 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/reports/confirm'),
+        await _uriAsync('/api/reports/confirm'),
         headers: headers,
         body: jsonEncode({'report_id': reportId}),
       );
@@ -781,7 +940,7 @@ class ApiClient {
       };
 
       final uri = Uri.parse(
-        '$baseUrl/api/safety',
+        '${await getBaseUrl()}/api/safety',
       ).replace(queryParameters: {'lat': '$lat', 'lon': '$lon'});
       final resp = await http.get(uri, headers: headers);
 
@@ -823,7 +982,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final uri = Uri.parse('$baseUrl/api/safe-spots/flutter').replace(
+      final uri = Uri.parse('${await getBaseUrl()}/api/safe-spots/flutter').replace(
         queryParameters: {
           'lat': '$lat',
           'lon': '$lon',
@@ -852,7 +1011,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(_uri('/api/report-types'), headers: headers);
+      final resp = await http.get(await _uriAsync('/api/report-types'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch report types');
@@ -880,7 +1039,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(_uri('/api/history'), headers: headers);
+      final resp = await http.get(await _uriAsync('/api/history'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch route history');
@@ -908,7 +1067,7 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/history/clear'),
+        await _uriAsync('/api/history/clear'),
         headers: headers,
       );
 
@@ -935,7 +1094,7 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/auth/change-password'),
+        await _uriAsync('/api/auth/change-password'),
         headers: headers,
         body: jsonEncode({
           'current_password': currentPassword,
@@ -968,7 +1127,7 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/auth/change-email'),
+        await _uriAsync('/api/auth/change-email'),
         headers: headers,
         body: jsonEncode({
           'current_password': currentPassword,
@@ -1000,7 +1159,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(_uri('/api/sos/contacts'), headers: headers);
+      final resp = await http.get(await _uriAsync('/api/sos/contacts'), headers: headers);
 
       // 401 = session not established yet — not an error, just not logged in
       if (resp.statusCode == 401) return [];
@@ -1033,7 +1192,7 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/sos/contacts'),
+        await _uriAsync('/api/sos/contacts'),
         headers: headers,
         body: jsonEncode({
           'name': name,
@@ -1064,7 +1223,7 @@ class ApiClient {
       };
 
       final resp = await http.delete(
-        _uri('/api/sos/contacts/$contactId'),
+        await _uriAsync('/api/sos/contacts/$contactId'),
         headers: headers,
       );
 
@@ -1093,7 +1252,7 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/sos'),
+        await _uriAsync('/api/sos'),
         headers: headers,
         body: jsonEncode({
           'lat': lat,
@@ -1131,7 +1290,7 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/user/survey'),
+        await _uriAsync('/api/user/survey'),
         headers: headers,
         body: jsonEncode({
           'commuterTypes': commuterTypes,
@@ -1158,7 +1317,7 @@ class ApiClient {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.get(_uri('/api/settings'), headers: headers);
+      final resp = await http.get(await _uriAsync('/api/settings'), headers: headers);
 
       if (resp.statusCode != 200) {
         throw Exception('Failed to fetch settings');
@@ -1198,7 +1357,7 @@ class ApiClient {
       };
 
       final resp = await http.post(
-        _uri('/api/settings'),
+        await _uriAsync('/api/settings'),
         headers: headers,
         body: jsonEncode(body),
       );
@@ -1223,7 +1382,7 @@ class ApiClient {
     String? token,
   }) async {
     final uri = Uri.parse(
-      '$baseUrl/api/reverse',
+      '${await getBaseUrl()}/api/reverse',
     ).replace(queryParameters: {'lat': '$lat', 'lon': '$lon'});
     final resp = await http
         .get(uri, headers: _headers(token))
@@ -1240,7 +1399,7 @@ class ApiClient {
     String? token,
   }) async {
     final uri = Uri.parse(
-      '$baseUrl/api/suggest',
+      '${await getBaseUrl()}/api/suggest',
     ).replace(queryParameters: {'q': query});
     final resp = await http
         .get(uri, headers: _headers(token))
@@ -1254,7 +1413,7 @@ class ApiClient {
   /// Returns { coding, closures, closures_count, mmda_banner }
   Future<Map<String, dynamic>> getMmda({String? token}) async {
     final resp = await http
-        .get(Uri.parse('$baseUrl/api/mmda'), headers: _headers(token))
+        .get(Uri.parse('${await getBaseUrl()}/api/mmda'), headers: _headers(token))
         .timeout(const Duration(seconds: 8));
     _checkStatus(resp);
     return jsonDecode(resp.body) as Map<String, dynamic>;
@@ -1280,7 +1439,7 @@ class ApiClient {
     if (query.trim().length < 3) return const [];
     try {
       final resp = await http
-          .get(_uri('/api/suggest?q=${Uri.encodeComponent(query.trim())}'))
+          .get(await _uriAsync('/api/suggest?q=${Uri.encodeComponent(query.trim())}'))
           .timeout(const Duration(seconds: 6));
       if (resp.statusCode != 200) return const [];
       final decoded = jsonDecode(resp.body);
@@ -1312,7 +1471,7 @@ class ApiClient {
   }) async {
     try {
       final resp = await http
-          .get(_uri('/api/nearby?lat=$lat&lon=$lon&radius=$radius'))
+          .get(await _uriAsync('/api/nearby?lat=$lat&lon=$lon&radius=$radius'))
           .timeout(const Duration(seconds: 6));
       if (resp.statusCode != 200) return const [];
       final decoded = jsonDecode(resp.body);
@@ -1332,7 +1491,8 @@ class ApiClient {
     String? token,
   }) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/community/weather').replace(
+      final base = await getBaseUrl();
+      final uri = Uri.parse('$base/api/community/weather').replace(
         queryParameters: {'lat': lat.toString(), 'lon': lon.toString()},
       );
       final resp = await http
@@ -1352,11 +1512,12 @@ class ApiClient {
   /// Falls back to empty list on any error.
   Future<List<Map<String, dynamic>>> getOfficialNews({String? token}) async {
     try {
+      final base = await getBaseUrl();
       final resp = await http
           .get(
-            Uri.parse('$baseUrl/api/community/news'),
-            headers: _headers(token),
-          )
+        Uri.parse('$base/api/community/news'),
+        headers: _headers(token),
+      )
           .timeout(const Duration(seconds: 10));
       if (resp.statusCode != 200) return const [];
       final decoded = jsonDecode(resp.body);
@@ -1380,9 +1541,8 @@ class ApiClient {
     try {
       final qp = <String, String>{};
       if (since != null && since > 0) qp['since'] = since.toStringAsFixed(3);
-      final uri = Uri.parse(
-        '$baseUrl/api/notifications',
-      ).replace(queryParameters: qp.isEmpty ? null : qp);
+      final base = await getBaseUrl();
+      final uri = Uri.parse('$base/api/notifications').replace(queryParameters: qp.isEmpty ? null : qp);
       final resp = await http
           .get(uri, headers: _headers(token))
           .timeout(const Duration(seconds: 10));

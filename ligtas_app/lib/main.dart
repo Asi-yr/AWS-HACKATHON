@@ -6,14 +6,19 @@ import 'core/app_router.dart';
 import 'core/app_colors.dart';
 import 'core/app_tab_controller.dart';
 import 'core/session_manager.dart';
+import 'core/api_client.dart';
 import 'screens/explore/explore_view.dart';
 import 'screens/explore/explore_controller.dart';
 import 'screens/community/community_view.dart';
 import 'screens/profile/profile_view.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+  // Pre-discover the Flask backend before the first screen renders.
+  // This runs the /ping scan in the background so login is instant.
+  ApiClient.getBaseUrl();
 
   runApp(
     MultiProvider(
