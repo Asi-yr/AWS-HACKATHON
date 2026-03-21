@@ -646,6 +646,84 @@ def _parse_jeepney(path):
     print(f"[DEBUG][{fn}] TOTAL PARSE TIME={time.time()-t_start:.3f}s")
     print(f"[DEBUG][{fn}] ──────────────────────────────────────────────────────────")
 
+# OSRM canonical polyline cache and helper
+_OSRM_ROUTE_CACHE = {}        # rid -> {'ts': epoch, 'poly': [[lat,lon],...], 'dist': meters}
+_OSRM_ROUTE_TTL = 60.0        # seconds to keep canonical polyline cached
+
+def _fetch_osrm_driving_polyline(start_lon, start_lat, end_lon, end_lat, timeout=12, max_retries=2):
+    """
+    Fetch OSRM driving polyline (geojson coords) between two points.
+    Returns (coords_list_as_[lat,lon], distance_m) or (None, 0.0) on failure.
+    """
+    fn = "_fetch_osrm_driving_polyline"
+    for attempt in range(1, max_retries + 1):
+        try:
+            url = (f"https://router.project-osrm.org/route/v1/driving/"
+                   f"{start_lon},{start_lat};{end_lon},{end_lat}"
+                   f"?overview=full&geometries=geojson&alternatives=false")
+            _dbg(fn, f"Attempt {attempt} OSRM driving {start_lat:.6f},{start_lon:.6f} → {end_lat:.6f},{end_lon:.6f}")
+            t_req = time.time()
+            r = requests.get(url, timeout=timeout, headers={'User-Agent': 'SafeRouteAI/1.0'})
+            _dbg(fn, f"HTTP {r.status_code} in {time.time()-t_req:.3f}s")
+            r.raise_for_status()
+            data = r.json()
+            if data.get('code') == 'Ok' and data.get('routes'):
+                rt = data['routes'][0]
+                coords = [[pt[1], pt[0]] for pt in rt['geometry']['coordinates']]
+                dist = rt.get('distance', 0.0)
+                _dbg(fn, f"OSRM OK pts={len(coords)} dist={int(dist)}")
+                return coords, dist
+            _dbg(fn, f"OSRM bad response code={data.get('code')}")
+        except Exception as e:
+            _dbg(fn, f"OSRM exception attempt {attempt}: {e}")
+        # small backoff
+        time.sleep(0.6 * attempt)
+    _dbg(fn, "OSRM all attempts failed")
+    return None, 0.0
+
+def _get_canonical_route_polyline(rid, force_refresh=False, samples_min=40):
+    """
+    Return the canonical road polyline for a jeepney route (list of [lat,lon]).
+    Strategy:
+      - If cached and fresh, return cached polyline.
+      - Otherwise, call OSRM driving from route start -> destination to get road polyline.
+      - If OSRM fails, fall back to sampled straight-line polyline (but log strongly).
+    The canonical polyline is stored in _OSRM_ROUTE_CACHE[rid].
+    """
+    fn = "_get_canonical_route_polyline"
+    now = time.time()
+    cached = _OSRM_ROUTE_CACHE.get(rid)
+    if cached and not force_refresh and (now - cached['ts'] <= _OSRM_ROUTE_TTL):
+        _dbg(fn, f"Cache HIT rid={rid} age={now-cached['ts']:.1f}s pts={len(cached['poly'])}")
+        return cached['poly'], cached['dist']
+
+    route = _JEEPNEY_ROUTES.get(rid)
+    if not route:
+        _dbg(fn, f"Route {rid} not found")
+        return None, 0.0
+
+    s_lat, s_lon = route['start']['lat'], route['start']['lon']
+    d_lat, d_lon = route['destination']['lat'], route['destination']['lon']
+
+    # Try OSRM driving to get canonical road polyline
+    poly, dist = _fetch_osrm_driving_polyline(s_lon, s_lat, d_lon, d_lat, timeout=15, max_retries=3)
+    if poly and len(poly) >= 2:
+        _OSRM_ROUTE_CACHE[rid] = {'ts': now, 'poly': poly, 'dist': dist}
+        _dbg(fn, f"Cached OSRM canonical poly rid={rid} pts={len(poly)} dist={int(dist)}")
+        return poly, dist
+
+    # OSRM failed: fallback to sampled straight-line polyline (last resort)
+    _dbg(fn, f"OSRM failed for rid={rid} — falling back to sampled straight line (not ideal)")
+    sampled = []
+    samples = max(samples_min, 40)
+    for i in range(samples + 1):
+        t = i / float(samples)
+        lat = s_lat + t * (d_lat - s_lat)
+        lon = s_lon + t * (d_lon - s_lon)
+        sampled.append([lat, lon])
+    dist = _poly_dist(sampled)
+    _OSRM_ROUTE_CACHE[rid] = {'ts': now, 'poly': sampled, 'dist': dist}
+    return sampled, dist
 
 def _build_jeepney_spatial():
     """
@@ -825,14 +903,14 @@ def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=6):
 #  JEEPNEY LEG BUILDER  (OSM / OSRM called HERE — after candidate selection)
 # ════════════════════════════════════════════════════════════════════════════════
 
-def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, samples=80, use_osrm=False):
+def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, use_osrm_canonical=True, samples=80):
     """
-    Build a jeepney leg by sampling the canonical route line (start->destination),
-    projecting board/alight onto that line, slicing the sampled polyline between
-    those projections, and returning the clipped polyline.
-
-    use_osrm: if True, OSRM is used only as a sanity check and will NOT replace
-              the canonical polyline unless it is very close.
+    Build a jeepney leg by:
+      1) obtaining the canonical road polyline for the route (OSRM driving),
+      2) projecting board/alight onto that polyline (closest point along polyline),
+      3) slicing the polyline between those projected positions,
+      4) returning the clipped road polyline (road-accurate, not straight-line).
+    If OSRM canonical polyline is unavailable, falls back to sampled straight line.
     """
     fn = "_build_jeepney_leg"
     t_start = time.time()
@@ -844,44 +922,97 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, sample
         return None
 
     rname = route['route_transit']
-    s_lat, s_lon = route['start']['lat'], route['start']['lon']
-    d_lat, d_lon = route['destination']['lat'], route['destination']['lon']
 
-    # Build canonical sampled polyline along route start->destination
-    sampled = []
-    for i in range(samples + 1):
-        t = i / float(samples)
-        lat = s_lat + t * (d_lat - s_lat)
-        lon = s_lon + t * (d_lon - s_lon)
-        sampled.append([lat, lon])
+    # 1) Get canonical polyline (road geometry)
+    poly, canonical_dist = _get_canonical_route_polyline(rid)
+    if not poly or len(poly) < 2:
+        _dbg(fn, f"!! No canonical polyline for {rid}")
+        return None
 
-    # Project board and alight onto canonical line
-    tb, bplat, bplon, bdist = _proj_point_on_segment(board_lat, board_lon, s_lat, s_lon, d_lat, d_lon)
-    ta, aplat, aplon, adist = _proj_point_on_segment(alight_lat, alight_lon, s_lat, s_lon, d_lat, d_lon)
-    _dbg(fn, f"proj tb={tb:.4f} bdist={int(bdist)} ta={ta:.4f} adist={int(adist)}")
+    # Helper: compute cumulative distances along polyline and find closest projection
+    cum = [0.0]
+    for i in range(1, len(poly)):
+        cum.append(cum[-1] + _hav(poly[i-1][0], poly[i-1][1], poly[i][0], poly[i][1]))
 
-    # Defensive ordering: ensure ta >= tb
-    if ta < tb:
+    total_len = cum[-1] if cum else 0.0
+
+    def project_onto_poly(lat, lon):
+        # Find closest segment and project point onto that segment (linear interpolation)
+        best = (1e18, 0, 0.0, None)  # (dist_sq, seg_idx, t_on_seg, proj_point)
+        for i in range(len(poly) - 1):
+            a_lat, a_lon = poly[i]
+            b_lat, b_lon = poly[i+1]
+            # use _proj_point_on_segment but it expects A->B as alat,alon, blat,blon
+            t, plat, plon, dist = _proj_point_on_segment(lat, lon, a_lat, a_lon, b_lat, b_lon)
+            dsq = _dsq(plat, plon, lat, lon)
+            if dsq < best[0]:
+                best = (dsq, i, t, (plat, plon, dist))
+        # compute absolute distance along poly to projection point
+        seg_idx = best[1]
+        t_on = best[2]
+        proj_lat, proj_lon, proj_dist = best[3]
+        dist_along = cum[seg_idx] + t_on * (cum[seg_idx+1] - cum[seg_idx])
+        return dist_along, proj_lat, proj_lon, proj_dist
+
+    b_along, bplat, bplon, bdist = project_onto_poly(board_lat, board_lon)
+    a_along, aplat, aplon, adist = project_onto_poly(alight_lat, alight_lon)
+    _dbg(fn, f"proj_along board={b_along:.1f}m bdist={int(bdist)} alight={a_along:.1f}m adist={int(adist)} total_len={int(total_len)}m")
+
+    # Ensure ordering: alight must be after board; if not, swap
+    if a_along < b_along:
         _dbg(fn, "alight projection before board projection — swapping to preserve forward direction")
-        tb, ta = ta, tb
+        b_along, a_along = a_along, b_along
         bplat, aplat = aplat, bplat
         bplon, aplon = aplon, bplon
         bdist, adist = adist, bdist
 
-    # Convert t to sample indices and slice
-    idx_b = max(0, min(samples, int(round(tb * samples))))
-    idx_a = max(0, min(samples, int(round(ta * samples))))
-    if idx_a <= idx_b:
-        if idx_b < samples:
-            idx_a = idx_b + 1
+    # Convert along-distances to indices in poly and fractional positions
+    def along_to_index_frac(along):
+        if total_len <= 0:
+            return 0, 0.0
+        # find segment where cum[i] <= along <= cum[i+1]
+        for i in range(len(cum)-1):
+            if cum[i] <= along <= cum[i+1] + 1e-6:
+                seg_len = cum[i+1] - cum[i]
+                if seg_len <= 0:
+                    frac = 0.0
+                else:
+                    frac = (along - cum[i]) / seg_len
+                return i, frac
+        # if beyond end
+        return len(cum)-2, 1.0
+
+    idx_b, frac_b = along_to_index_frac(b_along)
+    idx_a, frac_a = along_to_index_frac(a_along)
+
+    # Build sliced polyline: include partial endpoints
+    sliced = []
+    # start point (interpolated)
+    a_lat, a_lon = poly[idx_b]
+    b_lat, b_lon = poly[idx_b+1]
+    start_lat = a_lat + frac_b * (b_lat - a_lat)
+    start_lon = a_lon + frac_b * (b_lon - a_lon)
+    sliced.append([start_lat, start_lon])
+
+    # include intermediate full vertices
+    for i in range(idx_b+1, idx_a+1):
+        sliced.append([poly[i][0], poly[i][1]])
+
+    # end point (interpolated) — if idx_a == idx_b, ensure we still include end
+    if idx_a >= idx_b:
+        c_lat, c_lon = poly[idx_a]
+        d_lat, d_lon = poly[idx_a+1]
+        end_lat = c_lat + frac_a * (d_lat - c_lat)
+        end_lon = c_lon + frac_a * (d_lon - c_lon)
+        # if last appended point equals end, replace; else append
+        if sliced and abs(sliced[-1][0] - end_lat) < 1e-9 and abs(sliced[-1][1] - end_lon) < 1e-9:
+            sliced[-1] = [end_lat, end_lon]
         else:
-            idx_b = max(0, idx_a - 1)
+            sliced.append([end_lat, end_lon])
 
-    sliced = sampled[idx_b: idx_a + 1]
-
-    # Replace endpoints with exact projected coordinates for accuracy
-    sliced[0] = [bplat, bplon]
-    sliced[-1] = [aplat, aplon]
+    # Ensure at least two points
+    if len(sliced) < 2:
+        sliced = [[bplat, bplon], [aplat, aplon]]
 
     # Compute ridden distance along sliced polyline
     dist_m = _poly_dist(sliced)
@@ -891,33 +1022,7 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, sample
     bname = parts[0].strip()
     aname = parts[-1].strip()
 
-    # Optionally run OSRM as a sanity check (does not replace canonical polyline unless close)
-    if use_osrm:
-        try:
-            url = (f"https://router.project-osrm.org/route/v1/driving/"
-                   f"{sliced[0][1]},{sliced[0][0]};{sliced[-1][1]},{sliced[-1][0]}?overview=full&geometries=geojson")
-            _dbg(fn, f"OSRM sanity check {url[:120]}...")
-            r = requests.get(url, timeout=10, headers={'User-Agent': 'SafeRouteAI/1.0'}).json()
-            if r.get('code') == 'Ok' and r.get('routes'):
-                osrm_dist = r['routes'][0].get('distance', 0.0)
-                if abs(osrm_dist - dist_m) / max(1.0, dist_m) < 0.30:
-                    coords = [[pt[1], pt[0]] for pt in r['routes'][0]['geometry']['coordinates']]
-                    _dbg(fn, f"OSRM close enough (osrm={osrm_dist:.0f}m canonical={dist_m:.0f}m) — using OSRM polyline")
-                    ridden_poly = coords
-                    dist_m = osrm_dist
-                else:
-                    _dbg(fn, f"OSRM differs too much — keeping canonical polyline")
-                    ridden_poly = [[pt[0], pt[1]] for pt in sliced]
-            else:
-                _dbg(fn, "OSRM returned no routes — keeping canonical")
-                ridden_poly = [[pt[0], pt[1]] for pt in sliced]
-        except Exception as e:
-            _dbg(fn, f"OSRM exception: {e} — keeping canonical")
-            ridden_poly = [[pt[0], pt[1]] for pt in sliced]
-    else:
-        ridden_poly = [[pt[0], pt[1]] for pt in sliced]
-
-    _dbg(fn, f"Built leg pts={len(ridden_poly)} dist={dist_m:.0f} fare={fare['label']} elapsed={time.time()-t_start:.3f}s")
+    _dbg(fn, f"Built road-clipped leg pts={len(sliced)} dist={dist_m:.0f} fare={fare['label']} elapsed={time.time()-t_start:.3f}s")
 
     return {
         'route_id'    : rid,
@@ -925,7 +1030,7 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, sample
         'rtype'       : 'PUJ',
         'board'       : {'name': bname, 'lat': board_lat,  'lon': board_lon},
         'alight'      : {'name': aname, 'lat': alight_lat, 'lon': alight_lon},
-        'ridden_poly' : ridden_poly,
+        'ridden_poly' : sliced,
         'ridden_stops': [
             {'name': bname, 'lat': board_lat,  'lon': board_lon},
             {'name': aname, 'lat': alight_lat, 'lon': alight_lon},
