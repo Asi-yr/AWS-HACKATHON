@@ -491,6 +491,82 @@ _JALIGHT_LIM = 1200             # max walk from alight point to user destination
 _JXFER_LIM   = 800              # max walk for a jeepney→jeepney transfer (was 600)
 _JXFER_PEN   = 300              # transfer penalty (added to candidate score)
 
+_OSRM_HDRS = {'User-Agent': 'SafeRouteAI/1.0'}
+_OSRM_ROUTE_CACHE = {}   # key -> (coords, dist_m, dur_s)
+_OSRM_FOOT_CACHE  = {}   # key -> (coords, dist_m, dur_s)
+
+def _dsq(la1, lo1, la2, lo2):
+    return (la1 - la2) ** 2 + (lo1 - lo2) ** 2
+
+def _closest_idx(poly, lat, lon):
+    if not poly:
+        return 0
+    return min(range(len(poly)), key=lambda i: _dsq(poly[i][0], poly[i][1], lat, lon))
+
+def _snip_poly(poly, i0, i1):
+    if not poly:
+        return []
+    if i0 == i1:
+        return [poly[i0]]
+    if i0 < i1:
+        return poly[i0:i1+1]
+    return list(reversed(poly[i1:i0+1]))
+
+def _round_key(*vals, p=5):
+    return tuple(round(v, p) for v in vals)
+
+def _osrm_route_via(points_latlon, profile="driving", timeout=15):
+    """
+    points_latlon: [[lat,lon], ...] (must be >= 2)
+    Returns (coords_latlon, dist_m, dur_s) or None
+    """
+    if not points_latlon or len(points_latlon) < 2:
+        return None
+
+    # Cache key: profile + first/last + count + coarse hash
+    key = (profile, len(points_latlon),
+           _round_key(points_latlon[0][0], points_latlon[0][1], p=5),
+           _round_key(points_latlon[-1][0], points_latlon[-1][1], p=5))
+    if key in _OSRM_ROUTE_CACHE:
+        return _OSRM_ROUTE_CACHE[key]
+
+    coords = ";".join(f"{lon},{lat}" for lat, lon in points_latlon)
+    url = f"https://router.project-osrm.org/route/v1/{profile}/{coords}?overview=full&geometries=geojson"
+
+    try:
+        r = requests.get(url, headers=_OSRM_HDRS, timeout=timeout)
+        r.raise_for_status()
+        js = r.json()
+        if js.get("code") != "Ok" or not js.get("routes"):
+            return None
+        rt = js["routes"][0]
+        out_coords = [[pt[1], pt[0]] for pt in rt["geometry"]["coordinates"]]
+        out = (out_coords, float(rt["distance"]), float(rt["duration"]))
+        _OSRM_ROUTE_CACHE[key] = out
+        return out
+    except Exception:
+        return None
+
+def _osrm_foot(a_lat, a_lon, b_lat, b_lon, timeout=10):
+    key = ("foot", _round_key(a_lat, a_lon, p=5), _round_key(b_lat, b_lon, p=5))
+    if key in _OSRM_FOOT_CACHE:
+        return _OSRM_FOOT_CACHE[key]
+
+    url = (f"https://router.project-osrm.org/route/v1/foot/"
+           f"{a_lon},{a_lat};{b_lon},{b_lat}?overview=full&geometries=geojson")
+    try:
+        r = requests.get(url, headers=_OSRM_HDRS, timeout=timeout)
+        r.raise_for_status()
+        js = r.json()
+        if js.get("code") != "Ok" or not js.get("routes"):
+            return None
+        rt = js["routes"][0]
+        coords = [[pt[1], pt[0]] for pt in rt["geometry"]["coordinates"]]
+        out = (coords, float(rt["distance"]), float(rt["duration"]))
+        _OSRM_FOOT_CACHE[key] = out
+        return out
+    except Exception:
+        return None
 
 def _find_file(*names):
     fn = "_find_file"
@@ -560,91 +636,94 @@ def _load_jeepney():
     print(f"[DEBUG][{fn}] TOTAL INIT TIME={time.time()-t_start:.3f}s")
     print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
 
-
 def _parse_jeepney(path):
-    """
-    Parse jeepney.json into _JEEPNEY_ROUTES.
-    Each route gets a synthetic PUJ_NNN route_id.
-    Route dict includes a 2-stop list (start & destination) for compatibility
-    with _assemble_route / calc_sakay_fare.
-    Multithreaded: all route objects are built in parallel.
-    """
-    fn = "_parse_jeepney"
-    t_start = time.time()
-    print(f"[DEBUG][{fn}] ── START ────────────────────────────────────────────────")
-    print(f"[DEBUG][{fn}] CALL: _parse_jeepney('{path}')")
+    global _JEEPNEY_ROUTES
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
 
-    # STEP 1 — read JSON
-    print(f"[DEBUG][{fn}] STEP 1 · Reading JSON from disk...")
-    t1 = time.time()
-    try:
-        with open(path, encoding='utf-8') as f:
-            data = json.load(f)
-        raw_routes = data.get('routes', [])
-        print(f"[DEBUG][{fn}] STEP 1 · Loaded  raw_routes={len(raw_routes)}  elapsed={time.time()-t1:.3f}s")
-    except Exception as e:
-        print(f"[DEBUG][{fn}] STEP 1 · !! JSON read error: {e}")
-        return
+    raw_routes = data.get("routes", [])
+    routes = {}
 
-    # STEP 2 — build route dicts in parallel
-    def build_route_obj(idx_and_raw):
-        idx, raw = idx_and_raw
-        name = raw.get('route_transit', f'Route_{idx}')
-        s    = raw.get('start', {})
-        d    = raw.get('destination', {})
-        slat, slon = s.get('lat'), s.get('lon')
-        dlat, dlon = d.get('lat'), d.get('lon')
-
+    def build(idx_raw):
+        idx, raw = idx_raw
+        name = raw.get("route_transit", f"Route_{idx}")
+        s = raw.get("start", {})
+        d = raw.get("destination", {})
+        slat, slon = s.get("lat"), s.get("lon")
+        dlat, dlon = d.get("lat"), d.get("lon")
         if None in (slat, slon, dlat, dlon):
-            return None, f"idx={idx} name='{name}' missing lat/lon"
+            return None
 
-        slat, slon, dlat, dlon = float(slat), float(slon), float(dlat), float(dlon)
-        rid   = f"PUJ_{idx:03d}"
-        parts = name.split(' - ', 1)
+        rid = f"PUJ_{idx:03d}"
+        parts = name.split(" - ", 1)
         bname = parts[0].strip()
         aname = parts[-1].strip()
 
+        shape = raw.get("shape") or []
+        shape_latlon = []
+        for p in shape:
+            try:
+                shape_latlon.append([float(p["lat"]), float(p["lon"])])
+            except Exception:
+                pass
+
         route = {
-            'route_id'        : rid,
-            'route_transit'   : name,
-            'route_long_name' : name,
-            'route_type'      : 3,
-            'route_color'     : '#e67e22',
-            'agency_id'       : 'LTFRB',
-            'shape_id'        : None,
-            'start'           : {'lat': slat, 'lon': slon},
-            'destination'     : {'lat': dlat, 'lon': dlon},
-            # Minimal 2-stop list for compatibility with helpers that iterate stops
-            'stops': [
-                {'stop_id': f'{rid}_S', 'name': bname, 'lat': slat, 'lon': slon, 'seq': 0},
-                {'stop_id': f'{rid}_D', 'name': aname, 'lat': dlat, 'lon': dlon, 'seq': 1},
+            "route_id": rid,
+            "route_transit": name,
+            "route_long_name": name,
+            "route_type": 3,
+            "route_color": "#e67e22",
+            "agency_id": "LTFRB",
+            "start": {"lat": float(slat), "lon": float(slon), "name": bname},
+            "destination": {"lat": float(dlat), "lon": float(dlon), "name": aname},
+            "stops": [
+                {"stop_id": f"{rid}_S", "name": bname, "lat": float(slat), "lon": float(slon), "seq": 0},
+                {"stop_id": f"{rid}_D", "name": aname, "lat": float(dlat), "lon": float(dlon), "seq": 1},
             ],
+            "shape_raw": shape_latlon,   # fixed jeepney path (input)
+            "shape_road": None,          # road-following polyline (computed)
+            "shape_dist_m": None,
+            "shape_dur_s": None,
         }
-        return route, None
+        return route
 
-    print(f"[DEBUG][{fn}] STEP 2 · Spawning ThreadPoolExecutor for {len(raw_routes)} route objects...")
-    t2 = time.time()
-    workers = min(32, max(1, len(raw_routes)))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-        results = list(ex.map(build_route_obj, enumerate(raw_routes)))
-    print(f"[DEBUG][{fn}] STEP 2 · ThreadPool done  elapsed={time.time()-t2:.3f}s")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        built = list(ex.map(build, enumerate(raw_routes)))
 
-    # STEP 3 — merge results
-    t3 = time.time()
-    valid = skipped = 0
-    for route, err in results:
-        if err:
-            print(f"[DEBUG][{fn}]   SKIP: {err}")
-            skipped += 1
-        elif route:
-            rid = route['route_id']
-            _JEEPNEY_ROUTES[rid] = route
-            _JEEPNEY_PUJ.append(rid)
-            valid += 1
+    for r in built:
+        if r:
+            routes[r["route_id"]] = r
 
-    print(f"[DEBUG][{fn}] STEP 3 · Merged  valid={valid}  skipped={skipped}  elapsed={time.time()-t3:.3f}s")
-    print(f"[DEBUG][{fn}] TOTAL PARSE TIME={time.time()-t_start:.3f}s")
-    print(f"[DEBUG][{fn}] ──────────────────────────────────────────────────────────")
+    _JEEPNEY_ROUTES = routes
+
+def _ensure_jeepney_shape_road(route, max_via=60):
+    """
+    Convert fixed shape into a road-following polyline once.
+    If shape_raw missing, we cannot guarantee fixed routing.
+    """
+    if route.get("shape_road"):
+        return True
+
+    raw = route.get("shape_raw") or []
+    if len(raw) < 2:
+        return False
+
+    # Downsample to avoid OSRM URL too long
+    if len(raw) > max_via:
+        step = max(1, len(raw) // max_via)
+        raw = raw[::step]
+        if raw[-1] != route["shape_raw"][-1]:
+            raw.append(route["shape_raw"][-1])
+
+    res = _osrm_route_via(raw, profile="driving", timeout=20)
+    if not res:
+        return False
+
+    coords, dist_m, dur_s = res
+    route["shape_road"] = coords
+    route["shape_dist_m"] = dist_m
+    route["shape_dur_s"] = dur_s
+    return True
 
 # OSRM canonical polyline cache and helper
 _OSRM_ROUTE_CACHE = {}        # rid -> {'ts': epoch, 'poly': [[lat,lon],...], 'dist': meters}
