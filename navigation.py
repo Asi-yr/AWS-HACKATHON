@@ -496,14 +496,6 @@ _OSRM_HDRS = {'User-Agent': 'SafeRouteAI/1.0'}
 _OSRM_ROUTE_CACHE = {}   # key -> (coords, dist_m, dur_s)
 _OSRM_FOOT_CACHE  = {}   # key -> (coords, dist_m, dur_s)
 
-def _dsq(la1, lo1, la2, lo2):
-    return (la1 - la2) ** 2 + (lo1 - lo2) ** 2
-
-def _closest_idx(poly, lat, lon):
-    if not poly:
-        return 0
-    return min(range(len(poly)), key=lambda i: _dsq(poly[i][0], poly[i][1], lat, lon))
-
 def _snip_poly(poly, i0, i1):
     if not poly:
         return []
@@ -694,6 +686,7 @@ def _parse_jeepney(path):
     for r in built:
         if r:
             routes[r["route_id"]] = r
+            _JEEPNEY_PUJ.append(r["route_id"])   # ← was never populated before
 
     _JEEPNEY_ROUTES = routes
 
@@ -726,13 +719,7 @@ def _ensure_jeepney_shape_road(route, max_via=60):
     route["shape_dur_s"] = dur_s
     return True
 
-# OSRM canonical polyline cache and helper
-_OSRM_ROUTE_CACHE = {}        # rid -> {'ts': epoch, 'poly': [[lat,lon],...], 'dist': meters}
-_OSRM_ROUTE_TTL = 60.0        # seconds to keep canonical polyline cached
-
-# OSRM canonical polyline cache and helper
-_OSRM_ROUTE_CACHE = {}        # rid -> {'ts': epoch, 'poly': [[lat,lon],...], 'dist': meters}
-_OSRM_ROUTE_TTL = 60.0        # seconds to keep canonical polyline cached
+# (canonical polyline cache defined above near _osrm_route_via)
 
 def _fetch_osrm_driving_polyline(start_lon, start_lat, end_lon, end_lat, timeout=12, max_retries=2):
     fn = "_fetch_osrm_driving_polyline"
@@ -826,13 +813,24 @@ def _build_jeepney_spatial():
         # destination
         cells.append(((int(dl / _JEEPNEY_CELL), int(dn / _JEEPNEY_CELL)),
                        (rid, 'dest', dl, dn)))
-        # intermediate sample points (pure linear interpolation — zero network I/O)
-        for i in range(1, _JEEPNEY_SAMPLES + 1):
-            t = i / (_JEEPNEY_SAMPLES + 1)
-            ml = sl + t * (dl - sl)
-            mn = sn + t * (dn - sn)
-            cells.append(((int(ml / _JEEPNEY_CELL), int(mn / _JEEPNEY_CELL)),
-                           (rid, f'mid_{i}', ml, mn)))
+
+        # Use actual shape_raw points if available (much more accurate than linear interp)
+        shape_raw = route.get('shape_raw') or []
+        if shape_raw and len(shape_raw) >= 2:
+            # Sample up to _JEEPNEY_SAMPLES * 3 shape points (skip start/end already added)
+            inner = shape_raw[1:-1]
+            step = max(1, len(inner) // (_JEEPNEY_SAMPLES * 3))
+            for i, pt in enumerate(inner[::step]):
+                cells.append(((int(pt[0] / _JEEPNEY_CELL), int(pt[1] / _JEEPNEY_CELL)),
+                               (rid, f'shape_{i}', pt[0], pt[1])))
+        else:
+            # Fallback: linear interpolation if no shape
+            for i in range(1, _JEEPNEY_SAMPLES + 1):
+                t = i / (_JEEPNEY_SAMPLES + 1)
+                ml = sl + t * (dl - sl)
+                mn = sn + t * (dn - sn)
+                cells.append(((int(ml / _JEEPNEY_CELL), int(mn / _JEEPNEY_CELL)),
+                               (rid, f'mid_{i}', ml, mn)))
         return cells
 
     workers = min(32, max(1, len(_JEEPNEY_ROUTES)))
@@ -960,7 +958,9 @@ def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=6):
 def _build_jeepney_shape_once(rid):
     """
     Build and cache the canonical jeepney road polyline ONCE.
-    This is NOT per-user routing.
+    Uses shape_raw waypoints from jeepney.json to produce a road-following
+    polyline via OSRM, ensuring the route stays on the jeepney's actual path.
+    Falls back to raw shape points if OSRM is unavailable.
     """
     if rid in _JEEPNEY_SHAPE_CACHE:
         return _JEEPNEY_SHAPE_CACHE[rid]['poly']
@@ -969,34 +969,67 @@ def _build_jeepney_shape_once(rid):
     if not route:
         return None
 
+    shape_raw = route.get('shape_raw') or []
+
+    if len(shape_raw) >= 2:
+        # Downsample waypoints if too many (OSRM URL length limit)
+        waypoints = shape_raw
+        if len(waypoints) > 60:
+            step = max(1, len(waypoints) // 60)
+            waypoints = waypoints[::step]
+            # Always include the last point so we reach the destination
+            if waypoints[-1] != shape_raw[-1]:
+                waypoints.append(shape_raw[-1])
+
+        coords_str = ";".join(f"{pt[1]},{pt[0]}" for pt in waypoints)
+        url = (f"https://router.project-osrm.org/route/v1/driving/{coords_str}"
+               f"?overview=full&geometries=geojson")
+        try:
+            r = requests.get(url, timeout=20, headers={'User-Agent': 'SafeRouteAI/1.0'})
+            r.raise_for_status()
+            js = r.json()
+            if js.get('code') == 'Ok' and js.get('routes'):
+                coords = [[pt[1], pt[0]] for pt in js['routes'][0]['geometry']['coordinates']]
+                dist   = js['routes'][0]['distance']
+                _JEEPNEY_SHAPE_CACHE[rid] = {'poly': coords, 'dist': dist}
+                _dbg("_build_jeepney_shape_once",
+                     f"OSRM via-shape OK rid={rid} pts={len(coords)} dist={int(dist)}")
+                return coords
+        except Exception as e:
+            _dbg("_build_jeepney_shape_once", f"OSRM failed rid={rid}: {e}")
+
+        # Fallback: use the raw shape points directly (still follows the road better
+        # than a naive start→end OSRM route)
+        _JEEPNEY_SHAPE_CACHE[rid] = {'poly': shape_raw, 'dist': _poly_dist(shape_raw)}
+        _dbg("_build_jeepney_shape_once", f"Using raw shape fallback rid={rid} pts={len(shape_raw)}")
+        return shape_raw
+
+    # No shape data: fall back to start→destination OSRM
     s = route['start']
     d = route['destination']
-
-    url = (
-        f"https://router.project-osrm.org/route/v1/driving/"
-        f"{s['lon']},{s['lat']};{d['lon']},{d['lat']}"
-        f"?overview=full&geometries=geojson"
-    )
-
+    url = (f"https://router.project-osrm.org/route/v1/driving/"
+           f"{s['lon']},{s['lat']};{d['lon']},{d['lat']}"
+           f"?overview=full&geometries=geojson")
     try:
         r = requests.get(url, timeout=20, headers={'User-Agent': 'SafeRouteAI/1.0'})
         r.raise_for_status()
         js = r.json()
-        if js.get('code') != 'Ok':
-            return None
-
-        coords = [[pt[1], pt[0]] for pt in js['routes'][0]['geometry']['coordinates']]
-        dist   = js['routes'][0]['distance']
-
-        _JEEPNEY_SHAPE_CACHE[rid] = {
-            'poly': coords,
-            'dist': dist
-        }
-        return coords
+        if js.get('code') == 'Ok' and js.get('routes'):
+            coords = [[pt[1], pt[0]] for pt in js['routes'][0]['geometry']['coordinates']]
+            dist   = js['routes'][0]['distance']
+            _JEEPNEY_SHAPE_CACHE[rid] = {'poly': coords, 'dist': dist}
+            return coords
     except Exception:
-        return None
+        pass
+    return None
 
 def _build_jeepney_leg(rid, orig_lat, orig_lon, dest_lat, dest_lon):
+    """
+    Build a single jeepney leg, snipping the canonical shape polyline
+    precisely at the closest points to orig and dest.
+    Uses segment projection so the snip lands on the road rather than
+    jumping to the nearest vertex.
+    """
     route = _JEEPNEY_ROUTES.get(rid)
     if not route:
         return None
@@ -1005,17 +1038,43 @@ def _build_jeepney_leg(rid, orig_lat, orig_lon, dest_lat, dest_lon):
     if not poly or len(poly) < 2:
         return None
 
-    # snap user points to shape
-    i_board  = _closest_idx(poly, orig_lat, orig_lon)
-    i_alight = _closest_idx(poly, dest_lat, dest_lon)
+    # --- Snap user points to nearest segment of the shape poly ---
+    def snap_to_poly(lat, lon):
+        best_t, best_idx, best_lat, best_lon, best_d = 0.0, 0, poly[0][0], poly[0][1], float('inf')
+        for i in range(len(poly) - 1):
+            t, plat, plon, d = _proj_point_on_segment(
+                lat, lon,
+                poly[i][0], poly[i][1],
+                poly[i+1][0], poly[i+1][1]
+            )
+            if d < best_d:
+                best_d = d
+                best_t = t
+                best_idx = i if t < 1.0 else i + 1
+                best_lat, best_lon = plat, plon
+        # If the projection lands exactly between two vertices, insert the proj pt
+        return best_idx, best_lat, best_lon
 
-    if i_board == i_alight:
+    i_board,  blat, blon = snap_to_poly(orig_lat, orig_lon)
+    i_alight, alat, alon = snap_to_poly(dest_lat, dest_lon)
+
+    if i_board == i_alight and abs(blat - alat) < 1e-6 and abs(blon - alon) < 1e-6:
         return None
 
-    if i_board < i_alight:
-        ridden = poly[i_board:i_alight+1]
+    # Build ridden segment: snip poly and prepend/append exact snap points
+    if i_board <= i_alight:
+        ridden = [[blat, blon]] + poly[i_board + 1:i_alight + 1]
+        if [alat, alon] not in ridden:
+            ridden.append([alat, alon])
     else:
-        ridden = list(reversed(poly[i_alight:i_board+1]))
+        # Route runs in reverse on this poly — reverse so ride goes forward
+        ridden = [[alat, alon]] + poly[i_alight + 1:i_board + 1]
+        if [blat, blon] not in ridden:
+            ridden.append([blat, blon])
+        ridden = list(reversed(ridden))
+
+    if len(ridden) < 2:
+        return None
 
     dist_m = _poly_dist(ridden)
     fare   = calc_sakay_fare(rid, dist_m)
@@ -1025,19 +1084,19 @@ def _build_jeepney_leg(rid, orig_lat, orig_lon, dest_lat, dest_lon):
     aname = parts[-1].strip()
 
     return {
-        'route_id': rid,
-        'route_name': route['route_transit'],
-        'rtype': 'PUJ',
-        'board':  {'name': bname, 'lat': ridden[0][0],  'lon': ridden[0][1]},
-        'alight': {'name': aname, 'lat': ridden[-1][0], 'lon': ridden[-1][1]},
+        'route_id':    rid,
+        'route_name':  route['route_transit'],
+        'rtype':       'PUJ',
+        'board':       {'name': bname, 'lat': ridden[0][0],  'lon': ridden[0][1]},
+        'alight':      {'name': aname, 'lat': ridden[-1][0], 'lon': ridden[-1][1]},
         'ridden_poly': ridden,
         'ridden_stops': [
             {'name': bname, 'lat': ridden[0][0],  'lon': ridden[0][1]},
             {'name': aname, 'lat': ridden[-1][0], 'lon': ridden[-1][1]},
         ],
-        'dist_m': dist_m,
-        'fare': fare,
-        'color': '#e67e22',
+        'dist_m':   dist_m,
+        'fare':     fare,
+        'color':    '#e67e22',
         'seg_type': 'jeepney',
     }
     
@@ -1129,6 +1188,14 @@ def _find_jeepney_chain(orig_lat, orig_lon, dest_lat, dest_lon, max_hops=3):
     return None
 
 def _build_jeepney_chain_legs(chain, orig_lat, orig_lon, dest_lat, dest_lon):
+    """
+    Build legs for a multi-hop jeepney chain.
+    Each leg is snipped correctly:
+      - Leg 0  board: closest point on shape to user origin
+      - Leg i>0 board: closest point on shape to previous leg's alight position
+      - Last leg alight: closest point on shape to user destination
+      - Mid-leg alight: where this route is closest to the next route's shape
+    """
     legs = []
 
     for i, rid in enumerate(chain):
@@ -1136,18 +1203,41 @@ def _build_jeepney_chain_legs(chain, orig_lat, orig_lon, dest_lat, dest_lon):
         if not poly:
             return None
 
+        # ── Determine board index ────────────────────────────────────────────
         if i == 0:
-            i0 = _closest_idx(poly, orig_lat, orig_lon)
+            board_lat, board_lon = orig_lat, orig_lon
         else:
-            prev_poly = _build_jeepney_shape_once(chain[i-1])
-            i0 = _closest_idx(poly, prev_poly[-1][0], prev_poly[-1][1])
+            # Use the actual alight position of the previous leg
+            prev_alight = legs[-1]['alight']
+            board_lat, board_lon = prev_alight['lat'], prev_alight['lon']
 
+        i0 = _closest_idx(poly, board_lat, board_lon)
+
+        # ── Determine alight index ───────────────────────────────────────────
         if i == len(chain) - 1:
-            i1 = _closest_idx(poly, dest_lat, dest_lon)
+            alight_lat, alight_lon = dest_lat, dest_lon
         else:
-            next_poly = _build_jeepney_shape_once(chain[i+1])
-            i1 = _closest_idx(poly, next_poly[0][0], next_poly[0][1])
+            # Find where this route is closest to the next route's shape
+            next_poly = _build_jeepney_shape_once(chain[i + 1])
+            if not next_poly:
+                return None
+            # Find the pair of points (one on each poly) with minimum distance
+            best_d = float('inf')
+            best_i, best_j = len(poly) - 1, 0
+            # Sample both polys to keep it fast
+            step_a = max(1, len(poly) // 40)
+            step_b = max(1, len(next_poly) // 40)
+            for a_idx in range(i0, len(poly), step_a):
+                for b_idx in range(0, len(next_poly), step_b):
+                    d = _hav(poly[a_idx][0], poly[a_idx][1],
+                             next_poly[b_idx][0], next_poly[b_idx][1])
+                    if d < best_d:
+                        best_d = d
+                        best_i = a_idx
+            alight_lat, alight_lon = poly[best_i][0], poly[best_i][1]
+        i1 = _closest_idx(poly, alight_lat, alight_lon)
 
+        # ── Snip ──────────────────────────────────────────────────────────────
         ridden = _snip_poly(poly, i0, i1)
         if len(ridden) < 2:
             return None
@@ -1156,24 +1246,47 @@ def _build_jeepney_chain_legs(chain, orig_lat, orig_lon, dest_lat, dest_lon):
         parts = route['route_transit'].split(' - ', 1)
 
         legs.append({
-            'route_id': rid,
-            'route_name': route['route_transit'],
-            'rtype': 'PUJ',
-            'board':  {'name': parts[0], 'lat': ridden[0][0],  'lon': ridden[0][1]},
-            'alight': {'name': parts[-1], 'lat': ridden[-1][0], 'lon': ridden[-1][1]},
+            'route_id':    rid,
+            'route_name':  route['route_transit'],
+            'rtype':       'PUJ',
+            'board':       {'name': parts[0], 'lat': ridden[0][0],  'lon': ridden[0][1]},
+            'alight':      {'name': parts[-1], 'lat': ridden[-1][0], 'lon': ridden[-1][1]},
             'ridden_poly': ridden,
-            'dist_m': _poly_dist(ridden),
-            'fare': calc_sakay_fare(rid, _poly_dist(ridden)),
-            'color': '#e67e22',
-            'seg_type': 'jeepney',
+            'dist_m':      _poly_dist(ridden),
+            'fare':        calc_sakay_fare(rid, _poly_dist(ridden)),
+            'color':       '#e67e22',
+            'seg_type':    'jeepney',
         })
 
     return legs
 
 def plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=1):
+    """
+    Plan a jeepney journey from orig to dest.
+    Priority:
+      1. Try direct candidates from _find_jeepney_candidates (pure geometry, fast).
+      2. Fall back to BFS graph search for multi-hop transfers.
+    """
     _load_jeepney()
-    _build_jeepney_graph()
 
+    # ── 1. Direct single-route candidates (geometry pre-filter) ─────────────
+    direct_candidates, _ = _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=6)
+    if direct_candidates:
+        results = []
+        for cand in direct_candidates:
+            score, rid, bplat, bplon, aplat, aplon = cand
+            # Build leg using the actual snap points found by candidate scoring
+            leg = _build_jeepney_leg(rid, bplat, bplon, aplat, aplon)
+            if leg:
+                route = _assemble_route([leg], orig_lat, orig_lon, dest_lat, dest_lon, len(results))
+                results.append(route)
+                if len(results) >= max_results:
+                    break
+        if results:
+            return results
+
+    # ── 2. BFS multi-hop graph search ────────────────────────────────────────
+    _build_jeepney_graph()
     chain = _find_jeepney_chain(orig_lat, orig_lon, dest_lat, dest_lon)
     if not chain:
         return []
