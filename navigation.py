@@ -722,196 +722,121 @@ def _build_jeepney_spatial():
 #  passes within _JXFER_LIM of the second route's start point.
 # ════════════════════════════════════════════════════════════════════════════════
 
-def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon):
+def _prefilter_routes_by_spatial(orig_lat, orig_lon, dest_lat, dest_lon, cell_radius=1):
     """
-    Pure-geometry route candidate finder.
-    NO network / OSM calls made here.
+    Return a set of route IDs near origin or destination using _JEEPNEY_SPATIAL.
+    cell_radius: how many cells around the origin/dest cell to include (1 => 3x3 area).
+    """
+    fn = "_prefilter_routes_by_spatial"
+    t0 = time.time()
+    if not _JEEPNEY_SPATIAL:
+        _dbg(fn, "Spatial index empty; returning all routes")
+        return set(_JEEPNEY_ROUTES.keys())
 
-    Returns:
-        direct_cands   : list of (score, rid, board_lat, board_lon, alight_lat, alight_lon)
-        transfer_cands : list of (score,
-                                  rid1, board1_lat, board1_lon, xfer1_lat, xfer1_lon,
-                                  rid2, board2_lat, board2_lon, alight2_lat, alight2_lon)
-    Both lists are sorted ascending by score (lower = better).
+    def cell_for(lat, lon):
+        return int(lat / _JEEPNEY_CELL), int(lon / _JEEPNEY_CELL)
+
+    ocell = cell_for(orig_lat, orig_lon)
+    dcell = cell_for(dest_lat, dest_lon)
+
+    candidates = set()
+    for base in (ocell, dcell):
+        for di in range(-cell_radius, cell_radius + 1):
+            for dj in range(-cell_radius, cell_radius + 1):
+                c = (base[0] + di, base[1] + dj)
+                entries = _JEEPNEY_SPATIAL.get(c)
+                if entries:
+                    for entry in entries:
+                        candidates.add(entry[0])  # rid
+    _dbg(fn, f"Prefiltered routes={len(candidates)} from cells {ocell} & {dcell} elapsed={time.time()-t0:.3f}s")
+    if not candidates:
+        # fallback to all routes if prefilter yields nothing
+        _dbg(fn, "Prefilter empty — falling back to all routes")
+        return set(_JEEPNEY_ROUTES.keys())
+    return candidates
+
+def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=6):
+    """
+    Pure-geometry candidate finder (direct-only).
+    Returns list of (score, rid, board_lat, board_lon, alight_lat, alight_lon)
+    Sorted ascending by score. Prefilters using spatial index and runs projections in parallel.
     """
     fn = "_find_jeepney_candidates"
     t_start = time.time()
-    print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
-    print(f"[DEBUG][{fn}] CALL: _find_jeepney_candidates()")
-    print(f"[DEBUG][{fn}]   Origin  = ({orig_lat:.6f}, {orig_lon:.6f})")
-    print(f"[DEBUG][{fn}]   Dest    = ({dest_lat:.6f}, {dest_lon:.6f})")
-    print(f"[DEBUG][{fn}]   Crow-flies distance = {_hav(orig_lat,orig_lon,dest_lat,dest_lon):.0f}m")
-    print(f"[DEBUG][{fn}]   Thresholds: BOARD={_JBOARD_LIM}m  ALIGHT={_JALIGHT_LIM}m  XFER={_JXFER_LIM}m")
+    _dbg(fn, f"CALL origin=({orig_lat:.6f},{orig_lon:.6f}) dest=({dest_lat:.6f},{dest_lon:.6f})")
 
     if not _JEEPNEY_READY:
-        print(f"[DEBUG][{fn}]   _JEEPNEY_READY=False → calling _load_jeepney() first")
+        _dbg(fn, "Jeepney DB not ready → loading")
         _load_jeepney()
 
-    total_routes = len(_JEEPNEY_ROUTES)
-    print(f"[DEBUG][{fn}]   Evaluating {total_routes} jeepney routes...")
+    # Prefilter routes using spatial index to avoid projecting against every route
+    candidate_rids = list(_prefilter_routes_by_spatial(orig_lat, orig_lon, dest_lat, dest_lon, cell_radius=1))
+    _dbg(fn, f"Prefiltered candidate count={len(candidate_rids)} (topk={topk})")
 
-    # ── STEP 1: Project origin & destination onto every route line ────────────
-    print(f"[DEBUG][{fn}] STEP 1 · Computing projections for all {total_routes} routes (multithreaded)...")
-    t1 = time.time()
+    if not candidate_rids:
+        _dbg(fn, "No candidate routes after prefilter")
+        return [], []
 
-    def compute_projections(rid):
-        """Project orig & dest onto route's straight-line corridor. Returns projection tuple."""
-        route = _JEEPNEY_ROUTES[rid]
-        sl, sn = route['start']['lat'],       route['start']['lon']
-        dl, dn = route['destination']['lat'],  route['destination']['lon']
+    # Worker: project origin & dest onto route's straight line and compute metrics
+    def _proj_worker(rid):
+        try:
+            route = _JEEPNEY_ROUTES[rid]
+            sl, sn = route['start']['lat'], route['start']['lon']
+            dl, dn = route['destination']['lat'], route['destination']['lon']
 
-        t_b, blat, blon, bdist = _proj_point_on_segment(orig_lat, orig_lon, sl, sn, dl, dn)
-        t_a, alat, alon, adist = _proj_point_on_segment(dest_lat, dest_lon, sl, sn, dl, dn)
+            t_b, bplat, bplon, bdist = _proj_point_on_segment(orig_lat, orig_lon, sl, sn, dl, dn)
+            t_a, aplat, aplon, adist = _proj_point_on_segment(dest_lat, dest_lon, sl, sn, dl, dn)
 
-        return rid, sl, sn, dl, dn, t_b, blat, blon, bdist, t_a, alat, alon, adist
+            # Valid direct candidate if both board & alight within thresholds and alight is after board
+            ok_board = (bdist is not None and bdist <= _JBOARD_LIM)
+            ok_alight = (adist is not None and adist <= _JALIGHT_LIM)
+            ok_order = (t_a >= t_b + 1e-6)
 
-    workers = min(32, max(1, total_routes))
+            # Score: prefer less walking; penalize boarding far along the route (to prefer earlier boarding)
+            walk = (bdist if bdist is not None else 1e9) + (adist if adist is not None else 1e9)
+            prog_pen = 200.0 * max(0.0, t_b)  # small bias
+            score = walk + prog_pen
+
+            _dbg(fn, f"{rid} tb={t_b:.4f} ta={t_a:.4f} bdist={int(bdist)} adist={int(adist)} ok={ok_board and ok_alight and ok_order} score={score:.1f}")
+
+            if ok_board and ok_alight and ok_order:
+                return (score, rid, bplat, bplon, aplat, aplon)
+            return None
+        except Exception as e:
+            _dbg(fn, f"WORKER_EXCEPTION rid={rid} err={e}")
+            return None
+
+    workers = min(32, max(1, len(candidate_rids)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-        proj_results = list(ex.map(compute_projections, list(_JEEPNEY_ROUTES.keys())))
+        results = list(ex.map(_proj_worker, candidate_rids))
 
-    print(f"[DEBUG][{fn}] STEP 1 · Projections done  elapsed={time.time()-t1:.3f}s")
+    direct = [r for r in results if r]
+    direct.sort(key=lambda x: (x[0], x[1]))  # stable ordering: score then rid
 
-    # ── STEP 2: Filter direct candidates ──────────────────────────────────────
-    print(f"[DEBUG][{fn}] STEP 2 · Filtering direct candidates...")
-    t2 = time.time()
-    direct_cands = []
+    _dbg(fn, f"Direct candidates found={len(direct)} elapsed={time.time()-t_start:.3f}s")
+    if direct:
+        for i, d in enumerate(direct[:min(3, len(direct))]):
+            _dbg(fn, f"TOP#{i+1} rid={d[1]} score={d[0]:.1f} board=({d[2]:.5f},{d[3]:.5f}) alight=({d[4]:.5f},{d[5]:.5f})")
 
-    for (rid, sl, sn, dl, dn,
-         t_b, blat, blon, bdist,
-         t_a, alat, alon, adist) in proj_results:
-
-        rname = _JEEPNEY_ROUTES[rid]['route_transit']
-
-        if bdist > _JBOARD_LIM:
-            continue  # origin too far from this route's corridor
-        if adist > _JALIGHT_LIM:
-            continue  # destination too far from this route's corridor
-        if t_a <= t_b:
-            continue  # destination is *behind* origin on this route (wrong direction)
-        if (t_a - t_b) < 0.05:
-            continue  # would ride < 5% of route — not useful
-
-        score = bdist + adist
-        direct_cands.append((score, rid, blat, blon, alat, alon))
-        print(f"[DEBUG][{fn}]   ✓ DIRECT  {rid} '{rname}'")
-        print(f"[DEBUG][{fn}]     board_dist={bdist:.0f}m  t_b={t_b:.3f} → board=({blat:.5f},{blon:.5f})")
-        print(f"[DEBUG][{fn}]     alight_dist={adist:.0f}m  t_a={t_a:.3f} → alight=({alat:.5f},{alon:.5f})")
-        print(f"[DEBUG][{fn}]     segment_coverage={t_a-t_b:.3f}  score={score:.0f}")
-
-    direct_cands.sort(key=lambda x: x[0])
-    print(f"[DEBUG][{fn}] STEP 2 · Done  direct_candidates={len(direct_cands)}  elapsed={time.time()-t2:.3f}s")
-
-    # ── STEP 3: Build route-indexed lookup tables for transfer search ──────────
-    print(f"[DEBUG][{fn}] STEP 3 · Building boardable/alightable lookup tables...")
-    t3 = time.time()
-    # boardable: routes where user can board from origin
-    boardable = {}     # rid → (t_b, blat, blon, bdist, sl, sn, dl, dn)
-    # alightable: routes where user can alight to destination
-    alightable = {}    # rid → (t_a, alat, alon, adist)
-
-    for (rid, sl, sn, dl, dn,
-         t_b, blat, blon, bdist,
-         t_a, alat, alon, adist) in proj_results:
-        if bdist <= _JBOARD_LIM:
-            boardable[rid]  = (t_b, blat, blon, bdist, sl, sn, dl, dn)
-        if adist <= _JALIGHT_LIM:
-            alightable[rid] = (t_a, alat, alon, adist)
-
-    print(f"[DEBUG][{fn}] STEP 3 · boardable={len(boardable)}  alightable={len(alightable)}  elapsed={time.time()-t3:.3f}s")
-
-    # ── STEP 4: Find transfer candidates (multithreaded) ───────────────────────
-    print(f"[DEBUG][{fn}] STEP 4 · Searching for transfer candidates (multithreaded)...")
-    t4 = time.time()
-
-    def find_transfers_from(rid1):
-        """
-        For a boardable route1, find all alightable route2 pairs reachable via
-        a transfer at the point on route1 closest to route2's start.
-        Returns list of transfer candidate tuples.
-        """
-        if rid1 not in boardable:
-            return []
-        t_b1, blat1, blon1, bdist1, sl1, sn1, dl1, dn1 = boardable[rid1]
-        rname1 = _JEEPNEY_ROUTES[rid1]['route_transit']
-        local = []
-
-        for rid2, (t_a2, alat2, alon2, adist2) in alightable.items():
-            if rid2 == rid1:
-                continue  # same route
-
-            s2 = _JEEPNEY_ROUTES[rid2]['start']
-            sl2, sn2 = s2['lat'], s2['lon']
-            d2 = _JEEPNEY_ROUTES[rid2]['destination']
-            dl2, dn2 = d2['lat'], d2['lon']
-
-            # Find closest point on route1's line to route2's start
-            t_xfer1, xlat1, xlon1, xfer_dist = _proj_point_on_segment(
-                sl2, sn2,       # point to project = route2 start
-                sl1, sn1,       # segment A = route1 start
-                dl1, dn1        # segment B = route1 destination
-            )
-            # xfer_dist = walk distance from that point on route1 to route2 start
-
-            if xfer_dist > _JXFER_LIM:
-                continue  # transfer walk too long
-            if t_xfer1 <= t_b1:
-                continue  # transfer would happen before boarding point on route1
-            if t_xfer1 < 0.05:
-                continue  # too close to route1 start — not meaningful
-
-            # Board route2 from the transfer walk point — project onto route2
-            t_b2, blat2, blon2, bdist2 = _proj_point_on_segment(
-                xlat1, xlon1,   # walk arrival point → route2 corridor
-                sl2,   sn2,
-                dl2,   dn2
-            )
-            if t_a2 <= t_b2:
-                continue  # destination is behind boarding on route2
-
-            score = bdist1 + xfer_dist + adist2 + _JXFER_PEN
-            rname2 = _JEEPNEY_ROUTES[rid2]['route_transit']
-            local.append((score,
-                           rid1, blat1, blon1, xlat1, xlon1,
-                           rid2, blat2, blon2, alat2, alon2))
-            print(f"[DEBUG][{fn}]   ✓ TRANSFER  {rid1}→{rid2}")
-            print(f"[DEBUG][{fn}]     '{rname1}' → '{rname2}'")
-            print(f"[DEBUG][{fn}]     board1_dist={bdist1:.0f}m  xfer_dist={xfer_dist:.0f}m  "
-                  f"alight2_dist={adist2:.0f}m  score={score:.0f}")
-        return local
-
-    workers = min(32, max(1, len(boardable)))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-        all_transfer_lists = list(ex.map(find_transfers_from, list(boardable.keys())))
-
-    # Flatten + deduplicate by (rid1, rid2) pair
-    transfer_cands = []
-    seen_pairs = set()
-    for transfer_list in all_transfer_lists:
-        for item in transfer_list:
-            pair = (item[1], item[6])   # (rid1, rid2)
-            if pair not in seen_pairs:
-                seen_pairs.add(pair)
-                transfer_cands.append(item)
-
-    transfer_cands.sort(key=lambda x: x[0])
-    print(f"[DEBUG][{fn}] STEP 4 · Done  transfer_candidates={len(transfer_cands)}  elapsed={time.time()-t4:.3f}s")
-
-    print(f"[DEBUG][{fn}] ── SUMMARY ──────────────────────────────────────────────")
-    print(f"[DEBUG][{fn}]   Direct candidates    : {len(direct_cands)}")
-    print(f"[DEBUG][{fn}]   Transfer candidates  : {len(transfer_cands)}")
-    print(f"[DEBUG][{fn}]   TOTAL DURATION       : {time.time()-t_start:.3f}s  (pure geometry — no OSM)")
-    print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
-    return direct_cands, transfer_cands
-
+    # We intentionally do not compute transfer candidates here to keep results simple and deterministic.
+    return direct[:topk], []
 
 # ════════════════════════════════════════════════════════════════════════════════
 #  JEEPNEY LEG BUILDER  (OSM / OSRM called HERE — after candidate selection)
 # ════════════════════════════════════════════════════════════════════════════════
 
-def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, samples=80, use_osrm=True):
+def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, samples=80, use_osrm=False):
+    """
+    Build a jeepney leg by sampling the canonical route line (start->destination),
+    projecting board/alight onto that line, slicing the sampled polyline between
+    those projections, and returning the clipped polyline.
+
+    use_osrm: if True, OSRM is used only as a sanity check and will NOT replace
+              the canonical polyline unless it is very close.
+    """
     fn = "_build_jeepney_leg"
     t_start = time.time()
-    _dbg(fn, f"CALL: {rid} board=({board_lat:.6f},{board_lon:.6f}) alight=({alight_lat:.6f},{alight_lon:.6f})")
+    _dbg(fn, f"CALL rid={rid} board=({board_lat:.6f},{board_lon:.6f}) alight=({alight_lat:.6f},{alight_lon:.6f})")
 
     route = _JEEPNEY_ROUTES.get(rid)
     if not route:
@@ -922,7 +847,7 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, sample
     s_lat, s_lon = route['start']['lat'], route['start']['lon']
     d_lat, d_lon = route['destination']['lat'], route['destination']['lon']
 
-    # Build canonical sampled polyline along route start->destination (lat,lon pairs)
+    # Build canonical sampled polyline along route start->destination
     sampled = []
     for i in range(samples + 1):
         t = i / float(samples)
@@ -930,25 +855,23 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, sample
         lon = s_lon + t * (d_lon - s_lon)
         sampled.append([lat, lon])
 
-    # Project board and alight onto the route line (using same projection used elsewhere)
+    # Project board and alight onto canonical line
     tb, bplat, bplon, bdist = _proj_point_on_segment(board_lat, board_lon, s_lat, s_lon, d_lat, d_lon)
     ta, aplat, aplon, adist = _proj_point_on_segment(alight_lat, alight_lon, s_lat, s_lon, d_lat, d_lon)
+    _dbg(fn, f"proj tb={tb:.4f} bdist={int(bdist)} ta={ta:.4f} adist={int(adist)}")
 
-    _dbg(fn, f"proj tb={tb:.4f} bdist={bdist:.0f} ta={ta:.4f} adist={adist:.0f}")
-
-    # Ensure ordering: if alight is before board, swap (defensive)
+    # Defensive ordering: ensure ta >= tb
     if ta < tb:
-        _dbg(fn, f"alight before board (ta<{tb}) — swapping to preserve forward direction")
+        _dbg(fn, "alight projection before board projection — swapping to preserve forward direction")
         tb, ta = ta, tb
         bplat, aplat = aplat, bplat
         bplon, aplon = aplon, bplon
         bdist, adist = adist, bdist
 
-    # Convert t (0..1) to sample indices and slice
+    # Convert t to sample indices and slice
     idx_b = max(0, min(samples, int(round(tb * samples))))
     idx_a = max(0, min(samples, int(round(ta * samples))))
     if idx_a <= idx_b:
-        # ensure at least two points
         if idx_b < samples:
             idx_a = idx_b + 1
         else:
@@ -956,11 +879,11 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, sample
 
     sliced = sampled[idx_b: idx_a + 1]
 
-    # Replace first/last points with exact projected board/alight coordinates for accuracy
+    # Replace endpoints with exact projected coordinates for accuracy
     sliced[0] = [bplat, bplon]
     sliced[-1] = [aplat, aplon]
 
-    # Compute ridden distance as sum of haversine along sliced polyline
+    # Compute ridden distance along sliced polyline
     dist_m = _poly_dist(sliced)
 
     fare = calc_sakay_fare(rid, dist_m)
@@ -968,11 +891,8 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, sample
     bname = parts[0].strip()
     aname = parts[-1].strip()
 
-    _dbg(fn, f"Built canonical jeepney segment pts={len(sliced)} dist={dist_m:.0f} fare={fare['label']} elapsed={time.time()-t_start:.3f}s")
-
-    # If user explicitly allows OSRM and we want to validate, we can optionally call OSRM here.
+    # Optionally run OSRM as a sanity check (does not replace canonical polyline unless close)
     if use_osrm:
-        # Try OSRM driving only as a sanity check; do not replace canonical polyline unless OSRM is within tolerance.
         try:
             url = (f"https://router.project-osrm.org/route/v1/driving/"
                    f"{sliced[0][1]},{sliced[0][0]};{sliced[-1][1]},{sliced[-1][0]}?overview=full&geometries=geojson")
@@ -980,14 +900,13 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, sample
             r = requests.get(url, timeout=10, headers={'User-Agent': 'SafeRouteAI/1.0'}).json()
             if r.get('code') == 'Ok' and r.get('routes'):
                 osrm_dist = r['routes'][0].get('distance', 0.0)
-                # Accept OSRM only if it is close to canonical distance (within 30%)
                 if abs(osrm_dist - dist_m) / max(1.0, dist_m) < 0.30:
                     coords = [[pt[1], pt[0]] for pt in r['routes'][0]['geometry']['coordinates']]
                     _dbg(fn, f"OSRM close enough (osrm={osrm_dist:.0f}m canonical={dist_m:.0f}m) — using OSRM polyline")
                     ridden_poly = coords
                     dist_m = osrm_dist
                 else:
-                    _dbg(fn, f"OSRM differs too much (osrm={osrm_dist:.0f}m canonical={dist_m:.0f}m) — keeping canonical")
+                    _dbg(fn, f"OSRM differs too much — keeping canonical polyline")
                     ridden_poly = [[pt[0], pt[1]] for pt in sliced]
             else:
                 _dbg(fn, "OSRM returned no routes — keeping canonical")
@@ -997,6 +916,8 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, sample
             ridden_poly = [[pt[0], pt[1]] for pt in sliced]
     else:
         ridden_poly = [[pt[0], pt[1]] for pt in sliced]
+
+    _dbg(fn, f"Built leg pts={len(ridden_poly)} dist={dist_m:.0f} fare={fare['label']} elapsed={time.time()-t_start:.3f}s")
 
     return {
         'route_id'    : rid,
@@ -1019,125 +940,75 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, sample
 #  JEEPNEY JOURNEY PLANNER
 # ════════════════════════════════════════════════════════════════════════════════
 
-def plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=3):
+def plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=1):
     """
-    Full jeepney journey planning pipeline:
-
-      Phase A  (no OSM)  — Load JSON data + pure-geometry candidate selection
-      Phase B  (OSM)     — OSRM polyline fetch for each confirmed candidate leg
-      Phase C            — Assemble final route objects
-
-    Returns list of assembled route dicts (same schema as _assemble_route output).
+    Full jeepney journey planning pipeline that returns up to max_results routes.
+    This refactor prefers a single canonical jeepney route (no duplicate alternatives).
     """
     fn = "plan_jeepney_journey"
     t_start = time.time()
-    print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
-    print(f"[DEBUG][{fn}] CALL: plan_jeepney_journey()")
-    print(f"[DEBUG][{fn}]   Origin      = ({orig_lat:.6f}, {orig_lon:.6f})")
-    print(f"[DEBUG][{fn}]   Destination = ({dest_lat:.6f}, {dest_lon:.6f})")
-    print(f"[DEBUG][{fn}]   max_results = {max_results}")
+    _dbg(fn, f"CALL origin=({orig_lat:.6f},{orig_lon:.6f}) dest=({dest_lat:.6f},{dest_lon:.6f}) max_results={max_results}")
 
-    # ── PHASE A-1: Ensure data is loaded (no OSM) ─────────────────────────────
-    print(f"[DEBUG][{fn}] ── PHASE A-1 · Loading jeepney data (no OSM) ──────────")
-    t_a1 = time.time()
+    # Phase A: ensure data loaded
     _load_jeepney()
-    print(f"[DEBUG][{fn}]   routes_loaded={len(_JEEPNEY_ROUTES)}  elapsed={time.time()-t_a1:.3f}s")
-
     if not _JEEPNEY_ROUTES:
-        print(f"[DEBUG][{fn}] !! No jeepney routes available  total={time.time()-t_start:.3f}s")
-        print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
+        _dbg(fn, "No jeepney routes available")
         return []
 
-    # ── PHASE A-2: Pure-geometry candidate selection (no OSM) ─────────────────
-    print(f"[DEBUG][{fn}] ── PHASE A-2 · Geometry-based candidate selection (no OSM) ─")
-    t_a2 = time.time()
-    direct_cands, transfer_cands = _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon)
-    print(f"[DEBUG][{fn}]   direct={len(direct_cands)}  transfer={len(transfer_cands)}  elapsed={time.time()-t_a2:.3f}s")
+    # Phase A-2: candidate selection (direct only)
+    direct_cands, _ = _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=6)
+    _dbg(fn, f"Candidates direct={len(direct_cands)}")
 
-    if not direct_cands and not transfer_cands:
-        print(f"[DEBUG][{fn}] !! No candidates found  total={time.time()-t_start:.3f}s")
-        print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
+    if not direct_cands:
+        _dbg(fn, "No direct candidates found")
         return []
 
-    # ── PHASE B: Build legs via OSRM (first OSM touch — multithreaded) ────────
-    print(f"[DEBUG][{fn}] ── PHASE B · OSRM leg building (multithreaded) ──────────")
-    t_b = time.time()
+    # Keep only the top candidate (avoid duplicates and multiple cards)
+    chosen = direct_cands[0:1]
 
-    # Prepare build tasks (direct + transfer), capped at max_results each
+    # Phase B: build legs (multithreaded if multiple legs, but we only have one)
     tasks = []
-    for item in direct_cands[:max_results]:
+    for item in chosen:
         score, rid, blat, blon, alat, alon = item
         tasks.append(('direct', score, rid, blat, blon, alat, alon))
-    for item in transfer_cands[:max_results]:
-        tasks.append(('transfer',) + item)
-
-    print(f"[DEBUG][{fn}]   Total tasks: {len(tasks)}  "
-          f"(direct={sum(1 for t in tasks if t[0]=='direct')}  "
-          f"transfer={sum(1 for t in tasks if t[0]=='transfer')})")
 
     def execute_task(task):
         ttype = task[0]
         if ttype == 'direct':
             _, score, rid, blat, blon, alat, alon = task
-            print(f"[DEBUG][{fn}][execute_task] Building DIRECT leg  rid={rid}  score={score:.0f}")
-            leg = _build_jeepney_leg(rid, blat, blon, alat, alon)
+            _dbg(fn, f"[execute_task] Building DIRECT leg rid={rid} score={score:.0f}")
+            # Use canonical clipping; do not call OSRM by default
+            leg = _build_jeepney_leg(rid, blat, blon, alat, alon, samples=80, use_osrm=False)
             if leg:
                 return (score, [leg])
-            print(f"[DEBUG][{fn}][execute_task] DIRECT leg build FAILED  rid={rid}")
-            return None
-
-        elif ttype == 'transfer':
-            _, score, rid1, bl1, blo1, xl1, xlo1, rid2, bl2, blo2, al2, alo2 = task
-            print(f"[DEBUG][{fn}][execute_task] Building TRANSFER legs  {rid1}→{rid2}  score={score:.0f}")
-            # Build both legs concurrently
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as inner_ex:
-                f1 = inner_ex.submit(_build_jeepney_leg, rid1, bl1, blo1, xl1, xlo1)
-                f2 = inner_ex.submit(_build_jeepney_leg, rid2, bl2, blo2, al2, alo2)
-                leg1 = f1.result()
-                leg2 = f2.result()
-            if leg1 and leg2:
-                print(f"[DEBUG][{fn}][execute_task] TRANSFER both legs OK  {rid1}→{rid2}")
-                return (score, [leg1, leg2])
-            print(f"[DEBUG][{fn}][execute_task] TRANSFER leg build FAILED  {rid1}→{rid2}  "
-                  f"leg1_ok={bool(leg1)}  leg2_ok={bool(leg2)}")
+            _dbg(fn, f"[execute_task] DIRECT leg build FAILED rid={rid}")
             return None
         return None
 
-    outer_workers = min(6, max(1, len(tasks)))
+    outer_workers = min(4, max(1, len(tasks)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=outer_workers) as ex:
         built_results = list(ex.map(execute_task, tasks))
 
     built_results = [r for r in built_results if r is not None]
     built_results.sort(key=lambda x: x[0])
-    print(f"[DEBUG][{fn}]   Built {len(built_results)} valid leg-sets  elapsed={time.time()-t_b:.3f}s")
 
-    # ── PHASE C: Assemble final route objects ─────────────────────────────────
-    print(f"[DEBUG][{fn}] ── PHASE C · Route assembly ──────────────────────────────")
-    t_c = time.time()
-    final    = []
-    seen_key = set()
-
+    # Phase C: assemble final route objects (avoid duplicates)
+    final = []
+    seen_keys = set()
     for score, legs in built_results:
         key = tuple(leg['route_id'] for leg in legs)
-        if key in seen_key:
-            print(f"[DEBUG][{fn}]   SKIP duplicate key={key}")
+        if key in seen_keys:
+            _dbg(fn, f"SKIP duplicate key={key}")
             continue
-        seen_key.add(key)
+        seen_keys.add(key)
         route = _assemble_route(legs, orig_lat, orig_lon, dest_lat, dest_lon, len(final))
         final.append(route)
-        print(f"[DEBUG][{fn}]   Added route[{len(final)-1}]  "
-              f"legs={len(legs)}  name='{route['name']}'  time={route['time']}")
+        _dbg(fn, f"Added route[{len(final)-1}] name='{route['name']}' time={route['time']} distance={route['distance']} fare={route['fare']}")
         if len(final) >= max_results:
             break
 
-    print(f"[DEBUG][{fn}]   Assembly done  routes={len(final)}  elapsed={time.time()-t_c:.3f}s")
-    print(f"[DEBUG][{fn}] ── RESULT ────────────────────────────────────────────────")
-    for i, r in enumerate(final):
-        print(f"[DEBUG][{fn}]   [{i}] '{r['name']}'  {r['time']}  {r['distance']}  fare={r['fare']}")
-    print(f"[DEBUG][{fn}] TOTAL DURATION={time.time()-t_start:.3f}s")
-    print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
+    _dbg(fn, f"RESULT routes={len(final)} total_elapsed={time.time()-t_start:.3f}s")
     return final
-
 
 # ════════════════════════════════════════════════════════════════════════════════
 #  SAKAY LOADER  (Bus + Rail ONLY — jeepney now served by jeepney.json above)
