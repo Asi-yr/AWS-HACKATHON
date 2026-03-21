@@ -1048,7 +1048,7 @@ def _build_jeepney_chain_legs(chain, orig_lat, orig_lon, dest_lat, dest_lon):
 
     return legs
 
-def plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=1):
+def plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=3):
     """
     Plan a jeepney journey from orig to dest.
     Always returns at most 1 route — the closest/best-scoring match.
