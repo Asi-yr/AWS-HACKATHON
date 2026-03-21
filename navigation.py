@@ -484,11 +484,11 @@ _JEEPNEY_SHAPE_CACHE = {}   # rid -> {'poly': [[lat,lon],...], 'dist': meters}
 # Indexed at: start, destination, and N intermediate sample points per route.
 _JEEPNEY_SPATIAL = defaultdict(list)
 _JEEPNEY_CELL    = 0.008        # ~890 m per cell
-_JEEPNEY_SAMPLES = 5            # intermediate line-sample points per route
+_JEEPNEY_SAMPLES = 12           # intermediate line-sample points per route (more = better spatial coverage)
 
 # Distance thresholds (metres)
-_JBOARD_LIM  = 1000             # max walk from user to board point on route (was 800)
-_JALIGHT_LIM = 1200             # max walk from alight point to user destination (was 950)
+_JBOARD_LIM  = 800              # max walk from user to board point on route
+_JALIGHT_LIM = 1000             # max walk from alight point to user destination
 _JXFER_LIM   = 800              # max walk for a jeepney→jeepney transfer (was 600)
 _JXFER_PEN   = 300              # transfer penalty (added to candidate score)
 
@@ -724,7 +724,7 @@ def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=1):
         _dbg(fn, "Jeepney DB not ready → loading")
         _load_jeepney()
 
-    candidate_rids = list(_prefilter_routes_by_spatial(orig_lat, orig_lon, dest_lat, dest_lon, cell_radius=1))
+    candidate_rids = list(_prefilter_routes_by_spatial(orig_lat, orig_lon, dest_lat, dest_lon, cell_radius=2))
     _dbg(fn, f"Prefiltered candidate count={len(candidate_rids)} (topk={topk})")
 
     if not candidate_rids:
@@ -740,13 +740,15 @@ def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=1):
             t_b, bplat, bplon, bdist = _proj_point_on_segment(orig_lat, orig_lon, sl, sn, dl, dn)
             t_a, aplat, aplon, adist = _proj_point_on_segment(dest_lat, dest_lon, sl, sn, dl, dn)
 
-            ok_board = (bdist is not None and bdist <= _JBOARD_LIM)
-            ok_alight = (adist is not None and adist <= _JALIGHT_LIM)
-            ok_order = (t_a >= t_b + 1e-6)
+            ok_board  = bdist is not None and bdist  <= _JBOARD_LIM
+            ok_alight = adist is not None and adist  <= _JALIGHT_LIM
+            ok_order  = t_a >= t_b + 1e-6
 
-            walk = (bdist if bdist is not None else 1e9) + (adist if adist is not None else 1e9)
-            prog_pen = 200.0 * max(0.0, t_b)
-            score = walk + prog_pen
+            # Score = total walking only.
+            # Weight board-walk 2x: getting to the route is the user's first obstacle.
+            # No progress penalty — it was backwards (penalising mid-route boards,
+            # rewarding terminal boards even when the terminal is far away).
+            score = bdist * 2.0 + adist
 
             _dbg(fn, f"{rid} tb={t_b:.4f} ta={t_a:.4f} bdist={int(bdist)} adist={int(adist)} ok={ok_board and ok_alight and ok_order} score={score:.1f}")
 
@@ -1048,7 +1050,7 @@ def _build_jeepney_chain_legs(chain, orig_lat, orig_lon, dest_lat, dest_lon):
 
     return legs
 
-def plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=3):
+def plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=1):
     """
     Plan a jeepney journey from orig to dest.
     Always returns at most 1 route — the closest/best-scoring match.
