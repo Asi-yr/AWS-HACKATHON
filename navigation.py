@@ -55,30 +55,51 @@ _OVERPASS = [
 def _overpass_query(query, max_retries=5, timeout=30):
     fn = "_overpass_query"
     t_start = time.time()
-    print(f"[DEBUG][{fn}] ── START ────────────────────────────────────────────────")
-    print(f"[DEBUG][{fn}] max_retries={max_retries}  timeout={timeout}s  payload={len(query)}chars")
+    _dbg(fn, f"START payload={len(query)}chars max_retries={max_retries} timeout={timeout}s")
 
-    for attempt in range(max_retries):
-        ep = _OVERPASS[attempt % len(_OVERPASS)]
-        print(f"[DEBUG][{fn}] Attempt {attempt+1}/{max_retries} → endpoint: {ep}")
+    # Helper to try a single endpoint once
+    def _try_endpoint(ep, attempt_idx, timeout_local):
         try:
             t_req = time.time()
-            r = requests.post(ep, data=query,
-                              headers={'User-Agent': 'SafeRoute/1.0'}, timeout=timeout)
-            print(f"[DEBUG][{fn}]   HTTP {r.status_code} in {time.time()-t_req:.3f}s")
+            r = requests.post(ep, data=query, headers={'User-Agent': 'SafeRoute/1.0'}, timeout=timeout_local)
+            _dbg(fn, f"HTTP {r.status_code} from {ep} in {time.time()-t_req:.3f}s (attempt {attempt_idx})")
             r.raise_for_status()
-            res_json = r.json()
+            # Defensive JSON decode
+            try:
+                res_json = r.json()
+            except ValueError as e:
+                _dbg(fn, f"JSON decode error from {ep}: {e}")
+                return None, f"json_error:{e}"
             el_count = len(res_json.get('elements', []))
-            print(f"[DEBUG][{fn}]   JSON parsed OK  elements={el_count}  total={time.time()-t_start:.3f}s")
-            return res_json
+            _dbg(fn, f"JSON OK elements={el_count} total_elapsed={time.time()-t_start:.3f}s")
+            return res_json, None
         except Exception as e:
-            print(f"[DEBUG][{fn}]   !! Exception on attempt {attempt+1}: {e}")
-        if attempt < max_retries - 1:
-            sleep_s = 2 * (attempt + 1)
-            print(f"[DEBUG][{fn}]   Sleeping {sleep_s}s before retry...")
+            _dbg(fn, f"Exception from {ep} attempt {attempt_idx}: {e}")
+            return None, str(e)
+
+    # Try endpoints in parallel per attempt round; first success returns
+    for attempt in range(1, max_retries + 1):
+        # choose endpoints order deterministic but rotate to spread load
+        eps = _OVERPASS[ (attempt-1) % len(_OVERPASS) : ] + _OVERPASS[: (attempt-1) % len(_OVERPASS)]
+        _dbg(fn, f"Attempt {attempt}/{max_retries} endpoints={len(eps)}")
+        # try endpoints in parallel but with small pool to avoid too many concurrent connections
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(eps))) as ex:
+            futures = { ex.submit(_try_endpoint, ep, attempt, timeout): ep for ep in eps }
+            for fut in concurrent.futures.as_completed(futures):
+                ep = futures[fut]
+                res, err = fut.result()
+                if res is not None:
+                    _dbg(fn, f"SUCCESS from {ep} on attempt {attempt}")
+                    return res
+                else:
+                    _dbg(fn, f"FAIL {ep} on attempt {attempt} err={err}")
+        # backoff before next attempt
+        if attempt < max_retries:
+            sleep_s = min(10, 2 ** attempt)
+            _dbg(fn, f"Sleeping {sleep_s}s before retry...")
             time.sleep(sleep_s)
 
-    print(f"[DEBUG][{fn}] !! All {max_retries} attempts failed  elapsed={time.time()-t_start:.3f}s")
+    _dbg(fn, f"ALL {max_retries} attempts failed elapsed={time.time()-t_start:.3f}s")
     return None
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────
@@ -745,86 +766,95 @@ def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon):
 #  JEEPNEY LEG BUILDER  (OSM / OSRM called HERE — after candidate selection)
 # ════════════════════════════════════════════════════════════════════════════════
 
-def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon):
-    """
-    Given a confirmed jeepney route and its board/alight coordinates,
-    call OSRM for the actual road polyline.
-    This is the ONLY place in the jeepney pipeline that touches the network.
-
-    Strategies (tried in order, first success wins):
-      1. OSRM driving route  (road-accurate polyline + real distance)
-      2. Straight-line fallback (crowfly)
-    """
+def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, samples=80, use_osrm=False):
     fn = "_build_jeepney_leg"
     t_start = time.time()
-    print(f"[DEBUG][{fn}] ── START ────────────────────────────────────────────────")
-    print(f"[DEBUG][{fn}] CALL: _build_jeepney_leg({rid})")
+    _dbg(fn, f"CALL: {rid} board=({board_lat:.6f},{board_lon:.6f}) alight=({alight_lat:.6f},{alight_lon:.6f})")
 
     route = _JEEPNEY_ROUTES.get(rid)
     if not route:
-        print(f"[DEBUG][{fn}] !! Route {rid} not found in _JEEPNEY_ROUTES")
+        _dbg(fn, f"!! Route {rid} not found")
         return None
 
-    rname     = route['route_transit']
-    dist_crow = _hav(board_lat, board_lon, alight_lat, alight_lon)
-    print(f"[DEBUG][{fn}]   Route       = '{rname}'")
-    print(f"[DEBUG][{fn}]   Board       = ({board_lat:.6f}, {board_lon:.6f})")
-    print(f"[DEBUG][{fn}]   Alight      = ({alight_lat:.6f}, {alight_lon:.6f})")
-    print(f"[DEBUG][{fn}]   Crow-flies  = {dist_crow:.0f}m")
+    rname = route['route_transit']
+    s_lat, s_lon = route['start']['lat'], route['start']['lon']
+    d_lat, d_lon = route['destination']['lat'], route['destination']['lon']
 
-    ridden_poly = None
-    dist_m      = 0.0
+    # Build canonical sampled polyline along route start->destination (lat,lon pairs)
+    sampled = []
+    for i in range(samples + 1):
+        t = i / float(samples)
+        lat = s_lat + t * (d_lat - s_lat)
+        lon = s_lon + t * (d_lon - s_lon)
+        sampled.append([lat, lon])
 
-    # ── Strategy 1: OSRM driving route ───────────────────────────────────────
-    def try_osrm_driving():
-        t_s = time.time()
-        url = (f"https://router.project-osrm.org/route/v1/driving/"
-               f"{board_lon},{board_lat};{alight_lon},{alight_lat}"
-               f"?overview=full&geometries=geojson")
-        print(f"[DEBUG][{fn}]   STRATEGY 1 (OSRM driving) → {url[:90]}...")
-        try:
-            t_req = time.time()
-            r = requests.get(url, timeout=15, headers={'User-Agent': 'SafeRouteAI/1.0'}).json()
-            print(f"[DEBUG][{fn}]   STRATEGY 1 responded in {time.time()-t_req:.3f}s  code={r.get('code')}")
-            if r.get('code') == 'Ok' and r.get('routes'):
-                coords = [[pt[1], pt[0]] for pt in r['routes'][0]['geometry']['coordinates']]
-                dist   = r['routes'][0]['distance']
-                # Sanity check: OSRM road dist should not be > 5× crow-flies
-                if dist <= dist_crow * 5.0:
-                    print(f"[DEBUG][{fn}]   STRATEGY 1 SUCCESS  dist={dist:.0f}m  "
-                          f"coords={len(coords)}pts  elapsed={time.time()-t_s:.3f}s")
-                    return coords, dist
-                else:
-                    print(f"[DEBUG][{fn}]   STRATEGY 1 REJECTED (dist {dist:.0f}m > 5×crow {dist_crow*5:.0f}m)")
-            else:
-                print(f"[DEBUG][{fn}]   STRATEGY 1 bad response: code={r.get('code')}")
-        except Exception as e:
-            print(f"[DEBUG][{fn}]   STRATEGY 1 EXCEPTION: {e}")
-        return None, 0.0
+    # Project board and alight onto the route line (using same projection used elsewhere)
+    tb, bplat, bplon, bdist = _proj_point_on_segment(board_lat, board_lon, s_lat, s_lon, d_lat, d_lon)
+    ta, aplat, aplon, adist = _proj_point_on_segment(alight_lat, alight_lon, s_lat, s_lon, d_lat, d_lon)
 
-    # ── Strategy 2: Straight-line fallback ────────────────────────────────────
-    def try_straight_line():
-        t_s = time.time()
-        print(f"[DEBUG][{fn}]   STRATEGY 2 (straight line fallback)  dist={dist_crow:.0f}m")
-        coords = [[board_lat, board_lon], [alight_lat, alight_lon]]
-        print(f"[DEBUG][{fn}]   STRATEGY 2 done  elapsed={time.time()-t_s:.3f}s")
-        return coords, dist_crow
+    _dbg(fn, f"proj tb={tb:.4f} bdist={bdist:.0f} ta={ta:.4f} adist={adist:.0f}")
 
-    # Run strategies sequentially (OSRM first; straight-line is instant so no benefit to parallelism)
-    print(f"[DEBUG][{fn}]   Attempting STRATEGY 1 (OSRM driving)...")
-    ridden_poly, dist_m = try_osrm_driving()
-    if not ridden_poly:
-        print(f"[DEBUG][{fn}]   STRATEGY 1 failed → falling back to STRATEGY 2")
-        ridden_poly, dist_m = try_straight_line()
+    # Ensure ordering: if alight is before board, swap (defensive)
+    if ta < tb:
+        _dbg(fn, f"alight before board (ta<{tb}) — swapping to preserve forward direction")
+        tb, ta = ta, tb
+        bplat, aplat = aplat, bplat
+        bplon, aplon = aplon, bplon
+        bdist, adist = adist, bdist
 
-    fare  = calc_sakay_fare(rid, dist_m)
+    # Convert t (0..1) to sample indices and slice
+    idx_b = max(0, min(samples, int(round(tb * samples))))
+    idx_a = max(0, min(samples, int(round(ta * samples))))
+    if idx_a <= idx_b:
+        # ensure at least two points
+        if idx_b < samples:
+            idx_a = idx_b + 1
+        else:
+            idx_b = max(0, idx_a - 1)
+
+    sliced = sampled[idx_b: idx_a + 1]
+
+    # Replace first/last points with exact projected board/alight coordinates for accuracy
+    sliced[0] = [bplat, bplon]
+    sliced[-1] = [aplat, aplon]
+
+    # Compute ridden distance as sum of haversine along sliced polyline
+    dist_m = _poly_dist(sliced)
+
+    fare = calc_sakay_fare(rid, dist_m)
     parts = rname.split(' - ', 1)
     bname = parts[0].strip()
     aname = parts[-1].strip()
 
-    print(f"[DEBUG][{fn}]   Leg built  dist={dist_m:.0f}m  fare={fare['label']}  "
-          f"polyline_pts={len(ridden_poly)}  total={time.time()-t_start:.3f}s")
-    print(f"[DEBUG][{fn}] ──────────────────────────────────────────────────────────")
+    _dbg(fn, f"Built canonical jeepney segment pts={len(sliced)} dist={dist_m:.0f} fare={fare['label']} elapsed={time.time()-t_start:.3f}s")
+
+    # If user explicitly allows OSRM and we want to validate, we can optionally call OSRM here.
+    if use_osrm:
+        # Try OSRM driving only as a sanity check; do not replace canonical polyline unless OSRM is within tolerance.
+        try:
+            url = (f"https://router.project-osrm.org/route/v1/driving/"
+                   f"{sliced[0][1]},{sliced[0][0]};{sliced[-1][1]},{sliced[-1][0]}?overview=full&geometries=geojson")
+            _dbg(fn, f"OSRM sanity check {url[:120]}...")
+            r = requests.get(url, timeout=10, headers={'User-Agent': 'SafeRouteAI/1.0'}).json()
+            if r.get('code') == 'Ok' and r.get('routes'):
+                osrm_dist = r['routes'][0].get('distance', 0.0)
+                # Accept OSRM only if it is close to canonical distance (within 30%)
+                if abs(osrm_dist - dist_m) / max(1.0, dist_m) < 0.30:
+                    coords = [[pt[1], pt[0]] for pt in r['routes'][0]['geometry']['coordinates']]
+                    _dbg(fn, f"OSRM close enough (osrm={osrm_dist:.0f}m canonical={dist_m:.0f}m) — using OSRM polyline")
+                    ridden_poly = coords
+                    dist_m = osrm_dist
+                else:
+                    _dbg(fn, f"OSRM differs too much (osrm={osrm_dist:.0f}m canonical={dist_m:.0f}m) — keeping canonical")
+                    ridden_poly = [[pt[0], pt[1]] for pt in sliced]
+            else:
+                _dbg(fn, "OSRM returned no routes — keeping canonical")
+                ridden_poly = [[pt[0], pt[1]] for pt in sliced]
+        except Exception as e:
+            _dbg(fn, f"OSRM exception: {e} — keeping canonical")
+            ridden_poly = [[pt[0], pt[1]] for pt in sliced]
+    else:
+        ridden_poly = [[pt[0], pt[1]] for pt in sliced]
 
     return {
         'route_id'    : rid,
@@ -842,7 +872,6 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon):
         'color'       : '#e67e22',
         'seg_type'    : 'jeepney',
     }
-
 
 # ════════════════════════════════════════════════════════════════════════════════
 #  JEEPNEY JOURNEY PLANNER
