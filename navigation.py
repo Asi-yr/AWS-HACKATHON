@@ -629,36 +629,49 @@ def _parse_jeepney(path):
 
 def _build_jeepney_spatial():
     """
-    Build _JEEPNEY_SPATIAL grid index.
-    Each route contributes cells for its start, destination, and
-    _JEEPNEY_SAMPLES linearly-interpolated points between them.
+    Build _JEEPNEY_SPATIAL grid index from actual OSRM road polylines.
+    Fetches all route shapes in parallel (cached after first build) so
+    the index reflects real roads, not straight lines between terminals.
     """
     fn = "_build_jeepney_spatial"
     t_start = time.time()
-    print(f"[DEBUG][{fn}] ── START ────────────────────────────────────────────────")
-    print(f"[DEBUG][{fn}] routes={len(_JEEPNEY_ROUTES)}  samples_per_route={_JEEPNEY_SAMPLES}")
+    print(f"[DEBUG][{fn}] ── START  routes={len(_JEEPNEY_ROUTES)}")
 
     _JEEPNEY_SPATIAL.clear()
 
     def index_one_route(rid):
         route = _JEEPNEY_ROUTES[rid]
-        s  = route['start']
-        d  = route['destination']
-        sl, sn = s['lat'], s['lon']
-        dl, dn = d['lat'], d['lon']
+        sl, sn = route['start']['lat'],       route['start']['lon']
+        dl, dn = route['destination']['lat'],  route['destination']['lon']
 
+        # Always include start and destination
         cells = [
             ((int(sl / _JEEPNEY_CELL), int(sn / _JEEPNEY_CELL)), (rid, 'start', sl, sn)),
             ((int(dl / _JEEPNEY_CELL), int(dn / _JEEPNEY_CELL)), (rid, 'dest',  dl, dn)),
         ]
-        for i in range(1, _JEEPNEY_SAMPLES + 1):
-            t  = i / (_JEEPNEY_SAMPLES + 1)
-            ml = sl + t * (dl - sl)
-            mn = sn + t * (dn - sn)
-            cells.append(((int(ml / _JEEPNEY_CELL), int(mn / _JEEPNEY_CELL)),
-                           (rid, f'mid_{i}', ml, mn)))
+
+        # Fetch real road polyline and index every Nth point along it
+        poly = _build_jeepney_shape_once(rid)
+        if poly and len(poly) >= 2:
+            step = max(1, len(poly) // 20)   # ~20 index points per route
+            for i, pt in enumerate(poly[::step]):
+                cells.append((
+                    (int(pt[0] / _JEEPNEY_CELL), int(pt[1] / _JEEPNEY_CELL)),
+                    (rid, f'road_{i}', pt[0], pt[1])
+                ))
+        else:
+            # OSRM unavailable — fall back to linear interpolation
+            for i in range(1, _JEEPNEY_SAMPLES + 1):
+                t  = i / (_JEEPNEY_SAMPLES + 1)
+                ml = sl + t * (dl - sl)
+                mn = sn + t * (dn - sn)
+                cells.append((
+                    (int(ml / _JEEPNEY_CELL), int(mn / _JEEPNEY_CELL)),
+                    (rid, f'mid_{i}', ml, mn)
+                ))
         return cells
 
+    print(f"[DEBUG][{fn}] Fetching OSRM shapes + building index in parallel...")
     workers = min(32, max(1, len(_JEEPNEY_ROUTES)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         all_cell_lists = list(ex.map(index_one_route, list(_JEEPNEY_ROUTES.keys())))
@@ -733,24 +746,24 @@ def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=1):
 
     def _proj_worker(rid):
         try:
-            route = _JEEPNEY_ROUTES[rid]
-            sl, sn = route['start']['lat'], route['start']['lon']
-            dl, dn = route['destination']['lat'], route['destination']['lon']
+            # Fetch the actual road polyline (cached after first call)
+            poly = _build_jeepney_shape_once(rid)
+            if not poly or len(poly) < 2:
+                return None
 
-            t_b, bplat, bplon, bdist = _proj_point_on_segment(orig_lat, orig_lon, sl, sn, dl, dn)
-            t_a, aplat, aplon, adist = _proj_point_on_segment(dest_lat, dest_lon, sl, sn, dl, dn)
+            # Snap user origin and destination to the real road poly
+            i_board,  bplat, bplon, bdist = _snap_point_to_poly(poly, orig_lat, orig_lon)
+            i_alight, aplat, aplon, adist = _snap_point_to_poly(poly, dest_lat, dest_lon)
 
-            ok_board  = bdist is not None and bdist  <= _JBOARD_LIM
-            ok_alight = adist is not None and adist  <= _JALIGHT_LIM
-            ok_order  = t_a >= t_b + 1e-6
+            ok_board  = bdist <= _JBOARD_LIM
+            ok_alight = adist <= _JALIGHT_LIM
+            ok_order  = i_alight > i_board   # alight must be further along the route
 
-            # Score = total walking only.
-            # Weight board-walk 2x: getting to the route is the user's first obstacle.
-            # No progress penalty — it was backwards (penalising mid-route boards,
-            # rewarding terminal boards even when the terminal is far away).
+            # Score: weight board-walk 2× (user's immediate walking cost)
             score = bdist * 2.0 + adist
 
-            _dbg(fn, f"{rid} tb={t_b:.4f} ta={t_a:.4f} bdist={int(bdist)} adist={int(adist)} ok={ok_board and ok_alight and ok_order} score={score:.1f}")
+            _dbg(fn, f"{rid} i_b={i_board} i_a={i_alight} bdist={int(bdist)} "
+                     f"adist={int(adist)} ok={ok_board and ok_alight and ok_order} score={score:.1f}")
 
             if ok_board and ok_alight and ok_order:
                 return (score, rid, bplat, bplon, aplat, aplon)
@@ -777,7 +790,29 @@ def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=1):
 #  JEEPNEY LEG BUILDER  (OSM / OSRM called HERE — after candidate selection)
 # ════════════════════════════════════════════════════════════════════════════════
 
-def _build_jeepney_shape_once(rid):
+def _snap_point_to_poly(poly, lat, lon):
+    """
+    Find the closest point on a polyline to (lat, lon) using segment projection.
+    Returns (seg_idx, proj_lat, proj_lon, dist_m) where seg_idx is the index
+    of the segment start vertex that the projection lands on/after.
+    """
+    best_d    = float('inf')
+    best_idx  = 0
+    best_plat = poly[0][0]
+    best_plon = poly[0][1]
+    for i in range(len(poly) - 1):
+        t, plat, plon, d = _proj_point_on_segment(
+            lat, lon,
+            poly[i][0], poly[i][1],
+            poly[i+1][0], poly[i+1][1],
+        )
+        if d < best_d:
+            best_d    = d
+            best_plat = plat
+            best_plon = plon
+            # If t==1.0 the projection is at the next vertex
+            best_idx  = i + 1 if t >= 1.0 else i
+    return best_idx, best_plat, best_plon, best_d
     """
     Fetch and cache the road-following polyline for a jeepney route.
     Calls OSRM once (start → destination) and caches the result.
@@ -828,61 +863,34 @@ def _build_jeepney_leg(rid, orig_lat, orig_lon, dest_lat, dest_lon):
     if not poly or len(poly) < 2:
         return None
 
-    # --- Snap user points to nearest segment of the shape poly ---
-    def snap_to_poly(lat, lon):
-        best_t, best_idx, best_lat, best_lon, best_d = 0.0, 0, poly[0][0], poly[0][1], float('inf')
-        for i in range(len(poly) - 1):
-            t, plat, plon, d = _proj_point_on_segment(
-                lat, lon,
-                poly[i][0], poly[i][1],
-                poly[i+1][0], poly[i+1][1]
-            )
-            if d < best_d:
-                best_d = d
-                best_t = t
-                best_idx = i if t < 1.0 else i + 1
-                best_lat, best_lon = plat, plon
-        # If the projection lands exactly between two vertices, insert the proj pt
-        return best_idx, best_lat, best_lon
+    i_board,  bplat, bplon, _ = _snap_point_to_poly(poly, orig_lat, orig_lon)
+    i_alight, aplat, aplon, _ = _snap_point_to_poly(poly, dest_lat, dest_lon)
 
-    i_board,  blat, blon = snap_to_poly(orig_lat, orig_lon)
-    i_alight, alat, alon = snap_to_poly(dest_lat, dest_lon)
-
-    if i_board == i_alight and abs(blat - alat) < 1e-6 and abs(blon - alon) < 1e-6:
+    if i_board >= i_alight:
         return None
 
-    # Build ridden segment: snip poly and prepend/append exact snap points
-    if i_board <= i_alight:
-        ridden = [[blat, blon]] + poly[i_board + 1:i_alight + 1]
-        if [alat, alon] not in ridden:
-            ridden.append([alat, alon])
-    else:
-        # Route runs in reverse on this poly — reverse so ride goes forward
-        ridden = [[alat, alon]] + poly[i_alight + 1:i_board + 1]
-        if [blat, blon] not in ridden:
-            ridden.append([blat, blon])
-        ridden = list(reversed(ridden))
+    # Snip: inject exact projected endpoints so the line starts/ends on the road
+    ridden = [[bplat, bplon]] + poly[i_board + 1:i_alight + 1] + [[aplat, aplon]]
 
     if len(ridden) < 2:
         return None
 
     dist_m = _poly_dist(ridden)
     fare   = calc_sakay_fare(rid, dist_m)
-
-    parts = route['route_transit'].split(' - ', 1)
-    bname = parts[0].strip()
-    aname = parts[-1].strip()
+    parts  = route['route_transit'].split(' - ', 1)
+    bname  = parts[0].strip()
+    aname  = parts[-1].strip()
 
     return {
         'route_id':    rid,
         'route_name':  route['route_transit'],
         'rtype':       'PUJ',
-        'board':       {'name': bname, 'lat': ridden[0][0],  'lon': ridden[0][1]},
-        'alight':      {'name': aname, 'lat': ridden[-1][0], 'lon': ridden[-1][1]},
+        'board':       {'name': bname, 'lat': bplat, 'lon': bplon},
+        'alight':      {'name': aname, 'lat': aplat, 'lon': aplon},
         'ridden_poly': ridden,
         'ridden_stops': [
-            {'name': bname, 'lat': ridden[0][0],  'lon': ridden[0][1]},
-            {'name': aname, 'lat': ridden[-1][0], 'lon': ridden[-1][1]},
+            {'name': bname, 'lat': bplat, 'lon': bplon},
+            {'name': aname, 'lat': aplat, 'lon': aplon},
         ],
         'dist_m':   dist_m,
         'fare':     fare,
