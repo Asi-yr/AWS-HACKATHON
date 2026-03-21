@@ -493,8 +493,6 @@ _JXFER_LIM   = 800              # max walk for a jeepney→jeepney transfer (was
 _JXFER_PEN   = 300              # transfer penalty (added to candidate score)
 
 _OSRM_HDRS = {'User-Agent': 'SafeRouteAI/1.0'}
-_OSRM_ROUTE_CACHE = {}   # key -> (coords, dist_m, dur_s)
-_OSRM_FOOT_CACHE  = {}   # key -> (coords, dist_m, dur_s)
 
 def _snip_poly(poly, i0, i1):
     if not poly:
@@ -504,62 +502,6 @@ def _snip_poly(poly, i0, i1):
     if i0 < i1:
         return poly[i0:i1+1]
     return list(reversed(poly[i1:i0+1]))
-
-def _round_key(*vals, p=5):
-    return tuple(round(v, p) for v in vals)
-
-def _osrm_route_via(points_latlon, profile="driving", timeout=15):
-    """
-    points_latlon: [[lat,lon], ...] (must be >= 2)
-    Returns (coords_latlon, dist_m, dur_s) or None
-    """
-    if not points_latlon or len(points_latlon) < 2:
-        return None
-
-    # Cache key: profile + first/last + count + coarse hash
-    key = (profile, len(points_latlon),
-           _round_key(points_latlon[0][0], points_latlon[0][1], p=5),
-           _round_key(points_latlon[-1][0], points_latlon[-1][1], p=5))
-    if key in _OSRM_ROUTE_CACHE:
-        return _OSRM_ROUTE_CACHE[key]
-
-    coords = ";".join(f"{lon},{lat}" for lat, lon in points_latlon)
-    url = f"https://router.project-osrm.org/route/v1/{profile}/{coords}?overview=full&geometries=geojson"
-
-    try:
-        r = requests.get(url, headers=_OSRM_HDRS, timeout=timeout)
-        r.raise_for_status()
-        js = r.json()
-        if js.get("code") != "Ok" or not js.get("routes"):
-            return None
-        rt = js["routes"][0]
-        out_coords = [[pt[1], pt[0]] for pt in rt["geometry"]["coordinates"]]
-        out = (out_coords, float(rt["distance"]), float(rt["duration"]))
-        _OSRM_ROUTE_CACHE[key] = out
-        return out
-    except Exception:
-        return None
-
-def _osrm_foot(a_lat, a_lon, b_lat, b_lon, timeout=10):
-    key = ("foot", _round_key(a_lat, a_lon, p=5), _round_key(b_lat, b_lon, p=5))
-    if key in _OSRM_FOOT_CACHE:
-        return _OSRM_FOOT_CACHE[key]
-
-    url = (f"https://router.project-osrm.org/route/v1/foot/"
-           f"{a_lon},{a_lat};{b_lon},{b_lat}?overview=full&geometries=geojson")
-    try:
-        r = requests.get(url, headers=_OSRM_HDRS, timeout=timeout)
-        r.raise_for_status()
-        js = r.json()
-        if js.get("code") != "Ok" or not js.get("routes"):
-            return None
-        rt = js["routes"][0]
-        coords = [[pt[1], pt[0]] for pt in rt["geometry"]["coordinates"]]
-        out = (coords, float(rt["distance"]), float(rt["duration"]))
-        _OSRM_FOOT_CACHE[key] = out
-        return out
-    except Exception:
-        return None
 
 def _find_file(*names):
     fn = "_find_file"
@@ -635,7 +577,6 @@ def _parse_jeepney(path):
         data = json.load(f)
 
     raw_routes = data.get("routes", [])
-    routes = {}
 
     def build(idx_raw):
         idx, raw = idx_raw
@@ -652,205 +593,84 @@ def _parse_jeepney(path):
         bname = parts[0].strip()
         aname = parts[-1].strip()
 
-        shape = raw.get("shape") or []
-        shape_latlon = []
-        for p in shape:
-            try:
-                shape_latlon.append([float(p["lat"]), float(p["lon"])])
-            except Exception:
-                pass
-
-        route = {
-            "route_id": rid,
-            "route_transit": name,
+        return {
+            "route_id":        rid,
+            "route_transit":   name,
             "route_long_name": name,
-            "route_type": 3,
-            "route_color": "#e67e22",
-            "agency_id": "LTFRB",
-            "start": {"lat": float(slat), "lon": float(slon), "name": bname},
+            "route_type":      3,
+            "route_color":     "#e67e22",
+            "agency_id":       "LTFRB",
+            "start":       {"lat": float(slat), "lon": float(slon), "name": bname},
             "destination": {"lat": float(dlat), "lon": float(dlon), "name": aname},
             "stops": [
-                {"stop_id": f"{rid}_S", "name": bname, "lat": float(slat), "lon": float(slon), "seq": 0},
-                {"stop_id": f"{rid}_D", "name": aname, "lat": float(dlat), "lon": float(dlon), "seq": 1},
+                {"stop_id": f"{rid}_S", "name": bname,
+                 "lat": float(slat), "lon": float(slon), "seq": 0},
+                {"stop_id": f"{rid}_D", "name": aname,
+                 "lat": float(dlat), "lon": float(dlon), "seq": 1},
             ],
-            "shape_raw": shape_latlon,   # fixed jeepney path (input)
-            "shape_road": None,          # road-following polyline (computed)
-            "shape_dist_m": None,
-            "shape_dur_s": None,
         }
-        return route
 
+    routes = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
         built = list(ex.map(build, enumerate(raw_routes)))
 
     for r in built:
         if r:
             routes[r["route_id"]] = r
-            _JEEPNEY_PUJ.append(r["route_id"])   # ← was never populated before
+            _JEEPNEY_PUJ.append(r["route_id"])
 
     _JEEPNEY_ROUTES = routes
 
-def _ensure_jeepney_shape_road(route, max_via=60):
-    """
-    Convert fixed shape into a road-following polyline once.
-    If shape_raw missing, we cannot guarantee fixed routing.
-    """
-    if route.get("shape_road"):
-        return True
 
-    raw = route.get("shape_raw") or []
-    if len(raw) < 2:
-        return False
+# ── Canonical jeepney polyline cache ─────────────────────────────────────────
 
-    # Downsample to avoid OSRM URL too long
-    if len(raw) > max_via:
-        step = max(1, len(raw) // max_via)
-        raw = raw[::step]
-        if raw[-1] != route["shape_raw"][-1]:
-            raw.append(route["shape_raw"][-1])
 
-    res = _osrm_route_via(raw, profile="driving", timeout=20)
-    if not res:
-        return False
 
-    coords, dist_m, dur_s = res
-    route["shape_road"] = coords
-    route["shape_dist_m"] = dist_m
-    route["shape_dur_s"] = dur_s
-    return True
-
-# (canonical polyline cache defined above near _osrm_route_via)
-
-def _fetch_osrm_driving_polyline(start_lon, start_lat, end_lon, end_lat, timeout=12, max_retries=2):
-    fn = "_fetch_osrm_driving_polyline"
-    for attempt in range(1, max_retries + 1):
-        try:
-            url = (f"https://router.project-osrm.org/route/v1/driving/"
-                   f"{start_lon},{start_lat};{end_lon},{end_lat}"
-                   f"?overview=full&geometries=geojson&alternatives=false")
-            _dbg(fn, f"Attempt {attempt} OSRM driving {start_lat:.6f},{start_lon:.6f} → {end_lat:.6f},{end_lon:.6f}")
-            t_req = time.time()
-            r = requests.get(url, timeout=timeout, headers={'User-Agent': 'SafeRouteAI/1.0'})
-            _dbg(fn, f"HTTP {r.status_code} in {time.time()-t_req:.3f}s")
-            r.raise_for_status()
-            data = r.json()
-            if data.get('code') == 'Ok' and data.get('routes'):
-                rt = data['routes'][0]
-                coords = [[pt[1], pt[0]] for pt in rt['geometry']['coordinates']]
-                dist = rt.get('distance', 0.0)
-                _dbg(fn, f"OSRM OK pts={len(coords)} dist={int(dist)}")
-                return coords, dist
-            _dbg(fn, f"OSRM bad response code={data.get('code')}")
-        except Exception as e:
-            _dbg(fn, f"OSRM exception attempt {attempt}: {e}")
-        time.sleep(0.6 * attempt)
-    _dbg(fn, "OSRM all attempts failed")
-    return None, 0.0
-
-def _get_canonical_route_polyline(rid, force_refresh=False, samples_min=40):
-    fn = "_get_canonical_route_polyline"
-    now = time.time()
-    cached = _OSRM_ROUTE_CACHE.get(rid)
-    if cached and not force_refresh and (now - cached['ts'] <= _OSRM_ROUTE_TTL):
-        _dbg(fn, f"Cache HIT rid={rid} age={now-cached['ts']:.1f}s pts={len(cached['poly'])}")
-        return cached['poly'], cached['dist']
-
-    route = _JEEPNEY_ROUTES.get(rid)
-    if not route:
-        _dbg(fn, f"Route {rid} not found")
-        return None, 0.0
-
-    s_lat, s_lon = route['start']['lat'], route['start']['lon']
-    d_lat, d_lon = route['destination']['lat'], route['destination']['lon']
-
-    poly, dist = _fetch_osrm_driving_polyline(s_lon, s_lat, d_lon, d_lat, timeout=15, max_retries=3)
-    if poly and len(poly) >= 2:
-        _OSRM_ROUTE_CACHE[rid] = {'ts': now, 'poly': poly, 'dist': dist}
-        _dbg(fn, f"Cached OSRM canonical poly rid={rid} pts={len(poly)} dist={int(dist)}")
-        return poly, dist
-
-    _dbg(fn, f"OSRM failed for rid={rid} — falling back to sampled straight line")
-    sampled = []
-    samples = max(samples_min, 40)
-    for i in range(samples + 1):
-        t = i / float(samples)
-        lat = s_lat + t * (d_lat - s_lat)
-        lon = s_lon + t * (d_lon - s_lon)
-        sampled.append([lat, lon])
-    dist = _poly_dist(sampled)
-    _OSRM_ROUTE_CACHE[rid] = {'ts': now, 'poly': sampled, 'dist': dist}
-    return sampled, dist
 
 def _build_jeepney_spatial():
     """
     Build _JEEPNEY_SPATIAL grid index.
-    Each route contributes cells for:
-      • its start point
-      • its destination point
-      • _JEEPNEY_SAMPLES evenly-spaced intermediate points along the straight
-        line from start→destination  (no OSM needed — pure linear interpolation)
-    All routes processed in parallel.
+    Each route contributes cells for its start, destination, and
+    _JEEPNEY_SAMPLES linearly-interpolated points between them.
     """
     fn = "_build_jeepney_spatial"
     t_start = time.time()
     print(f"[DEBUG][{fn}] ── START ────────────────────────────────────────────────")
-    print(f"[DEBUG][{fn}] CALL: _build_jeepney_spatial()  routes={len(_JEEPNEY_ROUTES)}  samples_per_route={_JEEPNEY_SAMPLES}")
+    print(f"[DEBUG][{fn}] routes={len(_JEEPNEY_ROUTES)}  samples_per_route={_JEEPNEY_SAMPLES}")
 
     _JEEPNEY_SPATIAL.clear()
 
     def index_one_route(rid):
-        """Return list of (cell, entry_tuple) for one route."""
         route = _JEEPNEY_ROUTES[rid]
         s  = route['start']
         d  = route['destination']
         sl, sn = s['lat'], s['lon']
         dl, dn = d['lat'], d['lon']
 
-        cells = []
-        # start
-        cells.append(((int(sl / _JEEPNEY_CELL), int(sn / _JEEPNEY_CELL)),
-                       (rid, 'start', sl, sn)))
-        # destination
-        cells.append(((int(dl / _JEEPNEY_CELL), int(dn / _JEEPNEY_CELL)),
-                       (rid, 'dest', dl, dn)))
-
-        # Use actual shape_raw points if available (much more accurate than linear interp)
-        shape_raw = route.get('shape_raw') or []
-        if shape_raw and len(shape_raw) >= 2:
-            # Sample up to _JEEPNEY_SAMPLES * 3 shape points (skip start/end already added)
-            inner = shape_raw[1:-1]
-            step = max(1, len(inner) // (_JEEPNEY_SAMPLES * 3))
-            for i, pt in enumerate(inner[::step]):
-                cells.append(((int(pt[0] / _JEEPNEY_CELL), int(pt[1] / _JEEPNEY_CELL)),
-                               (rid, f'shape_{i}', pt[0], pt[1])))
-        else:
-            # Fallback: linear interpolation if no shape
-            for i in range(1, _JEEPNEY_SAMPLES + 1):
-                t = i / (_JEEPNEY_SAMPLES + 1)
-                ml = sl + t * (dl - sl)
-                mn = sn + t * (dn - sn)
-                cells.append(((int(ml / _JEEPNEY_CELL), int(mn / _JEEPNEY_CELL)),
-                               (rid, f'mid_{i}', ml, mn)))
+        cells = [
+            ((int(sl / _JEEPNEY_CELL), int(sn / _JEEPNEY_CELL)), (rid, 'start', sl, sn)),
+            ((int(dl / _JEEPNEY_CELL), int(dn / _JEEPNEY_CELL)), (rid, 'dest',  dl, dn)),
+        ]
+        for i in range(1, _JEEPNEY_SAMPLES + 1):
+            t  = i / (_JEEPNEY_SAMPLES + 1)
+            ml = sl + t * (dl - sl)
+            mn = sn + t * (dn - sn)
+            cells.append(((int(ml / _JEEPNEY_CELL), int(mn / _JEEPNEY_CELL)),
+                           (rid, f'mid_{i}', ml, mn)))
         return cells
 
     workers = min(32, max(1, len(_JEEPNEY_ROUTES)))
-    print(f"[DEBUG][{fn}] STEP 1 · Spawning ThreadPoolExecutor  workers={workers}...")
-    t1 = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         all_cell_lists = list(ex.map(index_one_route, list(_JEEPNEY_ROUTES.keys())))
-    print(f"[DEBUG][{fn}] STEP 1 · ThreadPool done  elapsed={time.time()-t1:.3f}s")
 
-    # Merge into shared dict (single-threaded merge to avoid race conditions)
-    t2 = time.time()
     total_entries = 0
     for cell_list in all_cell_lists:
         for cell, entry in cell_list:
             _JEEPNEY_SPATIAL[cell].append(entry)
             total_entries += 1
 
-    print(f"[DEBUG][{fn}] STEP 2 · Merge done  "
-          f"cells={len(_JEEPNEY_SPATIAL)}  entries={total_entries}  elapsed={time.time()-t2:.3f}s")
-    print(f"[DEBUG][{fn}] TOTAL SPATIAL BUILD TIME={time.time()-t_start:.3f}s")
+    print(f"[DEBUG][{fn}] cells={len(_JEEPNEY_SPATIAL)}  entries={total_entries}  "
+          f"elapsed={time.time()-t_start:.3f}s")
     print(f"[DEBUG][{fn}] ──────────────────────────────────────────────────────────")
 
 
@@ -957,10 +777,9 @@ def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=6):
 
 def _build_jeepney_shape_once(rid):
     """
-    Build and cache the canonical jeepney road polyline ONCE.
-    Uses shape_raw waypoints from jeepney.json to produce a road-following
-    polyline via OSRM, ensuring the route stays on the jeepney's actual path.
-    Falls back to raw shape points if OSRM is unavailable.
+    Fetch and cache the road-following polyline for a jeepney route.
+    Calls OSRM once (start → destination) and caches the result.
+    Falls back to a straight-line approximation if OSRM is unavailable.
     """
     if rid in _JEEPNEY_SHAPE_CACHE:
         return _JEEPNEY_SHAPE_CACHE[rid]['poly']
@@ -969,66 +788,35 @@ def _build_jeepney_shape_once(rid):
     if not route:
         return None
 
-    shape_raw = route.get('shape_raw') or []
-
-    if len(shape_raw) >= 2:
-        # Downsample waypoints if too many (OSRM URL length limit)
-        waypoints = shape_raw
-        if len(waypoints) > 60:
-            step = max(1, len(waypoints) // 60)
-            waypoints = waypoints[::step]
-            # Always include the last point so we reach the destination
-            if waypoints[-1] != shape_raw[-1]:
-                waypoints.append(shape_raw[-1])
-
-        coords_str = ";".join(f"{pt[1]},{pt[0]}" for pt in waypoints)
-        url = (f"https://router.project-osrm.org/route/v1/driving/{coords_str}"
-               f"?overview=full&geometries=geojson")
-        try:
-            r = requests.get(url, timeout=20, headers={'User-Agent': 'SafeRouteAI/1.0'})
-            r.raise_for_status()
-            js = r.json()
-            if js.get('code') == 'Ok' and js.get('routes'):
-                coords = [[pt[1], pt[0]] for pt in js['routes'][0]['geometry']['coordinates']]
-                dist   = js['routes'][0]['distance']
-                _JEEPNEY_SHAPE_CACHE[rid] = {'poly': coords, 'dist': dist}
-                _dbg("_build_jeepney_shape_once",
-                     f"OSRM via-shape OK rid={rid} pts={len(coords)} dist={int(dist)}")
-                return coords
-        except Exception as e:
-            _dbg("_build_jeepney_shape_once", f"OSRM failed rid={rid}: {e}")
-
-        # Fallback: use the raw shape points directly (still follows the road better
-        # than a naive start→end OSRM route)
-        _JEEPNEY_SHAPE_CACHE[rid] = {'poly': shape_raw, 'dist': _poly_dist(shape_raw)}
-        _dbg("_build_jeepney_shape_once", f"Using raw shape fallback rid={rid} pts={len(shape_raw)}")
-        return shape_raw
-
-    # No shape data: fall back to start→destination OSRM
     s = route['start']
     d = route['destination']
     url = (f"https://router.project-osrm.org/route/v1/driving/"
            f"{s['lon']},{s['lat']};{d['lon']},{d['lat']}"
            f"?overview=full&geometries=geojson")
     try:
-        r = requests.get(url, timeout=20, headers={'User-Agent': 'SafeRouteAI/1.0'})
+        r = requests.get(url, timeout=20, headers=_OSRM_HDRS)
         r.raise_for_status()
         js = r.json()
         if js.get('code') == 'Ok' and js.get('routes'):
             coords = [[pt[1], pt[0]] for pt in js['routes'][0]['geometry']['coordinates']]
             dist   = js['routes'][0]['distance']
             _JEEPNEY_SHAPE_CACHE[rid] = {'poly': coords, 'dist': dist}
+            _dbg("_build_jeepney_shape_once",
+                 f"OSRM OK rid={rid} pts={len(coords)} dist={int(dist)}")
             return coords
-    except Exception:
-        pass
-    return None
+    except Exception as e:
+        _dbg("_build_jeepney_shape_once", f"OSRM failed rid={rid}: {e}")
+
+    # Fallback: straight-line approximation (40 samples)
+    sl, sn, dl, dn = s['lat'], s['lon'], d['lat'], d['lon']
+    fallback = [[sl + i/40*(dl-sl), sn + i/40*(dn-sn)] for i in range(41)]
+    _JEEPNEY_SHAPE_CACHE[rid] = {'poly': fallback, 'dist': _poly_dist(fallback)}
+    return fallback
 
 def _build_jeepney_leg(rid, orig_lat, orig_lon, dest_lat, dest_lon):
     """
-    Build a single jeepney leg, snipping the canonical shape polyline
-    precisely at the closest points to orig and dest.
-    Uses segment projection so the snip lands on the road rather than
-    jumping to the nearest vertex.
+    Build a single jeepney leg, snipping the OSRM road polyline precisely
+    at the closest segment-projected points to orig and dest.
     """
     route = _JEEPNEY_ROUTES.get(rid)
     if not route:
