@@ -504,22 +504,17 @@ def _snip_poly(poly, i0, i1):
     return list(reversed(poly[i1:i0+1]))
 
 def _find_file(*names):
-    fn = "_find_file"
-    t_start = time.time()
     base = os.path.dirname(os.path.abspath(__file__))
     cwd  = os.getcwd()
     search_dirs = [
         os.path.join(base, 'map_transit'), base,
         os.path.join(cwd,  'map_transit'), cwd,
     ]
-    print(f"[DEBUG][{fn}] Searching for {names} across {len(search_dirs)} dirs...")
     for name in names:
         for d in search_dirs:
             p = os.path.join(d, name)
             if os.path.exists(p):
-                print(f"[DEBUG][{fn}]   Found '{name}' at: {p}  elapsed={time.time()-t_start:.3f}s")
                 return p
-    print(f"[DEBUG][{fn}]   !! None of {names} found  elapsed={time.time()-t_start:.3f}s")
     return None
 
 
@@ -813,6 +808,8 @@ def _snap_point_to_poly(poly, lat, lon):
             # If t==1.0 the projection is at the next vertex
             best_idx  = i + 1 if t >= 1.0 else i
     return best_idx, best_plat, best_plon, best_d
+
+def _build_jeepney_shape_once(rid):
     """
     Fetch and cache the road-following polyline for a jeepney route.
     Calls OSRM once (start → destination) and caches the result.
@@ -1107,29 +1104,24 @@ def _load_sakay():
     fn = "_load_sakay"
     global _SAKAY_READY
     t_start = time.time()
-    print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
-    print(f"[DEBUG][{fn}] CALL: _load_sakay()  _SAKAY_READY={_SAKAY_READY}")
 
     if _SAKAY_READY:
-        print(f"[DEBUG][{fn}] Already initialised — skipping  elapsed={time.time()-t_start:.3f}s")
-        print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
         return
 
     rp = _find_file('sakay_all_routes.json')
     sp = _find_file('sakay_all_shapes.geojson')
-    print(f"[DEBUG][{fn}] File discovery → routes={bool(rp)}  shapes={bool(sp)}")
+
+    if not rp and not sp:
+        _SAKAY_READY = True   # nothing to load — mark ready so we don't retry
+        return
+
+    print(f"[DEBUG][{fn}] Loading sakay files  routes={bool(rp)}  shapes={bool(sp)}")
 
     def parse_routes_worker(path):
-        t0 = time.time()
-        print(f"[DEBUG][{fn}][routes_worker] Parsing {path}...")
         _parse_routes(path)
-        print(f"[DEBUG][{fn}][routes_worker] Done  elapsed={time.time()-t0:.3f}s")
 
     def parse_shapes_worker(path):
-        t0 = time.time()
-        print(f"[DEBUG][{fn}][shapes_worker] Parsing {path}...")
         _parse_shapes(path)
-        print(f"[DEBUG][{fn}][shapes_worker] Done  elapsed={time.time()-t0:.3f}s")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
         futures = []
@@ -1141,18 +1133,11 @@ def _load_sakay():
             except Exception as e:
                 print(f"[DEBUG][{fn}] Worker error: {e}")
 
-    t_spatial = time.time()
-    print(f"[DEBUG][{fn}] Building sakay spatial index...")
     _build_spatial()
-    print(f"[DEBUG][{fn}] Spatial index built  elapsed={time.time()-t_spatial:.3f}s")
-
     _SAKAY_READY = True
-    n_stops = sum(len(v) for v in _STOP_SPATIAL.values())
-    print(f"[DEBUG][{fn}] ✓ READY: {len(_SAKAY_ROUTES)} routes "
-          f"({len(_SAKAY_PUB)} PUB · {len(_SAKAY_RAIL)} rail) · "
-          f"{len(_SAKAY_SHAPES)} shapes · {n_stops} indexed stops")
-    print(f"[DEBUG][{fn}] TOTAL INIT TIME={time.time()-t_start:.3f}s")
-    print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
+    print(f"[DEBUG][{fn}] ✓ {len(_SAKAY_ROUTES)} routes "
+          f"({len(_SAKAY_PUB)} PUB · {len(_SAKAY_RAIL)} rail)  "
+          f"elapsed={time.time()-t_start:.3f}s")
 
 
 def _parse_routes(path):
