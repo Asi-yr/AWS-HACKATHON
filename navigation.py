@@ -552,19 +552,19 @@ def _load_jeepney():
     _parse_jeepney(jpath)
     print(f"[DEBUG][{fn}] STEP 2 · Done  routes_loaded={len(_JEEPNEY_ROUTES)}  elapsed={time.time()-t2:.3f}s")
 
-    # STEP 3 — build spatial index (multithreaded)
-    print(f"[DEBUG][{fn}] STEP 3 · Building spatial index (multithreaded)...")
+    # STEP 3 — build spatial index
     t3 = time.time()
     _build_jeepney_spatial()
-    cells = len(_JEEPNEY_SPATIAL)
-    entries = sum(len(v) for v in _JEEPNEY_SPATIAL.values())
-    print(f"[DEBUG][{fn}] STEP 3 · Done  cells={cells}  indexed_entries={entries}  elapsed={time.time()-t3:.3f}s")
+    print(f"[DEBUG][{fn}] STEP 3 · Spatial index  cells={len(_JEEPNEY_SPATIAL)}  elapsed={time.time()-t3:.3f}s")
+
+    # STEP 4 — build transfer graph (coordinate-only, instant)
+    t4 = time.time()
+    _build_jeepney_graph()
+    print(f"[DEBUG][{fn}] STEP 4 · Transfer graph  elapsed={time.time()-t4:.3f}s")
 
     _JEEPNEY_READY = True
-    print(f"[DEBUG][{fn}] ✓ READY: {len(_JEEPNEY_ROUTES)} jeepney routes indexed "
-          f"({len(_JEEPNEY_PUJ)} PUJ IDs)")
-    print(f"[DEBUG][{fn}] TOTAL INIT TIME={time.time()-t_start:.3f}s")
-    print(f"[DEBUG][{fn}] ══════════════════════════════════════════════════════════")
+    print(f"[DEBUG][{fn}] ✓ READY: {len(_JEEPNEY_ROUTES)} routes  "
+          f"TOTAL={time.time()-t_start:.3f}s")
 
 def _parse_jeepney(path):
     global _JEEPNEY_ROUTES
@@ -624,14 +624,12 @@ def _parse_jeepney(path):
 
 def _build_jeepney_spatial():
     """
-    Build _JEEPNEY_SPATIAL grid index from actual OSRM road polylines.
-    Fetches all route shapes in parallel (cached after first build) so
-    the index reflects real roads, not straight lines between terminals.
+    Build _JEEPNEY_SPATIAL grid index using linear interpolation between
+    start and destination. This is only a prefilter — OSRM shapes are
+    fetched lazily per-route when actually needed for routing.
     """
     fn = "_build_jeepney_spatial"
     t_start = time.time()
-    print(f"[DEBUG][{fn}] ── START  routes={len(_JEEPNEY_ROUTES)}")
-
     _JEEPNEY_SPATIAL.clear()
 
     def index_one_route(rid):
@@ -639,34 +637,18 @@ def _build_jeepney_spatial():
         sl, sn = route['start']['lat'],       route['start']['lon']
         dl, dn = route['destination']['lat'],  route['destination']['lon']
 
-        # Always include start and destination
         cells = [
             ((int(sl / _JEEPNEY_CELL), int(sn / _JEEPNEY_CELL)), (rid, 'start', sl, sn)),
             ((int(dl / _JEEPNEY_CELL), int(dn / _JEEPNEY_CELL)), (rid, 'dest',  dl, dn)),
         ]
-
-        # Fetch real road polyline and index every Nth point along it
-        poly = _build_jeepney_shape_once(rid)
-        if poly and len(poly) >= 2:
-            step = max(1, len(poly) // 20)   # ~20 index points per route
-            for i, pt in enumerate(poly[::step]):
-                cells.append((
-                    (int(pt[0] / _JEEPNEY_CELL), int(pt[1] / _JEEPNEY_CELL)),
-                    (rid, f'road_{i}', pt[0], pt[1])
-                ))
-        else:
-            # OSRM unavailable — fall back to linear interpolation
-            for i in range(1, _JEEPNEY_SAMPLES + 1):
-                t  = i / (_JEEPNEY_SAMPLES + 1)
-                ml = sl + t * (dl - sl)
-                mn = sn + t * (dn - sn)
-                cells.append((
-                    (int(ml / _JEEPNEY_CELL), int(mn / _JEEPNEY_CELL)),
-                    (rid, f'mid_{i}', ml, mn)
-                ))
+        for i in range(1, _JEEPNEY_SAMPLES + 1):
+            t  = i / (_JEEPNEY_SAMPLES + 1)
+            ml = sl + t * (dl - sl)
+            mn = sn + t * (dn - sn)
+            cells.append(((int(ml / _JEEPNEY_CELL), int(mn / _JEEPNEY_CELL)),
+                           (rid, f'mid_{i}', ml, mn)))
         return cells
 
-    print(f"[DEBUG][{fn}] Fetching OSRM shapes + building index in parallel...")
     workers = min(32, max(1, len(_JEEPNEY_ROUTES)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         all_cell_lists = list(ex.map(index_one_route, list(_JEEPNEY_ROUTES.keys())))
@@ -679,7 +661,6 @@ def _build_jeepney_spatial():
 
     print(f"[DEBUG][{fn}] cells={len(_JEEPNEY_SPATIAL)}  entries={total_entries}  "
           f"elapsed={time.time()-t_start:.3f}s")
-    print(f"[DEBUG][{fn}] ──────────────────────────────────────────────────────────")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -813,7 +794,8 @@ def _build_jeepney_shape_once(rid):
     """
     Fetch and cache the road-following polyline for a jeepney route.
     Calls OSRM once (start → destination) and caches the result.
-    Falls back to a straight-line approximation if OSRM is unavailable.
+    Only caches on success — falls back to straight-line without caching
+    so OSRM is retried on the next request.
     """
     if rid in _JEEPNEY_SHAPE_CACHE:
         return _JEEPNEY_SHAPE_CACHE[rid]['poly']
@@ -828,24 +810,22 @@ def _build_jeepney_shape_once(rid):
            f"{s['lon']},{s['lat']};{d['lon']},{d['lat']}"
            f"?overview=full&geometries=geojson")
     try:
-        r = requests.get(url, timeout=20, headers=_OSRM_HDRS)
+        r = requests.get(url, timeout=10, headers=_OSRM_HDRS)
         r.raise_for_status()
         js = r.json()
         if js.get('code') == 'Ok' and js.get('routes'):
             coords = [[pt[1], pt[0]] for pt in js['routes'][0]['geometry']['coordinates']]
             dist   = js['routes'][0]['distance']
-            _JEEPNEY_SHAPE_CACHE[rid] = {'poly': coords, 'dist': dist}
+            _JEEPNEY_SHAPE_CACHE[rid] = {'poly': coords, 'dist': dist}   # cache only on success
             _dbg("_build_jeepney_shape_once",
                  f"OSRM OK rid={rid} pts={len(coords)} dist={int(dist)}")
             return coords
     except Exception as e:
         _dbg("_build_jeepney_shape_once", f"OSRM failed rid={rid}: {e}")
 
-    # Fallback: straight-line approximation (40 samples)
+    # Fallback: NOT cached — next call will retry OSRM
     sl, sn, dl, dn = s['lat'], s['lon'], d['lat'], d['lon']
-    fallback = [[sl + i/40*(dl-sl), sn + i/40*(dn-sn)] for i in range(41)]
-    _JEEPNEY_SHAPE_CACHE[rid] = {'poly': fallback, 'dist': _poly_dist(fallback)}
-    return fallback
+    return [[sl + i/40*(dl-sl), sn + i/40*(dn-sn)] for i in range(41)]
 
 def _build_jeepney_leg(rid, orig_lat, orig_lon, dest_lat, dest_lon):
     """
@@ -860,14 +840,19 @@ def _build_jeepney_leg(rid, orig_lat, orig_lon, dest_lat, dest_lon):
     if not poly or len(poly) < 2:
         return None
 
-    i_board,  bplat, bplon, _ = _snap_point_to_poly(poly, orig_lat, orig_lon)
-    i_alight, aplat, aplon, _ = _snap_point_to_poly(poly, dest_lat, dest_lon)
+    i_board,  bplat, bplon, bdist = _snap_point_to_poly(poly, orig_lat, orig_lon)
+    i_alight, aplat, aplon, adist = _snap_point_to_poly(poly, dest_lat, dest_lon)
 
-    if i_board >= i_alight:
+    # Route must go forward (board before alight on the poly).
+    # If equal, check haversine to decide — if they're genuinely too close just bail.
+    if i_board > i_alight:
+        return None
+    if i_board == i_alight and _hav(bplat, bplon, aplat, aplon) < 50:
         return None
 
-    # Snip: inject exact projected endpoints so the line starts/ends on the road
-    ridden = [[bplat, bplon]] + poly[i_board + 1:i_alight + 1] + [[aplat, aplon]]
+    # Snip: inject exact projected endpoints
+    inner = poly[i_board + 1: i_alight + 1]
+    ridden = [[bplat, bplon]] + inner + [[aplat, aplon]]
 
     if len(ridden) < 2:
         return None
@@ -899,56 +884,60 @@ def _build_jeepney_leg(rid, orig_lat, orig_lon, dest_lat, dest_lon):
 #  JEEPNEY JOURNEY PLANNER
 # ════════════════════════════════════════════════════════════════════════════════
 
-_JEEPNEY_GRAPH = defaultdict(list)  # rid -> [(other_rid, transfer_dist_m)]
+_JEEPNEY_GRAPH       = defaultdict(list)  # rid -> [(other_rid, transfer_dist_m)]
+_JEEPNEY_GRAPH_READY = False
 
-def _build_jeepney_graph(max_transfer_dist=600):
+def _build_jeepney_graph(max_transfer_dist=700):
+    """
+    Build transfer graph using only start/destination coordinates — no OSRM.
+    Two routes connect if any of their key points (start, mid, dest) are
+    within max_transfer_dist of each other.
+    Built once and cached; call is a no-op after first build.
+    """
+    global _JEEPNEY_GRAPH_READY
+    if _JEEPNEY_GRAPH_READY:
+        return
+
     _JEEPNEY_GRAPH.clear()
-
     rids = list(_JEEPNEY_ROUTES.keys())
-    shapes = {}
 
-    # Ensure all shapes exist
-    for rid in rids:
-        poly = _build_jeepney_shape_once(rid)
-        if poly:
-            shapes[rid] = poly
+    # Build a compact point list per route: [start, mid, dest]
+    def key_points(rid):
+        r  = _JEEPNEY_ROUTES[rid]
+        sl, sn = r['start']['lat'],       r['start']['lon']
+        dl, dn = r['destination']['lat'],  r['destination']['lon']
+        return [(sl, sn), ((sl+dl)/2, (sn+dn)/2), (dl, dn)]
+
+    pts = {rid: key_points(rid) for rid in rids}
 
     for i, rid1 in enumerate(rids):
-        p1 = shapes.get(rid1)
-        if not p1:
-            continue
-
         for rid2 in rids[i+1:]:
-            p2 = shapes.get(rid2)
-            if not p2:
-                continue
-
-            # Check minimum distance between polylines
-            min_d = float("inf")
-            for a in p1[::10]:
-                for b in p2[::10]:
-                    d = _hav(a[0], a[1], b[0], b[1])
-                    if d < min_d:
-                        min_d = d
-                    if min_d <= max_transfer_dist:
-                        break
-                if min_d <= max_transfer_dist:
-                    break
-
+            min_d = min(
+                _hav(a[0], a[1], b[0], b[1])
+                for a in pts[rid1]
+                for b in pts[rid2]
+            )
             if min_d <= max_transfer_dist:
                 _JEEPNEY_GRAPH[rid1].append((rid2, min_d))
                 _JEEPNEY_GRAPH[rid2].append((rid1, min_d))
 
-def _snap_user_to_routes(lat, lon, max_dist=900):
+    _JEEPNEY_GRAPH_READY = True
+    edges = sum(len(v) for v in _JEEPNEY_GRAPH.values()) // 2
+    print(f"[DEBUG][_build_jeepney_graph] graph ready  routes={len(rids)}  edges={edges}")
+
+def _snap_user_to_routes(lat, lon, max_dist=1200):
+    """
+    Find all routes whose straight-line path passes within max_dist of (lat, lon).
+    Uses segment projection on start→dest line — fast, no OSRM.
+    """
     hits = []
     for rid, route in _JEEPNEY_ROUTES.items():
-        poly = _build_jeepney_shape_once(rid)
-        if not poly:
-            continue
-        idx = _closest_idx(poly, lat, lon)
-        d = _hav(lat, lon, poly[idx][0], poly[idx][1])
+        sl, sn = route['start']['lat'],       route['start']['lon']
+        dl, dn = route['destination']['lat'],  route['destination']['lon']
+        _, _, _, d = _proj_point_on_segment(lat, lon, sl, sn, dl, dn)
         if d <= max_dist:
-            hits.append((rid, idx, d))
+            hits.append((rid, 0, d))
+    hits.sort(key=lambda x: x[2])
     return hits
 
 def _find_jeepney_chain(orig_lat, orig_lon, dest_lat, dest_lon, max_hops=3):
@@ -1074,7 +1063,7 @@ def plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=1):
             return [_assemble_route([leg], orig_lat, orig_lon, dest_lat, dest_lon, 0)]
 
     # ── 2. BFS multi-hop graph search ────────────────────────────────────────
-    _build_jeepney_graph()
+    # Graph is built during _load_jeepney — no rebuild needed here
     chain = _find_jeepney_chain(orig_lat, orig_lon, dest_lat, dest_lon)
     if not chain:
         return []
