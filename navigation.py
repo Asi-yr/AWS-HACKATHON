@@ -903,18 +903,18 @@ def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=6):
 #  JEEPNEY LEG BUILDER  (OSM / OSRM called HERE — after candidate selection)
 # ════════════════════════════════════════════════════════════════════════════════
 
-def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, use_osrm_canonical=True, samples=80):
+def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon,
+                       use_osrm=False, samples=80):
     """
-    Build a jeepney leg by:
-      1) obtaining the canonical road polyline for the route (OSRM driving),
-      2) projecting board/alight onto that polyline (closest point along polyline),
-      3) slicing the polyline between those projected positions,
-      4) returning the clipped road polyline (road-accurate, not straight-line).
-    If OSRM canonical polyline is unavailable, falls back to sampled straight line.
+    Build a jeepney leg and remain backward-compatible with callers that pass use_osrm.
+    Strategy:
+      • Obtain canonical road polyline for the route (OSRM driving) via _get_canonical_route_polyline.
+      • Project board/alight onto that polyline and slice between projections.
+      • Return clipped road polyline (road-accurate). If canonical polyline unavailable, fall back to sampled line.
     """
     fn = "_build_jeepney_leg"
     t_start = time.time()
-    _dbg(fn, f"CALL rid={rid} board=({board_lat:.6f},{board_lon:.6f}) alight=({alight_lat:.6f},{alight_lon:.6f})")
+    _dbg(fn, f"CALL rid={rid} board=({board_lat:.6f},{board_lon:.6f}) alight=({alight_lat:.6f},{alight_lon:.6f}) use_osrm={use_osrm} samples={samples}")
 
     route = _JEEPNEY_ROUTES.get(rid)
     if not route:
@@ -923,34 +923,50 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, use_os
 
     rname = route['route_transit']
 
-    # 1) Get canonical polyline (road geometry)
-    poly, canonical_dist = _get_canonical_route_polyline(rid)
-    if not poly or len(poly) < 2:
-        _dbg(fn, f"!! No canonical polyline for {rid}")
-        return None
+    # 1) Get canonical polyline (road geometry). _get_canonical_route_polyline should exist in file.
+    #    If it doesn't, this call will fall back to a sampled straight line inside that helper.
+    try:
+        canonical_poly, canonical_dist = _get_canonical_route_polyline(rid, force_refresh=False)
+    except Exception as e:
+        _dbg(fn, f"_get_canonical_route_polyline exception: {e}")
+        canonical_poly, canonical_dist = None, 0.0
 
-    # Helper: compute cumulative distances along polyline and find closest projection
+    # If canonical polyline is missing, build a sampled straight-line polyline as last resort
+    if not canonical_poly or len(canonical_poly) < 2:
+        _dbg(fn, f"No canonical polyline for {rid}; building sampled straight-line polyline")
+        sampled = []
+        s_lat, s_lon = route['start']['lat'], route['start']['lon']
+        d_lat, d_lon = route['destination']['lat'], route['destination']['lon']
+        s_count = max(40, samples)
+        for i in range(s_count + 1):
+            t = i / float(s_count)
+            lat = s_lat + t * (d_lat - s_lat)
+            lon = s_lon + t * (d_lon - s_lon)
+            sampled.append([lat, lon])
+        canonical_poly = sampled
+        canonical_dist = _poly_dist(canonical_poly)
+
+    # 2) Build cumulative distances along canonical polyline
     cum = [0.0]
-    for i in range(1, len(poly)):
-        cum.append(cum[-1] + _hav(poly[i-1][0], poly[i-1][1], poly[i][0], poly[i][1]))
-
+    for i in range(1, len(canonical_poly)):
+        cum.append(cum[-1] + _hav(canonical_poly[i-1][0], canonical_poly[i-1][1],
+                                  canonical_poly[i][0], canonical_poly[i][1]))
     total_len = cum[-1] if cum else 0.0
 
+    # 3) Project a point onto the polyline: find closest segment and projection
     def project_onto_poly(lat, lon):
-        # Find closest segment and project point onto that segment (linear interpolation)
-        best = (1e18, 0, 0.0, None)  # (dist_sq, seg_idx, t_on_seg, proj_point)
-        for i in range(len(poly) - 1):
-            a_lat, a_lon = poly[i]
-            b_lat, b_lon = poly[i+1]
-            # use _proj_point_on_segment but it expects A->B as alat,alon, blat,blon
+        best = (1e18, 0, 0.0, None)  # (dist_sq, seg_idx, t_on_seg, (plat,plon,dist))
+        for i in range(len(canonical_poly) - 1):
+            a_lat, a_lon = canonical_poly[i]
+            b_lat, b_lon = canonical_poly[i+1]
             t, plat, plon, dist = _proj_point_on_segment(lat, lon, a_lat, a_lon, b_lat, b_lon)
             dsq = _dsq(plat, plon, lat, lon)
             if dsq < best[0]:
                 best = (dsq, i, t, (plat, plon, dist))
-        # compute absolute distance along poly to projection point
         seg_idx = best[1]
         t_on = best[2]
         proj_lat, proj_lon, proj_dist = best[3]
+        # distance along polyline to projection point
         dist_along = cum[seg_idx] + t_on * (cum[seg_idx+1] - cum[seg_idx])
         return dist_along, proj_lat, proj_lon, proj_dist
 
@@ -958,7 +974,7 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, use_os
     a_along, aplat, aplon, adist = project_onto_poly(alight_lat, alight_lon)
     _dbg(fn, f"proj_along board={b_along:.1f}m bdist={int(bdist)} alight={a_along:.1f}m adist={int(adist)} total_len={int(total_len)}m")
 
-    # Ensure ordering: alight must be after board; if not, swap
+    # 4) Ensure ordering: alight must be after board; if not, swap
     if a_along < b_along:
         _dbg(fn, "alight projection before board projection — swapping to preserve forward direction")
         b_along, a_along = a_along, b_along
@@ -966,57 +982,51 @@ def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, use_os
         bplon, aplon = aplon, bplon
         bdist, adist = adist, bdist
 
-    # Convert along-distances to indices in poly and fractional positions
+    # 5) Convert along-distances to segment indices and fractional positions
     def along_to_index_frac(along):
         if total_len <= 0:
             return 0, 0.0
-        # find segment where cum[i] <= along <= cum[i+1]
         for i in range(len(cum)-1):
             if cum[i] <= along <= cum[i+1] + 1e-6:
                 seg_len = cum[i+1] - cum[i]
-                if seg_len <= 0:
-                    frac = 0.0
-                else:
-                    frac = (along - cum[i]) / seg_len
+                frac = 0.0 if seg_len <= 0 else (along - cum[i]) / seg_len
                 return i, frac
-        # if beyond end
         return len(cum)-2, 1.0
 
     idx_b, frac_b = along_to_index_frac(b_along)
     idx_a, frac_a = along_to_index_frac(a_along)
 
-    # Build sliced polyline: include partial endpoints
+    # 6) Build sliced polyline with interpolated endpoints
     sliced = []
-    # start point (interpolated)
-    a_lat, a_lon = poly[idx_b]
-    b_lat, b_lon = poly[idx_b+1]
+    # start interpolated point
+    a_lat, a_lon = canonical_poly[idx_b]
+    b_lat, b_lon = canonical_poly[idx_b+1]
     start_lat = a_lat + frac_b * (b_lat - a_lat)
     start_lon = a_lon + frac_b * (b_lon - a_lon)
     sliced.append([start_lat, start_lon])
 
-    # include intermediate full vertices
+    # intermediate full vertices
     for i in range(idx_b+1, idx_a+1):
-        sliced.append([poly[i][0], poly[i][1]])
+        sliced.append([canonical_poly[i][0], canonical_poly[i][1]])
 
-    # end point (interpolated) — if idx_a == idx_b, ensure we still include end
-    if idx_a >= idx_b:
-        c_lat, c_lon = poly[idx_a]
-        d_lat, d_lon = poly[idx_a+1]
-        end_lat = c_lat + frac_a * (d_lat - c_lat)
-        end_lon = c_lon + frac_a * (d_lon - c_lon)
-        # if last appended point equals end, replace; else append
-        if sliced and abs(sliced[-1][0] - end_lat) < 1e-9 and abs(sliced[-1][1] - end_lon) < 1e-9:
-            sliced[-1] = [end_lat, end_lon]
-        else:
-            sliced.append([end_lat, end_lon])
+    # end interpolated point
+    c_lat, c_lon = canonical_poly[idx_a]
+    d_lat, d_lon = canonical_poly[idx_a+1]
+    end_lat = c_lat + frac_a * (d_lat - c_lat)
+    end_lon = c_lon + frac_a * (d_lon - c_lon)
+    if sliced and abs(sliced[-1][0] - end_lat) < 1e-9 and abs(sliced[-1][1] - end_lon) < 1e-9:
+        sliced[-1] = [end_lat, end_lon]
+    else:
+        sliced.append([end_lat, end_lon])
 
     # Ensure at least two points
     if len(sliced) < 2:
         sliced = [[bplat, bplon], [aplat, aplon]]
 
-    # Compute ridden distance along sliced polyline
+    # 7) Compute ridden distance along sliced polyline
     dist_m = _poly_dist(sliced)
 
+    # 8) Fare and names
     fare = calc_sakay_fare(rid, dist_m)
     parts = rname.split(' - ', 1)
     bname = parts[0].strip()
