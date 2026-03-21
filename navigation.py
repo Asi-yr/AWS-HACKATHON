@@ -715,7 +715,7 @@ def _prefilter_routes_by_spatial(orig_lat, orig_lon, dest_lat, dest_lon, cell_ra
         return set(_JEEPNEY_ROUTES.keys())
     return candidates
 
-def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=6):
+def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=1):
     fn = "_find_jeepney_candidates"
     t_start = time.time()
     _dbg(fn, f"CALL origin=({orig_lat:.6f},{orig_lon:.6f}) dest=({dest_lat:.6f},{dest_lon:.6f})")
@@ -1051,27 +1051,20 @@ def _build_jeepney_chain_legs(chain, orig_lat, orig_lon, dest_lat, dest_lon):
 def plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=1):
     """
     Plan a jeepney journey from orig to dest.
+    Always returns at most 1 route — the closest/best-scoring match.
     Priority:
-      1. Try direct candidates from _find_jeepney_candidates (pure geometry, fast).
+      1. Direct candidate from _find_jeepney_candidates (pure geometry, fast).
       2. Fall back to BFS graph search for multi-hop transfers.
     """
     _load_jeepney()
 
-    # ── 1. Direct single-route candidates (geometry pre-filter) ─────────────
-    direct_candidates, _ = _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=6)
+    # ── 1. Direct single-route candidate (best geometry match) ──────────────
+    direct_candidates, _ = _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon, topk=1)
     if direct_candidates:
-        results = []
-        for cand in direct_candidates:
-            score, rid, bplat, bplon, aplat, aplon = cand
-            # Build leg using the actual snap points found by candidate scoring
-            leg = _build_jeepney_leg(rid, bplat, bplon, aplat, aplon)
-            if leg:
-                route = _assemble_route([leg], orig_lat, orig_lon, dest_lat, dest_lon, len(results))
-                results.append(route)
-                if len(results) >= max_results:
-                    break
-        if results:
-            return results
+        score, rid, bplat, bplon, aplat, aplon = direct_candidates[0]
+        leg = _build_jeepney_leg(rid, bplat, bplon, aplat, aplon)
+        if leg:
+            return [_assemble_route([leg], orig_lat, orig_lon, dest_lat, dest_lon, 0)]
 
     # ── 2. BFS multi-hop graph search ────────────────────────────────────────
     _build_jeepney_graph()
@@ -1083,8 +1076,7 @@ def plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=1):
     if not legs:
         return []
 
-    route = _assemble_route(legs, orig_lat, orig_lon, dest_lat, dest_lon, 0)
-    return [route]
+    return [_assemble_route(legs, orig_lat, orig_lon, dest_lat, dest_lon, 0)]
 
 # ════════════════════════════════════════════════════════════════════════════════
 #  SAKAY LOADER  (Bus + Rail ONLY — jeepney now served by jeepney.json above)
@@ -1571,7 +1563,7 @@ def plan_surface_journey(allowed_modes, orig_lat, orig_lon, dest_lat, dest_lon, 
         if 'jeepney' not in allowed_modes:
             return []
         print(f"[DEBUG][{fn}][run_jeepney] → plan_jeepney_journey()")
-        return plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results)
+        return plan_jeepney_journey(orig_lat, orig_lon, dest_lat, dest_lon, max_results=1)
 
     def run_bus():
         if 'bus' not in allowed_modes:
