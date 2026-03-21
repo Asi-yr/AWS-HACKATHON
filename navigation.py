@@ -6,6 +6,10 @@ print("[DEBUG][INIT] Loading navigation.py  ·  jeepney.json edition")
 print("[DEBUG][INIT] ═══════════════════════════════════════════════════════════════════")
 t_nav_init = time.time()
 
+def _dbg(tag, msg):
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[DEBUG][{tag}] [{ts}] {msg}")
+
 # ── Known locations atlas ────────────────────────────────────────────────────
 _KNOWN = {
     "lrt monumento station":(14.654,120.983),"monumento":(14.654,120.983),
