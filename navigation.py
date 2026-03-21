@@ -56,51 +56,189 @@ _OVERPASS = [
     "https://overpass.openstreetmap.ru/api/interpreter",
 ]
 
+# Lightweight in-memory short-term cache to avoid repeating identical heavy queries
+_OVERPASS_QUERY_CACHE = {}          # query_text -> (timestamp, parsed_json)
+_OVERPASS_CACHE_TTL = 8.0          # seconds to keep a cached response
+
+# Per-endpoint cooldown tracker to avoid hammering endpoints that recently returned 429/errors
+_OVERPASS_EP_COOLDOWN = {}         # endpoint -> next_allowed_epoch
+_OVERPASS_EP_BASE_COOLDOWN = 8.0   # seconds base cooldown after a failure
+
+def _split_bbox_query(query):
+    """
+    If the query contains a bbox placeholder pattern like '{{bbox}}' or 'bbox',
+    attempt to split into 4 tiles (2x2) by replacing a simple bbox token.
+    This is conservative: only used when query is very large and contains an explicit bbox token.
+    Returns list of subqueries or None if not splittable.
+    """
+    fn = "_split_bbox_query"
+    if "{{bbox}}" not in query and "bbox" not in query:
+        _dbg(fn, "No bbox token found; skipping split")
+        return None
+
+    # Try to extract an explicit bbox if present in the form: (south,west,north,east)
+    # This is best-effort; if we can't parse, return None.
+    import re
+    m = re.search(r"\(\s*([-0-9\.]+)\s*,\s*([-0-9\.]+)\s*,\s*([-0-9\.]+)\s*,\s*([-0-9\.]+)\s*\)", query)
+    if not m:
+        _dbg(fn, "No explicit bbox coords found; will not split")
+        return None
+
+    south, west, north, east = map(float, m.groups())
+    _dbg(fn, f"Splitting bbox {south},{west},{north},{east} into 4 tiles")
+
+    mid_lat = (south + north) / 2.0
+    mid_lon = (west + east) / 2.0
+
+    tiles = [
+        (south, west, mid_lat, mid_lon),
+        (south, mid_lon, mid_lat, east),
+        (mid_lat, west, north, mid_lon),
+        (mid_lat, mid_lon, north, east),
+    ]
+
+    subqueries = []
+    for (s, w, n, e) in tiles:
+        bbox_str = f"{s},{w},{n},{e}"
+        # Replace common bbox tokens; try both '{{bbox}}' and the explicit original bbox string
+        if "{{bbox}}" in query:
+            subq = query.replace("{{bbox}}", bbox_str)
+        else:
+            # replace the first occurrence of the original bbox coords with the tile bbox
+            subq = re.sub(r"\(\s*[-0-9\.]+\s*,\s*[-0-9\.]+\s*,\s*[-0-9\.]+\s*,\s*[-0-9\.]+\s*\)",
+                          f"({bbox_str})", query, count=1)
+        subqueries.append(subq)
+    return subqueries
+
 def _overpass_query(query, max_retries=5, timeout=30):
+    """
+    Robust Overpass query with:
+      - short-term caching
+      - per-endpoint cooldowns
+      - exponential backoff + jitter
+      - optional bbox splitting (safe, conservative)
+      - bounded parallel endpoint probing (small pool)
+    Returns parsed JSON or None on failure.
+    """
     fn = "_overpass_query"
     t_start = time.time()
     _dbg(fn, f"START payload={len(query)}chars max_retries={max_retries} timeout={timeout}s")
 
-    # Helper to try a single endpoint once
-    def _try_endpoint(ep, attempt_idx, timeout_local):
+    # 1) Short-term cache check
+    now = time.time()
+    cached = _OVERPASS_QUERY_CACHE.get(query)
+    if cached:
+        ts, data = cached
+        if now - ts <= _OVERPASS_CACHE_TTL:
+            _dbg(fn, f"CACHE HIT (age={now-ts:.2f}s) returning cached response")
+            return data
+        else:
+            _dbg(fn, f"CACHE EXPIRED (age={now-ts:.2f}s)")
+
+    # 2) If query is huge and contains bbox token, attempt safe split into tiles
+    if len(query) > 16000:
+        subqs = _split_bbox_query(query)
+        if subqs:
+            _dbg(fn, f"Large query detected; executing {len(subqs)} subqueries and merging results")
+            merged = {'elements': []}
+            for i, sq in enumerate(subqs, 1):
+                _dbg(fn, f"Subquery {i}/{len(subqs)} length={len(sq)}")
+                res = _overpass_query(sq, max_retries=max_retries, timeout=timeout)
+                if res and isinstance(res, dict):
+                    merged['elements'].extend(res.get('elements', []))
+                else:
+                    _dbg(fn, f"Subquery {i} failed; aborting merged result")
+                    return None
+            # cache merged result briefly
+            _OVERPASS_QUERY_CACHE[query] = (time.time(), merged)
+            _dbg(fn, f"Subqueries merged elements={len(merged['elements'])} total_elapsed={time.time()-t_start:.3f}s")
+            return merged
+        else:
+            _dbg(fn, "Large query but not splittable; proceeding without split")
+
+    # 3) Endpoint probing with cooldowns and backoff
+    # Prepare endpoints order rotated by attempt to spread load
+    endpoints = list(_OVERPASS)
+
+    # Helper to attempt a single endpoint once
+    def _attempt_endpoint(ep):
+        # Respect per-endpoint cooldown
+        next_allowed = _OVERPASS_EP_COOLDOWN.get(ep, 0.0)
+        if time.time() < next_allowed:
+            _dbg(fn, f"Skipping {ep} due to cooldown until {next_allowed:.1f}")
+            return None, f"cooldown_until_{next_allowed:.1f}"
+
         try:
             t_req = time.time()
-            r = requests.post(ep, data=query, headers={'User-Agent': 'SafeRoute/1.0'}, timeout=timeout_local)
-            _dbg(fn, f"HTTP {r.status_code} from {ep} in {time.time()-t_req:.3f}s (attempt {attempt_idx})")
+            r = requests.post(ep, data=query, headers={'User-Agent': 'SafeRoute/1.0'}, timeout=timeout)
+            _dbg(fn, f"HTTP {r.status_code} from {ep} in {time.time()-t_req:.3f}s")
+            # Handle 429 explicitly
+            if r.status_code == 429:
+                retry_after = r.headers.get('Retry-After')
+                cooldown = _OVERPASS_EP_BASE_COOLDOWN
+                if retry_after:
+                    try:
+                        cooldown = max(cooldown, float(retry_after))
+                    except Exception:
+                        pass
+                _OVERPASS_EP_COOLDOWN[ep] = time.time() + cooldown
+                _dbg(fn, f"429 from {ep}; setting cooldown {cooldown}s (until {_OVERPASS_EP_COOLDOWN[ep]:.1f})")
+                return None, "429"
             r.raise_for_status()
             # Defensive JSON decode
             try:
                 res_json = r.json()
             except ValueError as e:
                 _dbg(fn, f"JSON decode error from {ep}: {e}")
+                # If body empty or invalid, penalize endpoint a bit
+                _OVERPASS_EP_COOLDOWN[ep] = time.time() + _OVERPASS_EP_BASE_COOLDOWN
                 return None, f"json_error:{e}"
             el_count = len(res_json.get('elements', []))
-            _dbg(fn, f"JSON OK elements={el_count} total_elapsed={time.time()-t_start:.3f}s")
+            _dbg(fn, f"JSON OK from {ep} elements={el_count} total_elapsed={time.time()-t_start:.3f}s")
             return res_json, None
+        except requests.exceptions.RequestException as e:
+            _dbg(fn, f"RequestException from {ep}: {e}")
+            # penalize endpoint on network errors
+            _OVERPASS_EP_COOLDOWN[ep] = time.time() + _OVERPASS_EP_BASE_COOLDOWN
+            return None, str(e)
         except Exception as e:
-            _dbg(fn, f"Exception from {ep} attempt {attempt_idx}: {e}")
+            _dbg(fn, f"Unexpected exception from {ep}: {e}")
+            _OVERPASS_EP_COOLDOWN[ep] = time.time() + _OVERPASS_EP_BASE_COOLDOWN
             return None, str(e)
 
-    # Try endpoints in parallel per attempt round; first success returns
+    # Try up to max_retries rounds; in each round probe endpoints in rotated order.
     for attempt in range(1, max_retries + 1):
-        # choose endpoints order deterministic but rotate to spread load
-        eps = _OVERPASS[ (attempt-1) % len(_OVERPASS) : ] + _OVERPASS[: (attempt-1) % len(_OVERPASS)]
-        _dbg(fn, f"Attempt {attempt}/{max_retries} endpoints={len(eps)}")
-        # try endpoints in parallel but with small pool to avoid too many concurrent connections
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(eps))) as ex:
-            futures = { ex.submit(_try_endpoint, ep, attempt, timeout): ep for ep in eps }
+        # rotate endpoints to spread load across servers
+        start_idx = (attempt - 1) % len(endpoints)
+        eps = endpoints[start_idx:] + endpoints[:start_idx]
+        _dbg(fn, f"Attempt {attempt}/{max_retries} probing {len(eps)} endpoints")
+
+        # Probe endpoints sequentially but allow a small parallelism for speed (bounded)
+        # We will try up to 2 endpoints in parallel to reduce latency while avoiding flood.
+        max_parallel = min(2, len(eps))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel) as ex:
+            futures = { ex.submit(_attempt_endpoint, ep): ep for ep in eps }
+            # as soon as one returns a valid JSON, cancel remaining
             for fut in concurrent.futures.as_completed(futures):
                 ep = futures[fut]
                 res, err = fut.result()
                 if res is not None:
+                    # cache and return
+                    _OVERPASS_QUERY_CACHE[query] = (time.time(), res)
                     _dbg(fn, f"SUCCESS from {ep} on attempt {attempt}")
                     return res
                 else:
                     _dbg(fn, f"FAIL {ep} on attempt {attempt} err={err}")
-        # backoff before next attempt
+
+        # If we reach here, no endpoint returned valid JSON this round
+        # Exponential backoff with jitter before next round
         if attempt < max_retries:
-            sleep_s = min(10, 2 ** attempt)
-            _dbg(fn, f"Sleeping {sleep_s}s before retry...")
+            backoff = min(30, (2 ** attempt))
+            # jitter up to 25% of backoff
+            import random
+            jitter = backoff * 0.15 * (random.random() - 0.5)
+            sleep_s = max(1.0, backoff + jitter)
+            _dbg(fn, f"No success this round; sleeping {sleep_s:.1f}s before retry")
             time.sleep(sleep_s)
 
     _dbg(fn, f"ALL {max_retries} attempts failed elapsed={time.time()-t_start:.3f}s")
@@ -770,7 +908,7 @@ def _find_jeepney_candidates(orig_lat, orig_lon, dest_lat, dest_lon):
 #  JEEPNEY LEG BUILDER  (OSM / OSRM called HERE — after candidate selection)
 # ════════════════════════════════════════════════════════════════════════════════
 
-def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, samples=80, use_osrm=False):
+def _build_jeepney_leg(rid, board_lat, board_lon, alight_lat, alight_lon, samples=80, use_osrm=True):
     fn = "_build_jeepney_leg"
     t_start = time.time()
     _dbg(fn, f"CALL: {rid} board=({board_lat:.6f},{board_lon:.6f}) alight=({alight_lat:.6f},{alight_lon:.6f})")
