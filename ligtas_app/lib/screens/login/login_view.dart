@@ -139,11 +139,10 @@ class _LoginViewState extends State<LoginView> {
 
   Future<void> _handleRegister() async {
     final name = _nameController.text.trim();
-    final email = _emailController.text.trim();
     final password = _passwordController.text;
-    debugPrint('[REGISTER] Attempting registration for name: $name, email: $email');
+    debugPrint('[REGISTER] Attempting registration for username: $name');
 
-    if (name.isEmpty || email.isEmpty || password.isEmpty) {
+    if (name.isEmpty || password.isEmpty) {
       _showError('Please fill all fields');
       debugPrint('[REGISTER] Missing fields');
       return;
@@ -161,7 +160,7 @@ class _LoginViewState extends State<LoginView> {
       final response = await ApiClient.instance.register(
         username: name,
         password: password,
-        email: email,
+        email: '',
       );
       debugPrint('[REGISTER] Response: $response');
 
@@ -283,17 +282,19 @@ class _LoginViewState extends State<LoginView> {
 
                   // ── Fields ────────────────────────────────────────
                   if (!_isLogin) ...[
-                    _field('Full Name', Icons.person_outline_rounded, false, _nameController, isDark),
+                    _field('Username', Icons.person_outline_rounded, false, _nameController, isDark),
                     const SizedBox(height: 14),
                   ],
-                  _field(
-                    _isLogin ? 'Username' : 'Email Address',
-                    _isLogin ? Icons.person_outline_rounded : Icons.email_outlined,
-                    false,
-                    _emailController,
-                    isDark,
-                  ),
-                  const SizedBox(height: 14),
+                  if (_isLogin) ...[
+                    _field(
+                      'Username',
+                      Icons.person_outline_rounded,
+                      false,
+                      _emailController,
+                      isDark,
+                    ),
+                    const SizedBox(height: 14),
+                  ],
                   _field('Password', Icons.lock_outline_rounded, true, _passwordController, isDark),
                   const SizedBox(height: 28),
 
@@ -336,7 +337,7 @@ class _LoginViewState extends State<LoginView> {
             if (_isLoading)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black.withOpacity(0.18),
+                  color: Colors.black.withValues(alpha: 0.18),
                   child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,

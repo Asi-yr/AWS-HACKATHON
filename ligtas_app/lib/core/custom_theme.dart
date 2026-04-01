@@ -32,14 +32,14 @@ class _LT {
   Color get blue     => dark ? AppColors.blueDark  : AppColors.blue;
   Color get toggleBg => AppColors.toggleBg(dark);
 
-  TextStyle title({double size = 17, FontWeight w = FontWeight.w800, Color? color}) =>
-      GoogleFonts.plusJakartaSans(fontSize: size, fontWeight: w, color: color ?? text);
+  TextStyle title({num size = 17, FontWeight w = FontWeight.w800, Color? color}) =>
+      GoogleFonts.plusJakartaSans(fontSize: size.toDouble(), fontWeight: w, color: color ?? text);
 
-  TextStyle body({double size = 14, FontWeight w = FontWeight.w400, Color? color}) =>
-      GoogleFonts.dmSans(fontSize: size, fontWeight: w, color: color ?? text);
+  TextStyle body({num size = 14, FontWeight w = FontWeight.w400, Color? color}) =>
+      GoogleFonts.dmSans(fontSize: size.toDouble(), fontWeight: w, color: color ?? text);
 
-  TextStyle label({double size = 11, Color? color}) =>
+  TextStyle label({num size = 11, Color? color}) =>
       GoogleFonts.plusJakartaSans(
-          fontSize: size, fontWeight: FontWeight.w700,
+          fontSize: size.toDouble(), fontWeight: FontWeight.w700,
           letterSpacing: 0.08, color: color ?? text3);
 }

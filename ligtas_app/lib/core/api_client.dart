@@ -78,7 +78,7 @@ class ApiClient {
     final subnets = await _getLocalSubnets();
     debugPrint('[API] Device subnets: $subnets');
     for (final s in subnets) {
-      for (int h = 1; h <= 254; h++) candidates.add('http://$s.$h:5000');
+      for (int h = 1; h <= 254; h++) { candidates.add('http://$s.$h:5000'); }
     }
 
     debugPrint('[API] Probing \${candidates.length} candidates simultaneously...');
@@ -810,6 +810,50 @@ class ApiClient {
       return {'ok': false, 'message': 'Cannot reach server. Check your connection.'};
     } catch (e) {
       debugPrint('[LOGIN] Exception: $e');
+      return {'ok': false, 'message': e.toString().replaceFirst('Exception: ', '')};
+    }
+  }
+
+  /// Fetch the authenticated user's profile (username, email, totp_enabled).
+  Future<Map<String, dynamic>> getAuthMe({required String token}) async {
+    try {
+      final uri  = await _uriAsync('/api/auth/me');
+      final resp = await http.get(
+        uri,
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) return {'ok': false};
+      return jsonDecode(resp.body) as Map<String, dynamic>;
+    } catch (_) {
+      return {'ok': false};
+    }
+  }
+
+  /// Enable or disable 2FA for the current user.
+  Future<Map<String, dynamic>> toggle2FA({
+    required bool enable,
+    required String token,
+  }) async {
+    try {
+      final endpoint = enable ? '/api/auth/setup-2fa' : '/api/auth/disable-2fa';
+      final uri = await _uriAsync(endpoint);
+      final resp = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 15));
+      final decoded = jsonDecode(resp.body);
+      if (resp.statusCode != 200) {
+        return {'ok': false, 'message': decoded['message'] ?? '2FA update failed'};
+      }
+      return decoded;
+    } on TimeoutException catch (_) {
+      return {'ok': false, 'message': 'Request timed out. Please try again.'};
+    } on SocketException catch (_) {
+      return {'ok': false, 'message': 'Cannot reach server. Check your connection.'};
+    } catch (e) {
       return {'ok': false, 'message': e.toString().replaceFirst('Exception: ', '')};
     }
   }

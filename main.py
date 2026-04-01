@@ -122,6 +122,25 @@ app.secret_key = 'saferoute_super_secret_key'
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
 app.register_blueprint(auth_bp)
 
+
+def _jwt_username(raw_token: str):
+    """Extract username from a Bearer token.
+    Handles both JWT (eyJ...) issued by auth.py and the legacy
+    plain-username tokens used by the HTML session-based flow.
+    Returns the username string or None on failure.
+    """
+    if not raw_token:
+        return None
+    if raw_token.startswith('eyJ'):
+        try:
+            import jwt as _jwt
+            payload = _jwt.decode(raw_token, app.secret_key, algorithms=['HS256'])
+            return payload.get('sub')
+        except Exception:
+            return None   # expired or invalid — treat as unauthorized
+    return raw_token      # legacy plain-username token (HTML login flow)
+
+
 print(f"[DEBUG] [INIT] Application setup complete in {time.time() - t_init_start:.4f}s")
 
 # ── Map factory ───────────────────────────────────────────────────────────────
@@ -968,7 +987,7 @@ def api_user_current():
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]  # Extract token after 'Bearer '
     
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     
     if not username:
         print("[DEBUG] [api_user_current] Unauthorized (no user)")
@@ -1025,7 +1044,7 @@ def api_get_settings():
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
     
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     
     if not username:
         print("[DEBUG] [api_get_settings] Unauthorized (no user)")
@@ -1070,7 +1089,7 @@ def api_save_settings():
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
     
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     
     if not username:
         print("[DEBUG] [api_save_settings] Unauthorized (no user)")
@@ -1128,7 +1147,7 @@ def api_save_survey():
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
     
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     
     if not username:
         print("[DEBUG] [api_save_survey] Unauthorized (no user)")
@@ -1167,104 +1186,9 @@ def api_save_survey():
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# NICE TO HAVE: History, Password Change, and other user endpoints
+# History, and other user endpoints
+# (change-password and change-email are handled by the auth Blueprint in auth.py)
 # ────────────────────────────────────────────────────────────────────────────
-
-@app.route('/api/auth/change-password', methods=['POST'])
-def api_change_password():
-    """JSON API endpoint for Flutter password change."""
-    print("[DEBUG] [api_change_password] POST /api/auth/change-password hit")
-    
-    auth_header = request.headers.get('Authorization', '')
-    token = None
-    if auth_header.startswith('Bearer '):
-        token = auth_header[7:]
-    
-    username = token if token else session.get('user')
-    
-    if not username:
-        print("[DEBUG] [api_change_password] Unauthorized")
-        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
-    
-    try:
-        data = request.get_json() or {}
-        current_password = data.get('current_password', '').strip()
-        new_password = data.get('new_password', '').strip()
-        
-        if not current_password or not new_password:
-            return jsonify({'ok': False, 'message': 'Missing password fields'}), 400
-        
-        # Use existing backend function
-        result = change_password(chDB_perf, username, current_password, new_password)
-        
-        if result.get('ok'):
-            print(f"[DEBUG] [api_change_password] Password changed for {username}")
-            return jsonify({'ok': True, 'message': result.get('message', 'Password updated')}), 200
-        else:
-            print(f"[DEBUG] [api_change_password] Password change failed: {result.get('message')}")
-            return jsonify({'ok': False, 'message': result.get('message', 'Password change failed')}), 400
-            
-    except Exception as e:
-        print(f"[DEBUG] [api_change_password] Exception: {e}")
-        return jsonify({'ok': False, 'message': str(e)}), 500
-
-
-@app.route('/api/auth/change-email', methods=['POST'])
-def api_change_email():
-    """
-    JSON API endpoint for Flutter email change.
-    Requires the user's current password to confirm identity before
-    updating the email — no verification link, just a direct DB update.
-    Body: { current_password, new_email }
-    """
-    print("[DEBUG] [api_change_email] POST /api/auth/change-email hit")
-
-    auth_header = request.headers.get('Authorization', '')
-    token = None
-    if auth_header.startswith('Bearer '):
-        token = auth_header[7:]
-
-    username = token if token else session.get('user')
-
-    if not username:
-        print("[DEBUG] [api_change_email] Unauthorized")
-        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
-
-    try:
-        data             = request.get_json() or {}
-        current_password = data.get('current_password', '').strip()
-        new_email        = data.get('new_email', '').strip()
-
-        if not current_password or not new_email:
-            return jsonify({'ok': False, 'message': 'Current password and new email are required'}), 400
-
-        # Basic email format check
-        import re
-        if not re.fullmatch(r'[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}', new_email):
-            return jsonify({'ok': False, 'message': 'Invalid email address format'}), 400
-
-        # Verify current password before making any changes
-        conn, c = chDB_perf.get_db_connection()
-        chDB_perf.execute_query(c, "SELECT password FROM users WHERE username=?", (username,))
-        row = c.fetchone()
-        c.close(); conn.close()
-
-        if not row or not check_password_hash(row[0], current_password):
-            print(f"[DEBUG] [api_change_email] Wrong password for '{username}'")
-            return jsonify({'ok': False, 'message': 'Current password is incorrect'}), 401
-
-        # Password confirmed — update the email in the user profile
-        profile = get_user_profile(chDB_perf, username)
-        display_name = profile.get('display_name', username)
-        save_user_profile(chDB_perf, username, display_name, new_email)
-
-        print(f"[DEBUG] [api_change_email] Email updated for '{username}' to '{new_email}'")
-        return jsonify({'ok': True, 'message': 'Email updated successfully'}), 200
-
-    except Exception as e:
-        print(f"[DEBUG] [api_change_email] Exception: {e}")
-        return jsonify({'ok': False, 'message': str(e)}), 500
-
 
 @app.route('/api/history', methods=['GET'])
 def api_history():
@@ -1276,7 +1200,7 @@ def api_history():
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
     
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     
     if not username:
         print("[DEBUG] [api_history] Unauthorized")
@@ -1316,7 +1240,7 @@ def api_history_clear():
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
     
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     
     if not username:
         print("[DEBUG] [api_history_clear] Unauthorized")
@@ -1814,7 +1738,7 @@ def api_confirm_report():
     print("[DEBUG] [api_confirm_report] Hit /api/reports/confirm endpoint.")
     auth_header = request.headers.get('Authorization', '')
     token = auth_header[7:] if auth_header.startswith('Bearer ') else None
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     if not username:
         print("[DEBUG] [api_confirm_report] Unauthorized. Rejecting.")
         return jsonify({'ok': False, 'message': 'Login required'}), 401
@@ -1834,7 +1758,7 @@ def api_report_json():
     print("[DEBUG] [api_report_json] Receiving JSON community report POST...")
     auth_header = request.headers.get('Authorization', '')
     token = auth_header[7:] if auth_header.startswith('Bearer ') else None
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     if not username:
         print("[DEBUG] [api_report_json] Unauthorized. Rejecting.")
         return jsonify({'ok': False, 'message': 'Login required'}), 401
@@ -2380,7 +2304,7 @@ def api_sos():
     print("[DEBUG] [api_sos] Processing SOS request...")
     auth_header = request.headers.get('Authorization', '')
     token = auth_header[7:] if auth_header.startswith('Bearer ') else None
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     if not username:
         print("[DEBUG][api_sos] Unauthorized user.")
         return jsonify({'ok': False, 'message': 'Login required'}), 401
@@ -2407,7 +2331,7 @@ def api_sos_contacts_get():
     print("[DEBUG] [api_sos_contacts_get] Requesting SOS contacts.")
     auth_header = request.headers.get('Authorization', '')
     token = auth_header[7:] if auth_header.startswith('Bearer ') else None
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     if not username:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     contacts = get_trusted_contacts(chDB_perf, username)
@@ -2421,7 +2345,7 @@ def api_sos_contacts_add():
     print("[DEBUG][api_sos_contacts_add] Adding SOS contact.")
     auth_header = request.headers.get('Authorization', '')
     token = auth_header[7:] if auth_header.startswith('Bearer ') else None
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     if not username:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     try:
@@ -2448,7 +2372,7 @@ def api_sos_contacts_delete(contact_id):
     print(f"[DEBUG] [api_sos_contacts_delete] Deleting contact ID {contact_id}.")
     auth_header = request.headers.get('Authorization', '')
     token = auth_header[7:] if auth_header.startswith('Bearer ') else None
-    username = token if token else session.get('user')
+    username = _jwt_username(token) if token else session.get('user')
     if not username:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
         

@@ -68,7 +68,7 @@ class _ProfileBody extends StatelessWidget {
               ]),
               const SectionLabel('ACCOUNT'),
               SettingsCard(children: [
-                ChevronRow(icon: Icons.lock_rounded, title: 'Password & Security', subtitle: 'Password, Email, Two-Factor Auth', onTap: ctrl.openSecurity),
+                ChevronRow(icon: Icons.lock_rounded, title: 'Password & Security', subtitle: 'Password, Username, Two-Factor Auth', onTap: ctrl.openSecurity),
                 const RowDivider(),
                 ChevronRow(icon: Icons.logout_rounded, title: 'Log Out', danger: true, onTap: () => ctrl.logOut(context)),
               ]),
@@ -79,8 +79,8 @@ class _ProfileBody extends StatelessWidget {
         if (ctrl.sosContactsOpen)    const _SosContactsPanel(),
         if (ctrl.securityOpen)       const _SecurityPanel(),
         if (ctrl.passwordOpen)       const _PasswordScreen(),
-        if (ctrl.emailOpen)          const _EmailScreen(),
-        if (ctrl.twoFAOpen)          const _TwoFAScreen(),
+        if (ctrl.usernameOpen)        const _UsernameScreen(),
+        if (ctrl.twoFAOpen)           const _TwoFAScreen(),
         if (ctrl.comingSoon) Positioned.fill(child: ComingSoonOverlay(onDismiss: ctrl.hideComingSoon)),
         LigtasToast(visible: ctrl.toastVis, message: ctrl.toastMsg, type: ctrl.toastType),
       ]),
@@ -483,10 +483,10 @@ class _SecurityPanel extends StatelessWidget {
                 ),
                 const RowDivider(),
                 ChevronRow(
-                  icon: Icons.email_rounded,
-                  title: 'Email Address',
-                  subtitle: 'Update your account email',
-                  onTap: ctrl.openEmail,
+                  icon: Icons.person_rounded,
+                  title: 'Username',
+                  subtitle: ctrl.user.username.isNotEmpty ? '@${ctrl.user.username}' : 'View your username',
+                  onTap: ctrl.openUsername,
                 ),
                 const RowDivider(),
                 ChevronRow(
@@ -582,18 +582,9 @@ class _PasswordScreenState extends State<_PasswordScreen> {
   }
 }
 
-// ── Email Screen ──────────────────────────────────────────────────────────────
-class _EmailScreen extends StatefulWidget {
-  const _EmailScreen();
-  @override State<_EmailScreen> createState() => _EmailScreenState();
-}
-class _EmailScreenState extends State<_EmailScreen> {
-  final _newEmail = TextEditingController();
-  final _emailPw  = TextEditingController();
-  bool  _showPw   = false;
-
-  @override
-  void dispose() { _newEmail.dispose(); _emailPw.dispose(); super.dispose(); }
+// ── Username Screen ──────────────────────────────────────────────────────────
+class _UsernameScreen extends StatelessWidget {
+  const _UsernameScreen();
 
   @override
   Widget build(BuildContext context) {
@@ -604,9 +595,9 @@ class _EmailScreenState extends State<_EmailScreen> {
         color: t.bg,
         child: Column(children: [
           LigtasHeader(
-            title: 'Change Email',
+            title: 'Username',
             leading: GestureDetector(
-              onTap: ctrl.closeEmail,
+              onTap: ctrl.closeUsername,
               child: Container(
                 width: 32, height: 32,
                 decoration: BoxDecoration(
@@ -619,11 +610,22 @@ class _EmailScreenState extends State<_EmailScreen> {
           Expanded(child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _inputField('New Email Address', _newEmail, Icons.email_outlined,
-                false, null, t, context),
-              const SizedBox(height: 14),
-              _pwField('Current Password', _emailPw, _showPw,
-                () => setState(() => _showPw = !_showPw), t, context),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: t.card,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: t.border)),
+                child: Row(children: [
+                  Icon(Icons.person_rounded, size: 18, color: t.text2),
+                  const SizedBox(width: 10),
+                  Text(
+                    '@${ctrl.user.username}',
+                    style: GoogleFonts.dmSans(fontSize: 14, color: t.text),
+                  ),
+                ]),
+              ),
               const SizedBox(height: 14),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -635,22 +637,9 @@ class _EmailScreenState extends State<_EmailScreen> {
                     size: 15, color: AppColors.primaryTeal(Theme.of(context).brightness == Brightness.dark)),
                   const SizedBox(width: 8),
                   Expanded(child: Text(
-                    'Your email will be updated directly after verifying your password.',
+                    'Your username is your login ID and cannot be changed.',
                     style: t.body(size: 12, color: t.text2))),
                 ]),
-              ),
-              const SizedBox(height: 28),
-              TealButton(
-                label: 'Update Email',
-                onTap: () => ctrl.changeEmail(
-                  context: context,
-                  newEmail:        _newEmail.text.trim(),
-                  currentPassword: _emailPw.text,
-                  onSuccess: () {
-                    _newEmail.clear(); _emailPw.clear();
-                    ctrl.closeEmail();
-                  },
-                ),
               ),
             ]),
           )),

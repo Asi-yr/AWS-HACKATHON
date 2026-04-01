@@ -337,6 +337,32 @@ def logout():
     return jsonify({'ok': True})
 
 
+# ── GET /api/auth/me ──────────────────────────────────────────────────────────
+@auth_bp.route('/api/auth/me', methods=['GET'])
+def me():
+    token   = _get_bearer_token()
+    payload = decode_token(token)
+    if not payload:
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+
+    db   = get_db()
+    user = db.execute(
+        'SELECT username, email, totp_enabled FROM users WHERE username = ?',
+        (payload['sub'],)
+    ).fetchone()
+    db.close()
+
+    if not user:
+        return jsonify({'ok': False, 'message': 'User not found'}), 404
+
+    return jsonify({
+        'ok':           True,
+        'username':     user['username'],
+        'email':        user['email'] or '',
+        'totp_enabled': bool(user['totp_enabled']),
+    })
+
+
 # ── POST /api/auth/setup-2fa ───────────────────────────────────────────────────
 #
 # Called from the settings screen to enable 2FA for the account.
@@ -357,6 +383,120 @@ def setup_2fa():
     db.commit()
     db.close()
     return jsonify({'ok': True})
+
+
+# ── POST /api/auth/disable-2fa ─────────────────────────────────────────────────
+@auth_bp.route('/api/auth/disable-2fa', methods=['POST'])
+def disable_2fa():
+    token   = _get_bearer_token()
+    payload = decode_token(token)
+    if not payload:
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+
+    db = get_db()
+    db.execute(
+        'UPDATE users SET totp_enabled = 0, otp = NULL, otp_expiry = NULL WHERE username = ?',
+        (payload['sub'],)
+    )
+    db.commit()
+    db.close()
+    return jsonify({'ok': True})
+
+
+# ── POST /api/auth/change-password ────────────────────────────────────────────
+#
+# Flutter sends:  Authorization: Bearer <token>
+#                 { current_password, new_password }
+#
+@auth_bp.route('/api/auth/change-password', methods=['POST'])
+def change_password():
+    token   = _get_bearer_token()
+    payload = decode_token(token)
+    if not payload:
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+
+    data             = request.get_json(silent=True) or {}
+    current_password = (data.get('current_password') or '')
+    new_password     = (data.get('new_password')     or '')
+
+    if not current_password or not new_password:
+        return jsonify({'ok': False, 'message': 'Both passwords are required'}), 400
+    if len(new_password) < 8:
+        return jsonify({'ok': False, 'message': 'New password must be at least 8 characters'}), 400
+
+    username = payload['sub']
+    db       = get_db()
+    user     = db.execute('SELECT password FROM users WHERE username = ?', (username,)).fetchone()
+
+    if not user:
+        db.close()
+        return jsonify({'ok': False, 'message': 'User not found'}), 404
+
+    # Dual-hash verification (bcrypt new / werkzeug legacy)
+    stored = user['password']
+    if stored.startswith('$2b$') or stored.startswith('$2a$'):
+        pw_ok = bcrypt.checkpw(current_password.encode(), stored.encode())
+    else:
+        from werkzeug.security import check_password_hash as _cwph
+        pw_ok = _cwph(stored, current_password)
+
+    if not pw_ok:
+        db.close()
+        return jsonify({'ok': False, 'message': 'Current password is incorrect'}), 401
+
+    new_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+    db.execute('UPDATE users SET password = ? WHERE username = ?', (new_hash, username))
+    db.commit()
+    db.close()
+    return jsonify({'ok': True, 'message': 'Password updated successfully'})
+
+
+# ── POST /api/auth/change-email ───────────────────────────────────────────────
+#
+# Flutter sends:  Authorization: Bearer <token>
+#                 { current_password, new_email }
+#
+@auth_bp.route('/api/auth/change-email', methods=['POST'])
+def change_email():
+    import re as _re
+    token   = _get_bearer_token()
+    payload = decode_token(token)
+    if not payload:
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+
+    data             = request.get_json(silent=True) or {}
+    current_password = (data.get('current_password') or '')
+    new_email        = (data.get('new_email')        or '').strip()
+
+    if not current_password or not new_email:
+        return jsonify({'ok': False, 'message': 'Password and new email are required'}), 400
+    if not _re.fullmatch(r'[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}', new_email):
+        return jsonify({'ok': False, 'message': 'Invalid email address format'}), 400
+
+    username = payload['sub']
+    db       = get_db()
+    user     = db.execute('SELECT password FROM users WHERE username = ?', (username,)).fetchone()
+
+    if not user:
+        db.close()
+        return jsonify({'ok': False, 'message': 'User not found'}), 404
+
+    # Dual-hash verification
+    stored = user['password']
+    if stored.startswith('$2b$') or stored.startswith('$2a$'):
+        pw_ok = bcrypt.checkpw(current_password.encode(), stored.encode())
+    else:
+        from werkzeug.security import check_password_hash as _cwph
+        pw_ok = _cwph(stored, current_password)
+
+    if not pw_ok:
+        db.close()
+        return jsonify({'ok': False, 'message': 'Current password is incorrect'}), 401
+
+    db.execute('UPDATE users SET email = ? WHERE username = ?', (new_email, username))
+    db.commit()
+    db.close()
+    return jsonify({'ok': True, 'message': 'Email updated successfully'})
 
 
 # ── Private helpers ────────────────────────────────────────────────────────────

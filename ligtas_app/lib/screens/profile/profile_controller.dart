@@ -21,7 +21,7 @@ class ProfileController extends ChangeNotifier {
   bool travelHistoryOpen = false;
   bool securityOpen  = false;
   bool passwordOpen  = false;
-  bool emailOpen     = false;
+  bool usernameOpen   = false;
   bool twoFAOpen     = false;
   bool comingSoon = false;
 
@@ -61,6 +61,16 @@ class ProfileController extends ChangeNotifier {
     try {
       final token = await SessionManager.instance.getAuthToken();
       if (token == null || token.isEmpty) return;
+
+      // Sync 2FA status from backend (source of truth)
+      final meData = await ApiClient.instance.getAuthMe(token: token);
+      if (meData['ok'] == true) {
+        final bool backendTfa = meData['totp_enabled'] as bool? ?? false;
+        _twoFactorEnabled = backendTfa;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('two_factor_enabled', backendTfa);
+        await SessionManager.instance.set2faEnabled(backendTfa);
+      }
 
       final settingsData = await ApiClient.instance.getSettings(token: token);
       if (settingsData['ok'] == true) {
@@ -297,55 +307,32 @@ class ProfileController extends ChangeNotifier {
     }
   }
 
-  // ── Change Email ──────────────────────────────────────────────
-  Future<void> changeEmail({
-    required BuildContext context,
-    required String newEmail,
-    required String currentPassword,
-    required VoidCallback onSuccess,
-  }) async {
-    if (newEmail.isEmpty || currentPassword.isEmpty) {
-      showToast("Please fill in all fields", "red"); return;
-    }
-    final emailRe = RegExp(r'^[\w\.\-]+@[\w\-]+\.[a-zA-Z]{2,}$');
-    if (!emailRe.hasMatch(newEmail)) {
-      showToast("Enter a valid email address", "red"); return;
-    }
-    try {
-      final token = await SessionManager.instance.getAuthToken();
-      if (token == null || token.isEmpty) {
-        showToast("Not logged in. Please try again.", "red"); return;
-      }
-      await ApiClient.instance.changeEmail(
-        currentPassword: currentPassword,
-        newEmail: newEmail,
-        token: token,
-      );
-      showToast("Email updated successfully", "green");
-      onSuccess();
-      notifyListeners();
-    } catch (e) {
-      final errorMsg = e.toString();
-      if (errorMsg.contains('401') || errorMsg.contains('incorrect')) {
-        showToast("Current password is incorrect", "red");
-      } else {
-        showToast("Error: ${e.toString()}", "red");
-      }
-    }
-  }
-
   // ── Two-Factor Authentication ─────────────────────────────────
   Future<void> toggle2FA(BuildContext context) async {
     final enabling = !_twoFactorEnabled;
-    await Future.delayed(const Duration(milliseconds: 300)); // MOCK
-    _twoFactorEnabled = enabling;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool("two_factor_enabled", enabling);
-    showToast(
-      enabling ? "2FA enabled successfully" : "2FA disabled successfully",
-      enabling ? "green" : "teal",
-    );
-    notifyListeners();
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        showToast('Not logged in. Please try again.', 'red');
+        return;
+      }
+      final resp = await ApiClient.instance.toggle2FA(enable: enabling, token: token);
+      if (resp['ok'] != true) {
+        showToast(resp['message'] as String? ?? '2FA update failed', 'red');
+        return;
+      }
+      _twoFactorEnabled = enabling;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('two_factor_enabled', enabling);
+      await SessionManager.instance.set2faEnabled(enabling);
+      showToast(
+        enabling ? '2FA enabled successfully' : '2FA disabled successfully',
+        enabling ? 'green' : 'teal',
+      );
+      notifyListeners();
+    } catch (e) {
+      showToast('Error: ${e.toString()}', 'red');
+    }
   }
 
   void showComingSoon() { comingSoon = true; notifyListeners(); }
@@ -449,8 +436,8 @@ class ProfileController extends ChangeNotifier {
   void closeSecurity() { securityOpen = false; notifyListeners(); }
   void openPassword()  { passwordOpen = true;  notifyListeners(); }
   void closePassword() { passwordOpen = false; notifyListeners(); }
-  void openEmail()     { emailOpen = true;     notifyListeners(); }
-  void closeEmail()    { emailOpen = false;    notifyListeners(); }
+  void openUsername()  { usernameOpen = true;  notifyListeners(); }
+  void closeUsername() { usernameOpen = false; notifyListeners(); }
   void openTwoFA()     { twoFAOpen = true;     notifyListeners(); }
   void closeTwoFA()    { twoFAOpen = false;    notifyListeners(); }
 

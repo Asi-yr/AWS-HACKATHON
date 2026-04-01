@@ -183,7 +183,7 @@ class _TwoFactorViewState extends State<TwoFactorView> {
                   hintStyle: GoogleFonts.dmSans(
                     fontSize: 30,
                     letterSpacing: 14,
-                    color: AppColors.text2(isDark).withOpacity(0.25),
+                    color: AppColors.text2(isDark).withValues(alpha: 0.25),
                   ),
                   filled: true,
                   fillColor: AppColors.card(isDark),
