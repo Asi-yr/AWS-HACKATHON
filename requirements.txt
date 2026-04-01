@@ -20,5 +20,7 @@ python-dotenv
 ddgs
 beautifulsoup4
 google-genai
+bcrypt
+PyJWT
 
 # briefcase

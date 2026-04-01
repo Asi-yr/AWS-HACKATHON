@@ -7,6 +7,7 @@ import '../../core/app_router.dart';
 import '../../core/session_manager.dart';
 import '../../core/api_client.dart';
 import '../explore/explore_controller.dart';
+import 'two_factor_view.dart';
 
 // ════════════════════════════════════════════════════════════════
 // LOGIN / REGISTRATION SCREEN
@@ -78,6 +79,25 @@ class _LoginViewState extends State<LoginView> {
         debugPrint('[LOGIN] Widget not mounted after response');
         return;
       }
+
+      // ── 2FA gate ───────────────────────────────────────────────────────────────────
+      if (response['requires_2fa'] == true) {
+        final tempToken = response['temp_token'] as String?;
+        if (tempToken == null) {
+          _showError('2FA error: no temp token received');
+          return;
+        }
+        await SessionManager.instance.setTempToken(tempToken);
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TwoFactorView(tempToken: tempToken),
+          ),
+        );
+        return;
+      }
+      // ──────────────────────────────────────────────────────────────────────────────
 
       if (response['ok'] == true && response['token'] != null) {
         debugPrint('[LOGIN] Login successful, saving session...');

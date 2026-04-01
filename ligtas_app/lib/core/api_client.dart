@@ -104,9 +104,9 @@ class ApiClient {
   /// Probe all [urls] simultaneously. Returns the first URL that answers
   /// HTTP 200 to GET /ping within [timeout], or null if none do.
   static Future<String?> _probeAll(
-      List<String> urls, {
-        required Duration timeout,
-      }) async {
+    List<String> urls, {
+    required Duration timeout,
+  }) async {
     if (urls.isEmpty) return null;
     final completer = Completer<String?>();
     int remaining = urls.length;
@@ -116,18 +116,18 @@ class ApiClient {
           .get(Uri.parse('$url/ping'))
           .timeout(timeout)
           .then((resp) {
-        if (!completer.isCompleted && resp.statusCode == 200) {
-          debugPrint('[API] /ping OK → $url');
-          completer.complete(url);
-        }
-      })
+            if (!completer.isCompleted && resp.statusCode == 200) {
+              debugPrint('[API] /ping OK → $url');
+              completer.complete(url);
+            }
+          })
           .catchError((_) {}) // connection refused, timeout, etc. — all silently ignored
           .whenComplete(() {
-        remaining--;
-        if (remaining == 0 && !completer.isCompleted) {
-          completer.complete(null); // all probes finished, none succeeded
-        }
-      });
+            remaining--;
+            if (remaining == 0 && !completer.isCompleted) {
+              completer.complete(null); // all probes finished, none succeeded
+            }
+          });
     }
     return completer.future;
   }
@@ -189,15 +189,15 @@ class ApiClient {
     final uri = await _uriAsync('/api/routes');
     final resp = await http
         .post(
-      uri,
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'origin': origin,
-        'destination': destination,
-        'mode': mode,
-        ...?extraParams,
-      }),
-    )
+          uri,
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'origin': origin,
+            'destination': destination,
+            'mode': mode,
+            ...?extraParams,
+          }),
+        )
         .timeout(const Duration(seconds: 180));
 
     // ── Never throw on HTTP errors — always return a usable map ──────────
@@ -219,10 +219,10 @@ class ApiClient {
       return {
         'routes': <RouteModel>[],
         'error':
-        (decoded['error'] ??
-            decoded['message'] ??
-            'No route found (${resp.statusCode})')
-            .toString(),
+            (decoded['error'] ??
+                    decoded['message'] ??
+                    'No route found (${resp.statusCode})')
+                .toString(),
         'error_type': decoded['error_type']?.toString() ?? '',
         'incidents': <dynamic>[],
         'mmda_banner': '',
@@ -284,14 +284,14 @@ class ApiClient {
     try {
       final resp = await http
           .post(
-        await _uriAsync('/api/routes'),
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'origin': origin,
-          'destination': destination,
-          'mode': mode,
-        }),
-      )
+            await _uriAsync('/api/routes'),
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'origin': origin,
+              'destination': destination,
+              'mode': mode,
+            }),
+          )
           .timeout(const Duration(seconds: 180));
 
       if (resp.statusCode != 200) return const [];
@@ -371,7 +371,7 @@ class ApiClient {
     final int safetyScore = numScore is num ? numScore.round() : 75;
 
     final String modeLabelRaw =
-    (r['mode_label'] ?? r['route_name'] ?? 'Route ${index + 1}').toString();
+        (r['mode_label'] ?? r['route_name'] ?? 'Route ${index + 1}').toString();
     final String modes = modeLabelRaw;
 
     // Position-based tag: route 0 = Fastest, 1 = Balanced, 2 = Safest
@@ -387,9 +387,9 @@ class ApiClient {
     // "flood-prone area — not currently raining" which is misleading
     final rawFlood = r['flood_warning'] as String?;
     final String? floodWarning =
-    (rawFlood != null &&
-        rawFlood.isNotEmpty &&
-        !rawFlood.toLowerCase().contains('not currently raining'))
+        (rawFlood != null &&
+            rawFlood.isNotEmpty &&
+            !rawFlood.toLowerCase().contains('not currently raining'))
         ? rawFlood
         : null;
 
@@ -434,13 +434,13 @@ class ApiClient {
       profileWarnings: r['profile_warnings'] as List<dynamic>?,
       routeCrimeZones: (r['route_crime_zones'] is List)
           ? (r['route_crime_zones'] as List)
-          .whereType<Map<String, dynamic>>()
-          .toList()
+                .whereType<Map<String, dynamic>>()
+                .toList()
           : null,
       floodZonesMap: (r['flood_zones_map'] is List)
           ? (r['flood_zones_map'] as List)
-          .whereType<Map<String, dynamic>>()
-          .toList()
+                .whereType<Map<String, dynamic>>()
+                .toList()
           : null,
     );
   }
@@ -448,11 +448,11 @@ class ApiClient {
   /// Build a step list from backend segment data.
   /// Falls back to a single summary step when no segments are present.
   List<RouteStep> _buildSteps(
-      Map<String, dynamic> r,
-      String modes,
-      String timeStr,
-      String distanceStr,
-      ) {
+    Map<String, dynamic> r,
+    String modes,
+    String timeStr,
+    String distanceStr,
+  ) {
     final segments = r['segments'];
     if (segments is List && segments.isNotEmpty) {
       final steps = <RouteStep>[];
@@ -810,6 +810,36 @@ class ApiClient {
       return {'ok': false, 'message': 'Cannot reach server. Check your connection.'};
     } catch (e) {
       debugPrint('[LOGIN] Exception: $e');
+      return {'ok': false, 'message': e.toString().replaceFirst('Exception: ', '')};
+    }
+  }
+
+  /// Verify OTP code during 2FA login.
+  Future<Map<String, dynamic>> verify2FA({
+    required String tempToken,
+    required String otpCode,
+  }) async {
+    try {
+      final uri = await _uriAsync('/api/auth/verify-2fa');
+      final resp = await http.post(
+        uri,
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({'temp_token': tempToken, 'otp_code': otpCode}),
+      ).timeout(const Duration(seconds: 15));
+      final decoded = jsonDecode(resp.body);
+      if (resp.statusCode != 200) {
+        debugPrint('[2FA] Error: ${decoded['message']}');
+        return {'ok': false, 'message': decoded['message'] ?? 'Verification failed'};
+      }
+      return decoded;
+    } on TimeoutException catch (_) {
+      debugPrint('[2FA] Timeout');
+      return {'ok': false, 'message': 'Request timed out. Please try again.'};
+    } on SocketException catch (_) {
+      debugPrint('[2FA] SocketException');
+      return {'ok': false, 'message': 'Cannot reach server. Check your connection.'};
+    } catch (e) {
+      debugPrint('[2FA] Exception: $e');
       return {'ok': false, 'message': e.toString().replaceFirst('Exception: ', '')};
     }
   }
@@ -1413,7 +1443,7 @@ class ApiClient {
   /// Returns { coding, closures, closures_count, mmda_banner }
   Future<Map<String, dynamic>> getMmda({String? token}) async {
     final resp = await http
-        .get(Uri.parse('${await getBaseUrl()}/api/mmda'), headers: _headers(token))
+      .get(Uri.parse('${await getBaseUrl()}/api/mmda'), headers: _headers(token))
         .timeout(const Duration(seconds: 8));
     _checkStatus(resp);
     return jsonDecode(resp.body) as Map<String, dynamic>;
@@ -1515,9 +1545,9 @@ class ApiClient {
       final base = await getBaseUrl();
       final resp = await http
           .get(
-        Uri.parse('$base/api/community/news'),
-        headers: _headers(token),
-      )
+            Uri.parse('$base/api/community/news'),
+            headers: _headers(token),
+          )
           .timeout(const Duration(seconds: 10));
       if (resp.statusCode != 200) return const [];
       final decoded = jsonDecode(resp.body);

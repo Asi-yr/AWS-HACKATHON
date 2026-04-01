@@ -17,7 +17,9 @@ class SessionManager {
   static const _kUsername = 'session_username';
   static const _kLastActiveMs = 'session_last_active_ms';
   static const _kHasActiveRoute = 'session_has_active_route';
-  static const _kLastRoute = 'session_last_route';
+  static const _kLastRoute     = 'session_last_route';
+  static const _kTempToken    = 'session_temp_token';
+  static const _k2faEnabled   = 'session_2fa_enabled';
 
   SharedPreferences? _prefs;
 
@@ -104,6 +106,34 @@ class SessionManager {
     final last = await getLastActive();
     if (last == null) return Duration.zero;
     return DateTime.now().difference(last);
+  }
+
+  // ── Two-factor authentication ──────────────────────────────────────────
+
+  /// Store a short-lived temp token while the user completes OTP verification.
+  Future<void> setTempToken(String token) async {
+    await _ensurePrefs();
+    await _prefs!.setString(_kTempToken, token);
+  }
+
+  Future<String?> getTempToken() async {
+    await _ensurePrefs();
+    return _prefs!.getString(_kTempToken);
+  }
+
+  Future<void> clearTempToken() async {
+    await _ensurePrefs();
+    await _prefs!.remove(_kTempToken);
+  }
+
+  Future<void> set2faEnabled(bool value) async {
+    await _ensurePrefs();
+    await _prefs!.setBool(_k2faEnabled, value);
+  }
+
+  Future<bool> is2faEnabled() async {
+    await _ensurePrefs();
+    return _prefs!.getBool(_k2faEnabled) ?? false;
   }
 }
 

@@ -61,6 +61,7 @@ from risk_monitor.sos import (
     get_trusted_contacts_settings_html,
 )
 from llm import get_commuter_advice
+from auth import auth_bp
 
 USE_MYSQL = False
 print(f"[DEBUG] [INIT] USE_MYSQL is set to: {USE_MYSQL}")
@@ -80,11 +81,46 @@ chDB_perf.init_db()
 init_user_tables(chDB_perf)
 init_report_tables(chDB_perf)
 init_sos_tables(chDB_perf)
+
+# ── 2FA: add otp columns to users table if not present ────────────────────────
+def _init_2fa_columns():
+    try:
+        conn, c = chDB_perf.get_db_connection()
+        for stmt in [
+            "ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN otp TEXT DEFAULT NULL",
+            "ALTER TABLE users ADD COLUMN otp_expiry TEXT DEFAULT NULL",
+            "ALTER TABLE users ADD COLUMN otp_attempts INTEGER DEFAULT 0",
+        ]:
+            try:
+                c.execute(stmt)
+            except Exception:
+                pass
+        try:
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS login_logs (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    identifier   TEXT,
+                    attempt_type TEXT,
+                    ip_address   TEXT,
+                    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )''')
+        except Exception:
+            pass
+        conn.commit()
+        c.close(); conn.close()
+        print("\U0001f7e2 2FA columns ready")
+    except Exception as e:
+        print(f"\U0001f534 2FA column init error: {e}")
+
+_init_2fa_columns()
 print(f"[DEBUG] [INIT] Database initialization took {time.time() - t_db_init:.4f}s")
 
 app = Flask(__name__)
 app.secret_key = 'saferoute_super_secret_key'
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
+app.register_blueprint(auth_bp)
 
 print(f"[DEBUG] [INIT] Application setup complete in {time.time() - t_init_start:.4f}s")
 
@@ -917,108 +953,8 @@ def logout():
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  JSON API AUTH ENDPOINTS (for Flutter app)
+#  login · register · verify-2fa · logout · setup-2fa  →  auth.py Blueprint
 # ══════════════════════════════════════════════════════════════════════════════
-
-@app.route('/api/auth/login', methods=['POST'])
-def api_login():
-    """JSON API endpoint for Flutter login. Returns user token & info."""
-    t_start = time.time()
-    print("[DEBUG] [api_login] POST /api/auth/login hit")
-    try:
-        data = request.json
-        username = data.get('username', '').strip()
-        password = data.get('password', '').strip()
-        
-        if not username or not password:
-            print("[DEBUG] [api_login] Missing username or password")
-            return jsonify({'ok': False, 'message': 'Username and password required'}), 400
-        
-        print(f"[DEBUG] [api_login] Attempting login for: '{username}'")
-        conn, c = chDB_perf.get_db_connection()
-        chDB_perf.execute_query(c, "SELECT password FROM users WHERE username=?", (username,))
-        user_row = c.fetchone()
-        c.close()
-        conn.close()
-        
-        if not user_row or not check_password_hash(user_row[0], password):
-            print(f"[DEBUG] [api_login] Auth failed for '{username}'")
-            return jsonify({'ok': False, 'message': 'Invalid credentials'}), 401
-        
-        # Success: store session and return user token
-        session['user'] = username
-        print(f"[DEBUG] [api_login] Login successful for '{username}'. Time: {time.time() - t_start:.4f}s")
-        
-        return jsonify({
-            'ok': True,
-            'message': 'Login successful',
-            'user': username,
-            'token': username,  # Simple token = username (backend validates via session)
-        }), 200
-        
-    except Exception as e:
-        print(f"[DEBUG] [api_login] Exception: {e}")
-        return jsonify({'ok': False, 'message': str(e)}), 500
-
-
-@app.route('/api/auth/register', methods=['POST'])
-def api_register():
-    """JSON API endpoint for Flutter registration. Returns user token & info."""
-    t_start = time.time()
-    print("[DEBUG] [api_register] POST /api/auth/register hit")
-    try:
-        data     = request.json
-        username = data.get('username', '').strip()
-        password = data.get('password', '').strip()
-        email    = data.get('email',    '').strip()
-
-        if not username or not password:
-            print("[DEBUG] [api_register] Missing username or password")
-            return jsonify({'ok': False, 'message': 'Username and password required'}), 400
-
-        if len(password) < 6:
-            return jsonify({'ok': False, 'message': 'Password must be at least 6 characters'}), 400
-
-        print(f"[DEBUG] [api_register] Attempting registration for: '{username}'")
-        conn, c = chDB_perf.get_db_connection()
-        chDB_perf.execute_query(c, "SELECT * FROM users WHERE username=?", (username,))
-
-        if c.fetchone():
-            print(f"[DEBUG] [api_register] Username '{username}' already exists")
-            c.close(); conn.close()
-            return jsonify({'ok': False, 'message': 'Username already in use'}), 409
-
-        # Create new user
-        hashed_pw = generate_password_hash(password)
-        chDB_perf.execute_query(c, "INSERT INTO users (username, password) VALUES (?, ?)",
-                                (username, hashed_pw))
-        conn.commit()
-
-        # Initialize user profile
-        save_user_profile(chDB_perf, username, username, email)
-        c.close(); conn.close()
-
-        # Auto-login after registration
-        session['user'] = username
-        print(f"[DEBUG] [api_register] Registration successful for '{username}'. Time: {time.time() - t_start:.4f}s")
-
-        return jsonify({
-            'ok':      True,
-            'message': 'Registration successful',
-            'user':    username,
-            'token':   username,
-        }), 201
-
-    except Exception as e:
-        print(f"[DEBUG] [api_register] Exception: {e}")
-        return jsonify({'ok': False, 'message': str(e)}), 500
-
-
-@app.route('/api/auth/logout', methods=['POST'])
-def api_logout():
-    """JSON API endpoint for Flutter logout."""
-    print(f"[DEBUG] [api_logout] User logging out: {session.get('user')}")
-    session.pop('user', None)
-    return jsonify({'ok': True, 'message': 'Logged out'}), 200
 
 
 @app.route('/api/user/current', methods=['GET'])
