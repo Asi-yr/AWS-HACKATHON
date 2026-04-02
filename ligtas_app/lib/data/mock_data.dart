@@ -12,6 +12,7 @@ const mockUser = UserModel(
   username: '@fullName123',
   role: 'Verified Commuter',
   avatarUrl: 'https://cdn.pixabay.com/photo/2023/02/18/11/00/icon-7797704_1280.png',
+  email: 'user@example.com',
   stats: UserStats(trips: 246, reports: 12, upvotedReports: 55),
   commuterType: 'Normal',
   preferences: UserPreferences(aiSafety: true, nightMode: false, transport: ['jeep', 'walk']),

@@ -70,6 +70,12 @@ class ProfileController extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('two_factor_enabled', backendTfa);
         await SessionManager.instance.set2faEnabled(backendTfa);
+        // Sync email from auth/me endpoint
+        final String? backendEmail = meData['email'] as String?;
+        if (backendEmail != null && backendEmail.isNotEmpty) {
+          user = user.copyWith(email: backendEmail);
+          notifyListeners();
+        }
       }
 
       final settingsData = await ApiClient.instance.getSettings(token: token);
@@ -103,6 +109,7 @@ class ProfileController extends ChangeNotifier {
           username: userData['username'] ?? user.username,
           role: userData['role'] ?? user.role,
           avatarUrl: userData['avatarUrl'],
+          email: userData['email'] as String?,
           stats: UserStats(
             trips: (userData['stats']?['trips'] ?? 0) as int,
             reports: (userData['stats']?['reports'] ?? 0) as int,
@@ -307,6 +314,40 @@ class ProfileController extends ChangeNotifier {
     }
   }
 
+  // ── Change Email ──────────────────────────────────────────────
+  Future<void> changeEmail({
+    required BuildContext context,
+    required String newEmail,
+    required VoidCallback onSuccess,
+  }) async {
+    if (newEmail.isEmpty) {
+      showToast('Please enter an email address', 'red'); return;
+    }
+    final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+    if (!emailRegex.hasMatch(newEmail)) {
+      showToast('Please enter a valid email address', 'red'); return;
+    }
+    try {
+      final token = await SessionManager.instance.getAuthToken();
+      if (token == null || token.isEmpty) {
+        showToast('Not logged in. Please try again.', 'red'); return;
+      }
+      await ApiClient.instance.saveSettings(
+        defaultCommuterType: user.commuterType ?? 'commute',
+        transportPreference: user.preferences.transport,
+        showWeatherBanner: user.preferences.aiSafety,
+        email: newEmail,
+        token: token,
+      );
+      user = user.copyWith(email: newEmail);
+      showToast('Email updated successfully', 'green');
+      onSuccess();
+      notifyListeners();
+    } catch (e) {
+      showToast('Error: ${e.toString().replaceFirst('Exception: ', '')}', 'red');
+    }
+  }
+
   // ── Two-Factor Authentication ─────────────────────────────────
   Future<void> toggle2FA(BuildContext context) async {
     final enabling = !_twoFactorEnabled;
@@ -440,6 +481,9 @@ class ProfileController extends ChangeNotifier {
   void closeUsername() { usernameOpen = false; notifyListeners(); }
   void openTwoFA()     { twoFAOpen = true;     notifyListeners(); }
   void closeTwoFA()    { twoFAOpen = false;    notifyListeners(); }
+  bool emailOpen = false;
+  void openEmail()     { emailOpen = true;     notifyListeners(); }
+  void closeEmail()    { emailOpen = false;    notifyListeners(); }
 
   // ── SOS Contacts Panel state ──────────────────────────────────
   bool sosContactsOpen = false;

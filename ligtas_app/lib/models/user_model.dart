@@ -7,6 +7,7 @@ class UserModel {
   final String username;
   final String role;
   final String? avatarUrl;
+  final String? email;
   final UserStats stats;
   final String? commuterType;
   final UserPreferences preferences;
@@ -17,6 +18,7 @@ class UserModel {
     required this.username,
     required this.role,
     this.avatarUrl,
+    this.email,
     required this.stats,
     this.commuterType,
     required this.preferences,
@@ -29,12 +31,13 @@ class UserModel {
   }
 
   UserModel copyWith({
-    String? name, 
-    String? username, 
+    String? name,
+    String? username,
     String? role,
-    String? avatarUrl, 
+    String? avatarUrl,
+    String? email,
     UserStats? stats,
-    String? commuterType, 
+    String? commuterType,
     UserPreferences? preferences,
   }) => UserModel(
     id: id,
@@ -42,6 +45,7 @@ class UserModel {
     username: username ?? this.username,
     role: role ?? this.role,
     avatarUrl: avatarUrl ?? this.avatarUrl,
+    email: email ?? this.email,
     stats: stats ?? this.stats,
     commuterType: commuterType ?? this.commuterType,
     preferences: preferences ?? this.preferences,

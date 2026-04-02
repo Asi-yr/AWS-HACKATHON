@@ -152,7 +152,34 @@ class ExploreController extends ChangeNotifier {
 
   void setState(AppState s) {
     _state = s;
+    recordActivity(); // any state change = user is active
     notifyListeners();
+  }
+
+  // ── Idle session management ────────────────────────────────────
+  // After 30 minutes of no explore interaction, return to the landing
+  // screen the next time the user opens this tab. The timer is NOT
+  // automatic — it only triggers when the user switches back here.
+  static const int _idleMinutes = 30;
+  int _lastActivityMs = 0; // 0 = never set (first open always shows state1)
+
+  /// Call this whenever the user does something on the Explore screen.
+  void recordActivity() {
+    _lastActivityMs = DateTime.now().millisecondsSinceEpoch;
+  }
+
+  /// Called when the Explore tab becomes active. Resets to the landing
+  /// screen only if the user has been idle for 30+ minutes.
+  void checkAndRestoreIfIdle() {
+    // First open (never recorded) → already state1, nothing to do.
+    if (_lastActivityMs == 0) return;
+    // Currently on the landing screen → nothing to restore.
+    if (_state == AppState.state1) return;
+    final idleMs = DateTime.now().millisecondsSinceEpoch - _lastActivityMs;
+    if (idleMs >= _idleMinutes * 60 * 1000) {
+      _state = AppState.state1;
+      notifyListeners();
+    }
   }
 
   // ── Location ───────────────────────────────────────────────────

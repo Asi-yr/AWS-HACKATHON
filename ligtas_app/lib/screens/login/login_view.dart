@@ -142,7 +142,8 @@ class _LoginViewState extends State<LoginView> {
     final password = _passwordController.text;
     debugPrint('[REGISTER] Attempting registration for username: $name');
 
-    if (name.isEmpty || password.isEmpty) {
+    final email = _emailController.text.trim();
+    if (name.isEmpty || password.isEmpty || email.isEmpty) {
       _showError('Please fill all fields');
       debugPrint('[REGISTER] Missing fields');
       return;
@@ -160,7 +161,7 @@ class _LoginViewState extends State<LoginView> {
       final response = await ApiClient.instance.register(
         username: name,
         password: password,
-        email: '',
+        email: _emailController.text.trim(),
       );
       debugPrint('[REGISTER] Response: $response');
 
@@ -283,6 +284,8 @@ class _LoginViewState extends State<LoginView> {
                   // ── Fields ────────────────────────────────────────
                   if (!_isLogin) ...[
                     _field('Username', Icons.person_outline_rounded, false, _nameController, isDark),
+                    const SizedBox(height: 14),
+                    _field('Email', Icons.email_outlined, false, _emailController, isDark),
                     const SizedBox(height: 14),
                   ],
                   if (_isLogin) ...[

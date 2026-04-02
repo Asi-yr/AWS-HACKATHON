@@ -67,32 +67,44 @@ class ApiClient {
       return _manualBaseUrl!;
     }
 
-    // Known fixed candidates tried first (emulator + loopback via ADB tunnel).
-    candidates.addAll([
+    // ── Phase 1: Try known fixed candidates first (fast path, 2 s budget) ───────
+    // This covers: Android emulator (10.0.2.2), desktop/web (127.0.0.1, localhost).
+    // If any of these responds we skip the expensive subnet scan entirely.
+    const fixedCandidates = [
       'http://10.0.2.2:5000',
       'http://127.0.0.1:5000',
       'http://localhost:5000',
-    ]);
+    ];
+    debugPrint('[API] Phase 1: probing ${fixedCandidates.length} fixed candidates...');
+    final quickFound = await _probeAll(fixedCandidates, timeout: const Duration(seconds: 2));
+    if (quickFound != null) {
+      _cachedBaseUrl = quickFound;
+      debugPrint('[API] ✓ Backend found (phase 1) at $quickFound');
+      return quickFound;
+    }
 
-    // Discover every /24 subnet the phone is on, probe ALL hosts in parallel.
+    // ── Phase 2: Full subnet scan (real device on Wi-Fi) ──────────────────────
+    // Only reached when fixed candidates failed. Scans every RFC-1918 /24 subnet
+    // in batches of 30 to avoid exhausting Android's file-descriptor limit.
     final subnets = await _getLocalSubnets();
-    debugPrint('[API] Device subnets: $subnets');
+    debugPrint('[API] Phase 2: device subnets: $subnets');
     for (final s in subnets) {
       for (int h = 1; h <= 254; h++) { candidates.add('http://$s.$h:5000'); }
     }
-
-    debugPrint('[API] Probing \${candidates.length} candidates simultaneously...');
-
-    // Fire every candidate at once — 5 s total budget.
-    final found = await _probeAll(candidates.toList(), timeout: const Duration(seconds: 5));
-
-    if (found != null) {
-      _cachedBaseUrl = found;
-      debugPrint('[API] ✓ Backend found at $found');
-      return found;
+    // Probe in batches of 30 to keep socket count manageable on Android.
+    const batchSize = 30;
+    final allCandidates = candidates.toList();
+    debugPrint('[API] Phase 2: probing ${allCandidates.length} candidates in batches of $batchSize...');
+    for (int i = 0; i < allCandidates.length; i += batchSize) {
+      final batch = allCandidates.sublist(i, (i + batchSize).clamp(0, allCandidates.length));
+      final batchFound = await _probeAll(batch, timeout: const Duration(seconds: 3));
+      if (batchFound != null) {
+        _cachedBaseUrl = batchFound;
+        debugPrint('[API] ✓ Backend found (phase 2) at $batchFound');
+        return batchFound;
+      }
     }
 
-    // Nothing responded. Log the subnet so the developer knows what to put in setManualUrl.
     debugPrint('[API] ✗ Backend not found. Device subnets were: $subnets');
     debugPrint('[API]   → If on a network that blocks device-to-device traffic,');
     debugPrint('[API]     call ApiClient.setManualUrl("http://<YOUR_LAPTOP_IP>:5000")');
@@ -137,6 +149,7 @@ class ApiClient {
   /// Uses dart:io NetworkInterface — no extra packages needed.
   static Future<List<String>> _getLocalSubnets() async {
     final subnets = <String>{};
+    if (kIsWeb) return subnets.toList(); // dart:io NetworkInterface not available on web
     try {
       final ifaces = await NetworkInterface.list(
         includeLinkLocal: false,

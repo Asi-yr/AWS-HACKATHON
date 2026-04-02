@@ -462,7 +462,8 @@ class _SuggestionDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = context.watch<ExploreController>();
     final isDark = context.watch<ThemeController>().isDark;
-    return Column(
+    return ClipRect(
+      child: Column(
       children: [
         GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -640,7 +641,8 @@ class _SuggestionDrawer extends StatelessWidget {
                 ),
         ),
       ],
-    );
+    ), // Column
+    ); // ClipRect
   }
 }
 

@@ -16,12 +16,21 @@ TEMP_EXPIRY_MIN = 5           # temp token (2FA pending): 5 minutes
 OTP_EXPIRY_MIN  = 2           # OTP code validity: 2 minutes
 OTP_MAX_TRIES   = 3           # lock account after this many wrong OTP attempts
 
-# Ethereal SMTP (swap for real SMTP in production)
-SMTP_HOST = 'smtp.ethereal.email'
+# ── SMTP config ────────────────────────────────────────────────────────────────
+# Set these as environment variables on your machine, OR fill in directly below.
+#
+#   Gmail (recommended):
+#     SMTP_HOST = smtp.gmail.com
+#     SMTP_PORT = 587
+#     SMTP_USER = your-gmail@gmail.com
+#     SMTP_PASS = your-16-char-app-password   ← generate at myaccount.google.com → Security → App Passwords
+#     MAIL_FROM = your-gmail@gmail.com
+#
+SMTP_HOST = 'smtp.gmail.com'
 SMTP_PORT = 587
-SMTP_USER = 'aisha.purdy@ethereal.email'
-SMTP_PASS = 'ePczWGEXG8XDWVYggw'
-MAIL_FROM = 'aisha.purdy@ethereal.email'
+SMTP_USER = 'wrye.lyth9.ohm@gmail.com'   # ← paste your Gmail address here  e.g. 'youremail@gmail.com'
+SMTP_PASS = 'tdau qiup yygz wkwt'   # ← paste your Gmail App Password here  e.g. 'abcd efgh ijkl mnop'
+MAIL_FROM = SMTP_USER
 
 
 # ── DB helper ──────────────────────────────────────────────────────────────────

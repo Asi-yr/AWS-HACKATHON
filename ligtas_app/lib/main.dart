@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'core/theme_controller.dart';
 import 'core/app_router.dart';
 import 'core/app_colors.dart';
@@ -15,6 +16,10 @@ import 'screens/profile/profile_view.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+  // Use bundled local fonts only — never fetch from fonts.gstatic.com.
+  // This prevents crashes on devices with no internet or restricted DNS.
+  GoogleFonts.config.allowRuntimeFetching = false;
 
   // Pre-discover the Flask backend before the first screen renders.
   // This runs the /ping scan in the background so login is instant.
@@ -112,13 +117,20 @@ class _RootShellState extends State<RootShell> {
   }
 
   void _onNavTap(int index) {
+    final exploreCtrl = context.read<ExploreController>();
     if (index == 0) {
-      context.read<ExploreController>().clearSearch();
+      // Returning to Explore: check if idle 30+ min and restore landing if so.
+      exploreCtrl.checkAndRestoreIfIdle();
+      // Don't call clearSearch here — leave their search state intact if not idle.
       SessionManager.instance.setLastRoute(AppRouter.explore);
-    } else if (index == 1) {
-      SessionManager.instance.setLastRoute(AppRouter.community);
-    } else if (index == 2) {
-      SessionManager.instance.setLastRoute(AppRouter.profile);
+    } else {
+      // Leaving Explore: record the moment they left as the last activity stamp.
+      if (_currentIndex == 0) exploreCtrl.recordActivity();
+      if (index == 1) {
+        SessionManager.instance.setLastRoute(AppRouter.community);
+      } else if (index == 2) {
+        SessionManager.instance.setLastRoute(AppRouter.profile);
+      }
     }
     SessionManager.instance.updateLastActive();
     context.read<AppTabController>().switchTo(index);

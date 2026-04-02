@@ -81,6 +81,7 @@ class _ProfileBody extends StatelessWidget {
         if (ctrl.passwordOpen)       const _PasswordScreen(),
         if (ctrl.usernameOpen)        const _UsernameScreen(),
         if (ctrl.twoFAOpen)           const _TwoFAScreen(),
+        if (ctrl.emailOpen)            const _EmailScreen(),
         if (ctrl.comingSoon) Positioned.fill(child: ComingSoonOverlay(onDismiss: ctrl.hideComingSoon)),
         LigtasToast(visible: ctrl.toastVis, message: ctrl.toastMsg, type: ctrl.toastType),
       ]),
@@ -490,6 +491,15 @@ class _SecurityPanel extends StatelessWidget {
                 ),
                 const RowDivider(),
                 ChevronRow(
+                  icon: Icons.email_rounded,
+                  title: 'Email Address',
+                  subtitle: (ctrl.user.email != null && ctrl.user.email!.isNotEmpty)
+                      ? ctrl.user.email!
+                      : 'Not set',
+                  onTap: ctrl.openEmail,
+                ),
+                const RowDivider(),
+                ChevronRow(
                   icon: Icons.security_rounded,
                   title: 'Two-Factor Authentication',
                   subtitle: ctrl.twoFactorEnabled ? 'Enabled' : 'Not enabled',
@@ -640,6 +650,90 @@ class _UsernameScreen extends StatelessWidget {
                     'Your username is your login ID and cannot be changed.',
                     style: t.body(size: 12, color: t.text2))),
                 ]),
+              ),
+            ]),
+          )),
+        ]),
+      ),
+    );
+  }
+}
+
+// ── Email Screen ──────────────────────────────────────────────────────────────
+class _EmailScreen extends StatefulWidget {
+  const _EmailScreen();
+  @override State<_EmailScreen> createState() => _EmailScreenState();
+}
+class _EmailScreenState extends State<_EmailScreen> {
+  late final TextEditingController _email;
+
+  @override
+  void initState() {
+    super.initState();
+    final u = context.read<ProfileController>().user;
+    _email = TextEditingController(text: u.email ?? '');
+  }
+
+  @override
+  void dispose() {
+    _email.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.read<ProfileController>();
+    final t    = context.lt;
+    return Positioned.fill(
+      child: Material(
+        color: t.bg,
+        child: Column(children: [
+          LigtasHeader(
+            title: 'Email Address',
+            leading: GestureDetector(
+              onTap: ctrl.closeEmail,
+              child: Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: t.border)),
+                child: Icon(Icons.arrow_back_rounded, size: 16, color: t.text),
+              ),
+            ),
+          ),
+          Expanded(child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _inputField('Email Address', _email,
+                Icons.email_outlined, false, null, t, context),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.tealDim,
+                  borderRadius: BorderRadius.circular(10)),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Icon(Icons.info_outline_rounded,
+                    size: 15,
+                    color: AppColors.primaryTeal(
+                      Theme.of(context).brightness == Brightness.dark)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(
+                    'Your email is used for account recovery and 2FA one-time codes.',
+                    style: t.body(size: 12, color: t.text2))),
+                ]),
+              ),
+              const SizedBox(height: 28),
+              TealButton(
+                label: 'Save Email',
+                onTap: () => ctrl.changeEmail(
+                  context: context,
+                  newEmail: _email.text.trim(),
+                  onSuccess: () {
+                    _email.clear();
+                    ctrl.closeEmail();
+                  },
+                ),
               ),
             ]),
           )),
