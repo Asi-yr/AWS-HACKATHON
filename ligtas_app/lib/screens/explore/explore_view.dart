@@ -27,7 +27,7 @@ final transportModeOptions = [
     label: 'Jeepney',
     icon: Icons.airport_shuttle_rounded,
   ),
-  FilterOption(key: 'bus', label: 'Bus', icon: Icons.directions_bus_rounded),
+  FilterOption(key: 'bus', label: 'Bus', icon: Icons.directions_bus_filled_rounded),
   FilterOption(key: 'walk', label: 'Walk', icon: Icons.directions_walk_rounded),
   FilterOption(key: 'car', label: 'Car', icon: Icons.directions_car_rounded),
   FilterOption(
@@ -100,7 +100,7 @@ class _ExploreScaffold extends StatefulWidget {
 class _ExploreScaffoldState extends State<_ExploreScaffold> {
   final MapController _mapCtrl = MapController();
 
-  static const double _panelMin = 0.30;
+  static const double _panelMin = 0.40;
   static const double _panelMax = 0.58;
   double _panelHeight = -1;
 
@@ -112,6 +112,11 @@ class _ExploreScaffoldState extends State<_ExploreScaffold> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ctrl = context.read<ExploreController>();
       ctrl.onLocationResolved = _onLocationResolved;
+      ctrl.onMapPreview = (lat, lon) {
+        try {
+          _mapCtrl.move(LatLng(lat, lon), 15);
+        } catch (_) {}
+      };
     });
   }
 
@@ -119,7 +124,9 @@ class _ExploreScaffoldState extends State<_ExploreScaffold> {
   void dispose() {
     // Clear callback to avoid calling into a disposed widget
     try {
-      context.read<ExploreController>().onLocationResolved = null;
+      final ctrl = context.read<ExploreController>();
+      ctrl.onLocationResolved = null;
+      ctrl.onMapPreview = null;
     } catch (_) {}
     super.dispose();
   }
@@ -489,6 +496,8 @@ class _SuggestionDrawer extends StatelessWidget {
         _FilterChipsRow(ctrl: ctrl),
         // ── Safe spots toggle bar ──────────────────────────────────────
         _SafeSpotsToggleBar(ctrl: ctrl),
+        // ── Weather / flood risk inline banners ────────────────────────
+        const _WeatherFloodBanner(),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Align(
@@ -637,7 +646,8 @@ class _SuggestionDrawer extends StatelessWidget {
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   itemCount: ctrl.routes.length,
-                  itemBuilder: (_, i) => _RouteCard(route: ctrl.routes[i]),
+                  itemBuilder: (_, i) =>
+                      _RouteCard(route: ctrl.routes[i], index: i),
                 ),
         ),
       ],
@@ -1485,9 +1495,6 @@ class _FilterModal extends StatelessWidget {
             ),
             Divider(color: AppColors.border(isDark)),
             const SizedBox(height: 12),
-            _sectionLabel('COMMUTER TYPE'),
-            _optionGrid(context, ctrl, commuterOptions, 'commuter'),
-            const SizedBox(height: 20),
             _sectionLabel('TRANSPORT MODE'),
             _optionGrid(context, ctrl, transportModeOptions, 'transport'),
             const SizedBox(height: 20),
@@ -1514,6 +1521,46 @@ class _FilterModal extends StatelessWidget {
             ),
             _profileGrid(context, ctrl),
 
+            // ── Safe spot types (web parity) ────────────────────────────
+            const SizedBox(height: 20),
+            _sectionLabel('SAFE SPOT TYPES'),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Builder(
+                builder: (context) {
+                  final isDark = context.watch<ThemeController>().isDark;
+                  return Text(
+                    'Choose which safe spots appear on your map',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      color: AppColors.text3(isDark),
+                    ),
+                  );
+                },
+              ),
+            ),
+            _safeSpotTypesGrid(context, ctrl),
+
+            // ── Plate number (web parity — MMDA coding check) ───────────
+            const SizedBox(height: 20),
+            _sectionLabel('PLATE LAST DIGIT'),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Builder(
+                builder: (context) {
+                  final isDark = context.watch<ThemeController>().isDark;
+                  return Text(
+                    'Optional — checks MMDA number coding restrictions',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      color: AppColors.text3(isDark),
+                    ),
+                  );
+                },
+              ),
+            ),
+            _PlateDigitField(ctrl: ctrl),
+
             if (ctrl.ligtasModeOn) ...[
               const SizedBox(height: 20),
               _sectionLabel('LIGTAS FEATURES'),
@@ -1532,7 +1579,10 @@ class _FilterModal extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                onPressed: () => Navigator.pop(context),
+                onPressed: () {
+                  context.read<ExploreController>().applyFilters();
+                  Navigator.pop(context);
+                },
                 child: const Text(
                   'Apply Filters',
                   style: TextStyle(fontWeight: FontWeight.bold),
@@ -1673,6 +1723,131 @@ class _FilterModal extends StatelessWidget {
           ),
         );
       }).toList(),
+    );
+  }
+
+  // ── Safe spot types grid ─────────────────────────────────────────
+  // Mirrors the web's 10-checkbox per-type filter shown when "Include
+  // Safe Spots" is ON.
+  static const _kSpotTypeOptions = [
+    (key: 'police',             label: 'Police',         icon: Icons.local_police_rounded),
+    (key: 'hospital',           label: 'Hospital',       icon: Icons.local_hospital_rounded),
+    (key: 'fire_station',       label: 'Fire Station',   icon: Icons.fire_truck_rounded),
+    (key: 'clinic',             label: 'Clinic',         icon: Icons.local_hospital_outlined),
+    (key: 'pharmacy',           label: 'Pharmacy',       icon: Icons.medical_services_rounded),
+    (key: 'barangay_hall',      label: 'Barangay Hall',  icon: Icons.account_balance_rounded),
+    (key: 'community_centre',   label: 'Community Ctr',  icon: Icons.people_rounded),
+    (key: 'evacuation_centre',  label: 'Evacuation Ctr', icon: Icons.emergency_share_rounded),
+    (key: 'supermarket',        label: 'Supermarket',    icon: Icons.store_rounded),
+    (key: 'convenience',        label: '7-Eleven etc.',  icon: Icons.store_mall_directory_rounded),
+  ];
+
+  Widget _safeSpotTypesGrid(BuildContext context, ExploreController ctrl) {
+    final isDark = context.watch<ThemeController>().isDark;
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 6,
+      crossAxisSpacing: 6,
+      childAspectRatio: 3.0,
+      children: _kSpotTypeOptions.map((opt) {
+        final isOn = ctrl.selectedSpotTypes.contains(opt.key);
+        return GestureDetector(
+          onTap: () => ctrl.toggleSpotType(opt.key),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: isOn ? AppColors.teal.withValues(alpha: 0.15) : AppColors.card2(isDark),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isOn ? AppColors.teal : AppColors.border(isDark),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(opt.icon, size: 14, color: isOn ? AppColors.teal : AppColors.text3(isDark)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    opt.label,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: isOn ? AppColors.teal : AppColors.text2(isDark),
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (isOn)
+                  Icon(Icons.check_circle_rounded, size: 12, color: AppColors.teal),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+// ── Plate digit input — stateful to hold the TextEditingController ────────────
+class _PlateDigitField extends StatefulWidget {
+  final ExploreController ctrl;
+  const _PlateDigitField({required this.ctrl});
+  @override
+  State<_PlateDigitField> createState() => _PlateDigitFieldState();
+}
+
+class _PlateDigitFieldState extends State<_PlateDigitField> {
+  late final TextEditingController _tec;
+
+  @override
+  void initState() {
+    super.initState();
+    _tec = TextEditingController(text: widget.ctrl.plateDigit);
+  }
+
+  @override
+  void dispose() {
+    _tec.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.watch<ThemeController>().isDark;
+    return TextField(
+      controller: _tec,
+      keyboardType: TextInputType.number,
+      maxLength: 1,
+      onChanged: widget.ctrl.setPlateDigit,
+      style: GoogleFonts.plusJakartaSans(
+        fontSize: 14,
+        color: AppColors.text(isDark),
+      ),
+      decoration: InputDecoration(
+        hintText: 'e.g. 3',
+        hintStyle: GoogleFonts.plusJakartaSans(
+          fontSize: 13,
+          color: AppColors.text3(isDark),
+        ),
+        counterText: '',
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: AppColors.border(isDark)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: AppColors.border(isDark)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: AppColors.teal, width: 1.5),
+        ),
+        fillColor: AppColors.card2(isDark),
+        filled: true,
+      ),
     );
   }
 }
@@ -1962,217 +2137,292 @@ class _MapControls extends StatelessWidget {
 // ── Route card ───────────────────────────────────────────────────────────────
 class _RouteCard extends StatelessWidget {
   final RouteModel route;
-  const _RouteCard({required this.route});
+  final int index;
+  const _RouteCard({required this.route, required this.index});
 
   @override
   Widget build(BuildContext context) {
     final ctrl = context.read<ExploreController>();
-    final meta = route.safetyMeta;
     final isDark = context.watch<ThemeController>().isDark;
+    final safetyColor = route.safetyMeta.color;
+    final fareStr = route.fareDisplay.isNotEmpty
+        ? route.fareDisplay
+        : route.fare > 0
+            ? '₱${route.fare}'
+            : '';
 
     return GestureDetector(
       onTap: () => ctrl.selectRoute(route),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
           color: AppColors.card2(isDark),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.border(isDark)),
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        _modeIcon(route.modes),
-                        size: 14,
-                        color: AppColors.teal,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          route.modes,
-                          style: GoogleFonts.plusJakartaSans(
-                            color: AppColors.text(isDark),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Colored left border ──────────────────────────────────
+              Container(
+                width: 5,
+                decoration: BoxDecoration(
+                  color: safetyColor,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    bottomLeft: Radius.circular(12),
                   ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.schedule_rounded,
-                        size: 13,
-                        color: AppColors.text2(isDark),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${route.minutes} min',
-                        style: GoogleFonts.plusJakartaSans(
-                          color: AppColors.text2(isDark),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Icon(
-                        Icons.payments_rounded,
-                        size: 13,
-                        color: AppColors.text2(isDark),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        route.fareDisplay.isNotEmpty
-                            ? route.fareDisplay
-                            : route.fare > 0
-                            ? '₱${route.fare}'
-                            : '—',
-                        style: GoogleFonts.plusJakartaSans(
-                          color: AppColors.text2(isDark),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      if (route.distance.isNotEmpty) ...[
-                        const SizedBox(width: 10),
-                        Icon(
-                          Icons.straighten_rounded,
-                          size: 13,
-                          color: AppColors.text2(isDark),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          route.distance,
-                          style: GoogleFonts.plusJakartaSans(
-                            color: AppColors.text2(isDark),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (route.seismicWarning != null &&
-                      route.seismicWarning!.isNotEmpty)
-                    _inlineWarning(
-                      Icons.crisis_alert_rounded,
-                      route.seismicWarning!,
-                      const Color(0xFFE74C3C),
-                      isDark,
-                    ),
-                  if (route.floodWarning != null &&
-                      route.floodWarning!.isNotEmpty &&
-                      (ctrl.isRaining ||
-                          ctrl.preferenceFilters.contains('avoid_flood')))
-                    _inlineWarning(
-                      Icons.water_rounded,
-                      route.floodWarning!,
-                      const Color(0xFF1565C0),
-                      isDark,
-                    ),
-                  if (route.crimeWarning != null &&
-                      route.crimeWarning!.isNotEmpty)
-                    _inlineWarning(
-                      Icons.shield_rounded,
-                      route.crimeWarning!,
-                      const Color(0xFFF59E0B),
-                      isDark,
-                    ),
-                ],
+                ),
               ),
-            ),
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: route.tagMeta.bg,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    route.tagMeta.label,
-                    style: GoogleFonts.plusJakartaSans(
-                      color: route.tagMeta.fg,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                    ),
+              // ── Card body ────────────────────────────────────────────
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header: dot + "Route N" + tag badge
+                      Row(
+                        children: [
+                          Container(
+                            width: 11,
+                            height: 11,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: safetyColor,
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          Text(
+                            'Route ${index + 1}',
+                            style: GoogleFonts.plusJakartaSans(
+                              color: AppColors.text(isDark),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 9, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: route.tagMeta.bg,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              route.tagMeta.label,
+                              style: GoogleFonts.plusJakartaSans(
+                                color: route.tagMeta.fg,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      // Stats row: ⏱ time  📏 distance
+                      Row(
+                        children: [
+                          Text(
+                            '⏱ ${route.minutes} min',
+                            style: GoogleFonts.plusJakartaSans(
+                              color: AppColors.text2(isDark),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (route.distance.isNotEmpty) ...[
+                            const SizedBox(width: 14),
+                            Text(
+                              '📏 ${route.distance}',
+                              style: GoogleFonts.plusJakartaSans(
+                                color: AppColors.text2(isDark),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      // Safety score + fare badge
+                      Row(
+                        children: [
+                          Text(
+                            '🛡️ Safety Score: ${route.safetyScore}/100',
+                            style: GoogleFonts.plusJakartaSans(
+                              color: safetyColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (fareStr.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.teal.withValues(alpha: 0.13),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '💸 $fareStr',
+                                style: GoogleFonts.plusJakartaSans(
+                                  color: AppColors.teal,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      // ── Warning boxes ──────────────────────────────
+                      ..._buildWarningBoxes(route, ctrl, isDark),
+                      // ── Leg breakdown ──────────────────────────────
+                      ..._buildLegs(route, isDark),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '${route.safetyScore}% safe',
-                  style: GoogleFonts.plusJakartaSans(
-                    color: meta.color,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _inlineWarning(IconData icon, String text, Color color, bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 5),
-      child: Row(
-        children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              text,
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: color,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
+  List<Widget> _buildWarningBoxes(
+      RouteModel route, ExploreController ctrl, bool isDark) {
+    final boxes = <Widget>[];
+
+    if (route.crimeWarning != null && route.crimeWarning!.isNotEmpty) {
+      boxes.add(_warningBox(
+        '⚠️ ${route.crimeWarning!}',
+        const Color(0xFFFFF3E0),
+        const Color(0xFFF59E0B),
+        const Color(0xFF78350F),
+      ));
+    }
+
+    final showFlood = route.floodWarning != null &&
+        route.floodWarning!.isNotEmpty &&
+        (ctrl.isRaining || ctrl.preferenceFilters.contains('avoid_flood'));
+    if (showFlood) {
+      boxes.add(_warningBox(
+        '🌊 ${route.floodWarning!}',
+        const Color(0xFFE3F2FD),
+        const Color(0xFF1565C0),
+        const Color(0xFF0D47A1),
+      ));
+    }
+
+    if (route.seismicWarning != null && route.seismicWarning!.isNotEmpty) {
+      boxes.add(_warningBox(
+        '🌍 ${route.seismicWarning!}',
+        const Color(0xFFFFEBEE),
+        const Color(0xFFE74C3C),
+        const Color(0xFF7B241C),
+      ));
+    }
+
+    if (route.profileWarnings != null) {
+      for (final w in route.profileWarnings!) {
+        final text = w?.toString() ?? '';
+        if (text.isNotEmpty) {
+          boxes.add(_warningBox(
+            '⚠️ $text',
+            const Color(0xFFF3E5F5),
+            const Color(0xFF9C27B0),
+            const Color(0xFF4A148C),
+          ));
+        }
+      }
+    }
+
+    return boxes;
+  }
+
+  Widget _warningBox(String text, Color bg, Color borderColor, Color textColor) {
+    return Container(
+      margin: const EdgeInsets.only(top: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(5),
+        border: Border(left: BorderSide(color: borderColor, width: 3)),
+      ),
+      child: Text(
+        text,
+        style: GoogleFonts.plusJakartaSans(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: textColor,
+        ),
       ),
     );
   }
 
-  IconData _modeIcon(String modes) {
-    final lower = modes.toLowerCase();
-    if (lower.contains('train') ||
-        lower.contains('lrt') ||
-        lower.contains('mrt')) {
-      return Icons.train_rounded;
-    } else if (lower.contains('jeepney')) {
-      return Icons.airport_shuttle_rounded;
-    } else if (lower.contains('bus')) {
-      return Icons.directions_bus_rounded;
-    } else if (lower.contains('walk')) {
-      return Icons.directions_walk_rounded;
-    } else if (lower.contains('car')) {
-      return Icons.directions_car_rounded;
-    } else if (lower.contains('motorcycle')) {
-      return Icons.two_wheeler_rounded;
+  List<Widget> _buildLegs(RouteModel route, bool isDark) {
+    final segs = route.rawSegments;
+    if (segs == null || segs.isEmpty) return [];
+
+    final legs = <Widget>[];
+    legs.add(const SizedBox(height: 8));
+
+    for (final seg in segs) {
+      final type = (seg['type'] ?? '').toString().toLowerCase();
+      final label = (seg['label'] ?? '').toString();
+      if (label.isEmpty) continue;
+
+      final IconData icon;
+      final Color color;
+      switch (type) {
+        case 'walk':
+          icon = Icons.directions_walk_rounded;
+          color = AppColors.text2(isDark);
+        case 'train':
+          icon = Icons.train_rounded;
+          color = const Color(0xFF2196F3);
+        case 'jeepney':
+          icon = Icons.airport_shuttle_rounded;
+          color = const Color(0xFFE67E22);
+        case 'bus':
+          icon = Icons.directions_bus_rounded;
+          color = const Color(0xFF16A085);
+        default:
+          icon = Icons.directions_transit_rounded;
+          color = AppColors.teal;
+      }
+
+      legs.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Row(
+            children: [
+              Icon(icon, size: 12, color: color),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  label,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: color,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
     }
-    return Icons.directions_transit_filled_rounded;
+
+    return legs;
   }
 }
 
@@ -2755,6 +3005,22 @@ class _MapLayerState extends State<_MapLayer> {
       );
     }
 
+    // ── Origin coverage circle (web parity: fetchAndDrawNearby 800m ring) ─────
+    final origCircleLat = ctrl.resolvedOrigLat;
+    final origCircleLon = ctrl.resolvedOrigLon;
+    if (origCircleLat != null && origCircleLon != null && ctrl.routes.isNotEmpty) {
+      circles.add(
+        CircleMarker(
+          point: LatLng(origCircleLat, origCircleLon),
+          radius: 800,
+          useRadiusInMeter: true,
+          color: const Color(0xFF0984E3).withValues(alpha: 0.04),
+          borderColor: const Color(0xFF0984E3),
+          borderStrokeWidth: 1.5,
+        ),
+      );
+    }
+
     // ── 3. Markers ────────────────────────────────────────────────────────────
     final markers = <Marker>[];
 
@@ -2815,6 +3081,81 @@ class _MapLayerState extends State<_MapLayer> {
       );
     }
 
+    // ── Transit transfer markers (web parity: segment join dots) ─────────────
+    // Draw a coloured dot at each segment boundary so users can see where
+    // they transfer between modes (matches the web's mkTransferDot() circles).
+    if (active != null) {
+      final segs = active.rawSegments;
+      if (segs != null && segs.length > 1) {
+        for (var i = 0; i < segs.length - 1; i++) {
+          final seg = segs[i];
+          final nextSeg = segs[i + 1];
+          final sc = seg['coords'] as List?;
+          if (sc == null || sc.isEmpty) continue;
+          LatLng? joinPt;
+          // Extract last coord of the current segment
+          final lastCoord = sc.last;
+          if (lastCoord is List && lastCoord.length >= 2) {
+            final lat = (lastCoord[0] as num?)?.toDouble();
+            final lon = (lastCoord[1] as num?)?.toDouble();
+            if (lat != null && lon != null) joinPt = LatLng(lat, lon);
+          }
+          if (joinPt == null) continue;
+          final nextType = (nextSeg['type'] ?? '').toString();
+          final color = _segColor(nextType);
+          markers.add(
+            Marker(
+              point: joinPt,
+              width: 22,
+              height: 22,
+              child: Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2.5),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black38, blurRadius: 4),
+                  ],
+                ),
+                child: Icon(
+                  _transitStopIcon(nextType),
+                  size: 8,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          );
+        }
+      }
+    }
+
+    // ── Nearby transit stop markers (web parity: fetchAndDrawNearby J/B/T dots)
+    // Drawn around origin at zoom≥13. At zoom≥15 shows label pill.
+    if (ctrl.nearbyStops.isNotEmpty && ctrl.resolvedOrigLat != null) {
+      for (final stop in ctrl.nearbyStops) {
+        final sLat = (stop['lat'] as num?)?.toDouble();
+        final sLon = (stop['lon'] as num?)?.toDouble();
+        if (sLat == null || sLon == null) continue;
+        final type = stop['type'] as String? ?? 'transit';
+        final color = _segColor(type);
+        final name = stop['name'] as String? ?? type;
+        if (_currentZoom >= 12) {
+          markers.add(
+            Marker(
+              point: LatLng(sLat, sLon),
+              width: _currentZoom >= 15 ? 110 : 16,
+              height: 28,
+              child: _currentZoom >= 15
+                  ? _labelPill(_transitStopIcon(type), name, color)
+                  : _dotPin(color),
+            ),
+          );
+        }
+      }
+    }
+
     // ── Hazard markers: no emojis, zoom-gated ─────────────────────────────────
     // < 13: hidden  |  13–14: dot only  |  ≥ 15: icon + label pill
     if (active != null) {
@@ -2861,6 +3202,7 @@ class _MapLayerState extends State<_MapLayer> {
                 : risk == 'moderate'
                 ? 'Flood Risk'
                 : 'Low Flood');
+        final desc = zone['description'] as String? ?? '';
         final color = _floodColor(risk);
         if (_currentZoom >= 13) {
           markers.add(
@@ -2868,9 +3210,12 @@ class _MapLayerState extends State<_MapLayer> {
               point: LatLng(lat, lon),
               width: _currentZoom >= 15 ? 110 : 14,
               height: 28,
-              child: _currentZoom >= 15
-                  ? _labelPill(Icons.water_rounded, label, color)
-                  : _dotPin(color),
+              child: GestureDetector(
+                onTap: () => _showFloodSheet(context, label, desc, color, risk),
+                child: _currentZoom >= 15
+                    ? _labelPill(Icons.water_rounded, label, color)
+                    : _dotPin(color),
+              ),
             ),
           );
         }
@@ -2884,15 +3229,19 @@ class _MapLayerState extends State<_MapLayer> {
       final type = inc['type'] as String? ?? 'other';
       final color = _incidentColor(type);
       final title = inc['title'] as String? ?? type;
+      final desc = inc['description'] as String? ?? inc['summary'] as String? ?? '';
       if (_currentZoom >= 13) {
         markers.add(
           Marker(
             point: LatLng(lat, lon),
             width: _currentZoom >= 15 ? 110 : 14,
             height: 28,
-            child: _currentZoom >= 15
-                ? _labelPill(_incidentIcon(type), title, color)
-                : _dotPin(color),
+            child: GestureDetector(
+              onTap: () => _showIncidentSheet(context, title, desc, color, type),
+              child: _currentZoom >= 15
+                  ? _labelPill(_incidentIcon(type), title, color)
+                  : _dotPin(color),
+            ),
           ),
         );
       }
@@ -2982,6 +3331,34 @@ class _MapLayerState extends State<_MapLayer> {
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all,
         ),
+        // ── Long-press → pinpoint destination (web parity: 📌 pin mode) ──────
+        // Reverse-geocodes the tapped point and sets it as the destination,
+        // then re-searches routes — mirrors the web's map-click pin flow.
+        onLongPress: (tapPosition, latlng) async {
+          if (ctrl.state != AppState.state2) return;
+          ctrl.showToast('Setting destination…', 'teal');
+          try {
+            final rev = await ApiClient.instance.reverseGeocode(
+              lat: latlng.latitude,
+              lon: latlng.longitude,
+            );
+            final address = rev['address'] as String? ?? '';
+            final label = address.isNotEmpty
+                ? address
+                : '${latlng.latitude.toStringAsFixed(5)}, ${latlng.longitude.toStringAsFixed(5)}';
+            ctrl.previewLocation(
+              isOrigin: false,
+              lat: latlng.latitude,
+              lon: latlng.longitude,
+              label: label,
+            );
+            if (ctrl.originText.isNotEmpty) {
+              ctrl.searchRoutes();
+            }
+          } catch (_) {
+            ctrl.showToast('Could not resolve location', 'red');
+          }
+        },
       ),
       children: [
         TileLayer(
@@ -3249,6 +3626,196 @@ class _MapLayerState extends State<_MapLayer> {
     );
   }
 
+  void _showFloodSheet(
+    BuildContext ctx,
+    String name,
+    String description,
+    Color color,
+    String risk,
+  ) {
+    showModalBottomSheet(
+      context: ctx,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E2530),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.water_rounded, color: color, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        '${risk[0].toUpperCase()}${risk.substring(1)} Flood Risk',
+                        style: TextStyle(
+                          color: color.withValues(alpha: 0.75),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (description.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                description,
+                style: const TextStyle(
+                  color: Color(0xFFCBD5E1),
+                  fontSize: 12,
+                  height: 1.5,
+                ),
+              ),
+            ],
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.water_drop_rounded, color: color, size: 15),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Avoid this area during heavy rain. Use elevated alternate routes.',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showIncidentSheet(
+    BuildContext ctx,
+    String title,
+    String description,
+    Color color,
+    String type,
+  ) {
+    showModalBottomSheet(
+      context: ctx,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E2530),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(_incidentIcon(type), color: color, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        type[0].toUpperCase() + type.substring(1).replaceAll('_', ' '),
+                        style: TextStyle(
+                          color: color.withValues(alpha: 0.75),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (description.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                description,
+                style: const TextStyle(
+                  color: Color(0xFFCBD5E1),
+                  fontSize: 12,
+                  height: 1.5,
+                ),
+              ),
+            ],
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_rounded, color: color, size: 15),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Exercise caution. Follow authorities\' instructions.',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   static IconData _incidentIcon(String type) {
     switch (type) {
       case 'fire':
@@ -3264,6 +3831,26 @@ class _MapLayerState extends State<_MapLayer> {
         return Icons.car_crash_rounded;
       default:
         return Icons.warning_rounded;
+    }
+  }
+
+  /// Icon for a transit stop by vehicle type — used in nearby stop markers
+  /// and transfer dot markers on the active route.
+  static IconData _transitStopIcon(String type) {
+    switch (type.toLowerCase()) {
+      case 'train':
+      case 'lrt':
+      case 'mrt':
+        return Icons.train_rounded;
+      case 'bus':
+        return Icons.directions_bus_rounded;
+      case 'jeepney':
+      case 'puj':
+        return Icons.airport_shuttle_rounded;
+      case 'walk':
+        return Icons.directions_walk_rounded;
+      default:
+        return Icons.directions_transit_filled_rounded;
     }
   }
 
@@ -3814,6 +4401,112 @@ class _SosButton extends StatelessWidget {
     } catch (_) {
       ctrl.showToast('SOS sent (offline mode)', 'red');
     }
+  }
+}
+
+// ── Weather / flood risk inline banner ───────────────────────────────────────
+// Shows in the suggestion drawer when weather or flood risk is non-trivial.
+// Covers 'rain' (not covered by advisory banner) and all flood risk levels.
+class _WeatherFloodBanner extends StatelessWidget {
+  const _WeatherFloodBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<ExploreController>();
+    final w = ctrl.weatherRisk;
+    final f = ctrl.floodRisk;
+
+    final showWeather = w != 'clear';
+    final showFlood = f != 'none';
+
+    if (!showWeather && !showFlood) return const SizedBox.shrink();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (showWeather) _buildWeatherRow(w),
+        if (showFlood) _buildFloodRow(f),
+      ],
+    );
+  }
+
+  Widget _buildWeatherRow(String level) {
+    final Color bg;
+    final IconData icon;
+    final String text;
+    switch (level) {
+      case 'storm':
+        bg = const Color(0xFF6D28D9);
+        icon = Icons.thunderstorm_rounded;
+        text = 'Storm warning — consider delaying travel';
+        break;
+      case 'heavy_rain':
+        bg = const Color(0xFF1D4ED8);
+        icon = Icons.water_rounded;
+        text = 'Heavy rain — expect delays and wet roads';
+        break;
+      default: // 'rain', 'light_rain'
+        bg = const Color(0xFF0369A1);
+        icon = Icons.grain_rounded;
+        text = 'Rain detected along route — carry an umbrella';
+    }
+    return _RiskBannerTile(bg: bg, icon: icon, text: text);
+  }
+
+  Widget _buildFloodRow(String level) {
+    final Color bg;
+    final String text;
+    switch (level) {
+      case 'high':
+        bg = const Color(0xFF0C4A6E);
+        text = 'High flood risk — avoid low-lying roads on this route';
+        break;
+      case 'moderate':
+        bg = const Color(0xFF164E63);
+        text = 'Moderate flood risk — watch for waterlogged streets';
+        break;
+      default: // 'low'
+        bg = const Color(0xFF0E7490);
+        text = 'Low flood risk detected in area';
+    }
+    return _RiskBannerTile(bg: bg, icon: Icons.flood_rounded, text: text);
+  }
+}
+
+class _RiskBannerTile extends StatelessWidget {
+  final Color bg;
+  final IconData icon;
+  final String text;
+  const _RiskBannerTile({
+    required this.bg,
+    required this.icon,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      color: bg,
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: Colors.white),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

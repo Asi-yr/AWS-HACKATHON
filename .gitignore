@@ -2,7 +2,7 @@
 venv/
 .venv/
 env/
-# .env
+.env
 *.venv
 
 # Python Cache & Compiled Files
@@ -41,7 +41,7 @@ database.db
 .DS_Store
 
 # Environment Variables & Secrets
-# .env
+.env
 .env.local
 .env.*.local
 api_keys.json

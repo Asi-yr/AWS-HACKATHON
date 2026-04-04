@@ -1036,6 +1036,10 @@ def _build_jeepney_chain_legs(chain, orig_lat, orig_lon, dest_lat, dest_lon):
             'board':       {'name': parts[0], 'lat': ridden[0][0],  'lon': ridden[0][1]},
             'alight':      {'name': parts[-1], 'lat': ridden[-1][0], 'lon': ridden[-1][1]},
             'ridden_poly': ridden,
+            'ridden_stops': [
+                {'name': parts[0],  'lat': ridden[0][0],  'lon': ridden[0][1]},
+                {'name': parts[-1], 'lat': ridden[-1][0], 'lon': ridden[-1][1]},
+            ],
             'dist_m':      _poly_dist(ridden),
             'fare':        calc_sakay_fare(rid, _poly_dist(ridden)),
             'color':       '#e67e22',

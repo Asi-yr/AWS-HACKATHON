@@ -17,9 +17,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-  // Use bundled local fonts only — never fetch from fonts.gstatic.com.
-  // This prevents crashes on devices with no internet or restricted DNS.
-  GoogleFonts.config.allowRuntimeFetching = false;
+  // Allow GoogleFonts to fetch DMSans and PlusJakartaSans from fonts.gstatic.com.
+  // The app requires internet for navigation, so this is always available.
+  GoogleFonts.config.allowRuntimeFetching = true;
 
   // Pre-discover the Flask backend before the first screen renders.
   // This runs the /ping scan in the background so login is instant.

@@ -1070,8 +1070,7 @@ class _PostCardState extends State<_PostCard> {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Stack(children: [
-              const Center(
-                  child: Text('🌊', style: TextStyle(fontSize: 36))),
+              const Center(child: Icon(Icons.water_rounded, size: 36, color: Colors.white70)),
               Positioned(
                 bottom: 8,
                 right: 8,
@@ -1451,22 +1450,22 @@ class _WeatherCard extends StatelessWidget {
     final floodColor   = _hexColor(floodColorHx, const Color(0xFFe74c3c));
 
     // Icon based on description keywords
-    String icon = '🌤️';
+    IconData icon = Icons.wb_cloudy_rounded;
     final desc = description.toLowerCase();
     if (desc.contains('heavy rain') || desc.contains('heavy shower')) {
-      icon = '🌧️';
+      icon = Icons.water_rounded;
     } else if (desc.contains('rain') || desc.contains('drizzle') || desc.contains('shower')) {
-      icon = '🌦️';
+      icon = Icons.water_rounded;
     } else if (desc.contains('thunder') || desc.contains('storm')) {
-      icon = '⛈️';
+      icon = Icons.bolt_rounded;
     } else if (desc.contains('snow') || desc.contains('sleet')) {
-      icon = '🌨️';
+      icon = Icons.ac_unit_rounded;
     } else if (desc.contains('fog') || desc.contains('mist') || desc.contains('haze')) {
-      icon = '🌫️';
+      icon = Icons.cloud_rounded;
     } else if (desc.contains('cloud')) {
-      icon = '☁️';
+      icon = Icons.cloud_rounded;
     } else if (desc.contains('clear') || desc.contains('sunny')) {
-      icon = '☀️';
+      icon = Icons.wb_sunny_rounded;
     }
 
     return Container(
@@ -1486,7 +1485,7 @@ class _WeatherCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            Text(icon, style: const TextStyle(fontSize: 32)),
+            Icon(icon, size: 36, color: Colors.white),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -1519,7 +1518,8 @@ class _WeatherCard extends StatelessWidget {
                 ],
               ),
             ),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Flexible(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
               Text('${tempC.toStringAsFixed(0)}°C',
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 28,
@@ -1532,12 +1532,13 @@ class _WeatherCard extends StatelessWidget {
                     color: Colors.white.withValues(alpha: 0.85),
                   )),
             ]),
+            ),
           ]),
           const SizedBox(height: 12),
           Row(children: [
-            _WeatherStat(icon: '💧', label: '$humidity%', sub: 'Humidity'),
+            _WeatherStat(icon: Icons.water_drop, label: '$humidity%', sub: 'Humidity'),
             const SizedBox(width: 16),
-            _WeatherStat(icon: '💨', label: '${windKph.toStringAsFixed(0)} kph', sub: 'Wind'),
+            _WeatherStat(icon: Icons.air, label: '${windKph.toStringAsFixed(0)} kph', sub: 'Wind'),
             const Spacer(),
             _WeatherActionBtn(
               label: 'View Map',
@@ -1670,7 +1671,7 @@ class _DetailRow extends StatelessWidget {
 }
 
 class _WeatherStat extends StatelessWidget {
-  final String icon;
+  final IconData icon;
   final String label;
   final String sub;
   const _WeatherStat({
@@ -1683,7 +1684,7 @@ class _WeatherStat extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       Row(children: [
-        Text(icon, style: const TextStyle(fontSize: 12)),
+        Icon(icon, size: 14, color: Colors.white),
         const SizedBox(width: 4),
         Text(label,
             style: GoogleFonts.dmSans(
@@ -1753,6 +1754,17 @@ class _ForecastStrip extends StatelessWidget {
     }
   }
 
+  IconData _iconFrom(String emoji) {
+    if (emoji.contains('☀') || emoji.contains('🌞')) return Icons.wb_sunny_rounded;
+    if (emoji.contains('⛅') || emoji.contains('🌤') || emoji.contains('🌥')) return Icons.wb_cloudy_rounded;
+    if (emoji.contains('☁')) return Icons.cloud_rounded;
+    if (emoji.contains('⛈') || emoji.contains('🌩')) return Icons.bolt_rounded;
+    if (emoji.contains('❄') || emoji.contains('🌨')) return Icons.ac_unit_rounded;
+    if (emoji.contains('🌧') || emoji.contains('🌦')) return Icons.water_rounded;
+    if (emoji.contains('🌫') || emoji.contains('🌬')) return Icons.air;
+    return Icons.wb_cloudy_rounded;
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = context.lt;
@@ -1797,7 +1809,7 @@ class _ForecastStrip extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                           color: t.text2,
                         )),
-                    Text(icon, style: const TextStyle(fontSize: 22)),
+                    Icon(_iconFrom(icon), size: 22, color: t.text),
                     Text('${tempMax.toStringAsFixed(0)}°/${tempMin.toStringAsFixed(0)}°',
                         style: GoogleFonts.dmSans(
                           fontSize: 10,

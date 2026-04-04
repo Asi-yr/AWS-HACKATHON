@@ -22,5 +22,7 @@ beautifulsoup4
 google-genai
 bcrypt
 PyJWT
+flask-wtf
+flask-limiter
 
 # briefcase

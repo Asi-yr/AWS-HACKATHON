@@ -1,12 +1,18 @@
 import time
 import logging
+import os
 from datetime import datetime, timezone
+from dotenv import load_dotenv
+
+load_dotenv()
 
 print("[DEBUG] [INIT] Starting application initialization...")
 t_init_start = time.time()
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
 from navigation import geocode_location, get_navigation_data
 from branca.element import Element
@@ -62,9 +68,13 @@ from risk_monitor.sos import (
 )
 from llm import get_commuter_advice
 from auth import auth_bp
+from flask_wtf.csrf import CSRFProtect
 
 USE_MYSQL = False
-print(f"[DEBUG] [INIT] USE_MYSQL is set to: {USE_MYSQL}")
+# Gate verbose debug output — set DEBUG_LOGS=false in .env to suppress in staging/production
+_DEBUG_LOGS = os.environ.get('DEBUG_LOGS', 'true').lower() == 'true'
+if _DEBUG_LOGS:
+    print(f"[DEBUG] [INIT] USE_MYSQL is set to: {USE_MYSQL}")
 
 if USE_MYSQL:
     print("[DEBUG] [INIT] Importing msql from db_opt...")
@@ -118,16 +128,28 @@ _init_2fa_columns()
 print(f"[DEBUG] [INIT] Database initialization took {time.time() - t_db_init:.4f}s")
 
 app = Flask(__name__)
-app.secret_key = 'saferoute_super_secret_key'
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY') or 'CHANGE_ME_IN_PRODUCTION'
+app.config['WTF_CSRF_CHECK_DEFAULT'] = False  # We register our own selective handler below
+CSRF = CSRFProtect(app)
+# Apply CSRF only to non-API routes. /api/* uses JWT Bearer tokens — CSRF doesn't apply.
+@app.before_request
+def _selective_csrf_protect():
+    if not request.path.startswith('/api/'):
+        return CSRF.protect()
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri='memory://',
+)
+CORS(app, resources={r"/api/*": {"origins": os.environ.get('CORS_ORIGINS', '*').split(',')}}, supports_credentials=False)
 app.register_blueprint(auth_bp)
 
 
 def _jwt_username(raw_token: str):
-    """Extract username from a Bearer token.
-    Handles both JWT (eyJ...) issued by auth.py and the legacy
-    plain-username tokens used by the HTML session-based flow.
-    Returns the username string or None on failure.
+    """Extract username from a JWT Bearer token.
+    Only accepts valid JWTs (eyJ...). Returns None for anything else
+    to prevent plain-username tokens from being accepted.
     """
     if not raw_token:
         return None
@@ -138,7 +160,7 @@ def _jwt_username(raw_token: str):
             return payload.get('sub')
         except Exception:
             return None   # expired or invalid — treat as unauthorized
-    return raw_token      # legacy plain-username token (HTML login flow)
+    return None  # reject non-JWT tokens
 
 
 print(f"[DEBUG] [INIT] Application setup complete in {time.time() - t_init_start:.4f}s")
@@ -916,48 +938,42 @@ def home():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     t_reg = time.time()
-    print(f"[DEBUG] [register] Method: {request.method}")
     if request.method == 'POST':
         username  = request.form.get('username')
         password  = request.form.get('password')
-        print(f"[DEBUG] [register] Attempting registration for username: '{username}'")
         conn, c   = chDB_perf.get_db_connection()
         chDB_perf.execute_query(c, "SELECT * FROM users WHERE username=?", (username,))
         if c.fetchone():
-            print(f"[DEBUG] [register] Username '{username}' already exists. Failing registration.")
             flash("Username already exists.")
             c.close(); conn.close()
             return redirect(url_for('register'))
-        
-        print(f"[DEBUG] [register] Username available. Hashing password...")
         hashed_pw = generate_password_hash(password)
         chDB_perf.execute_query(c, "INSERT INTO users (username, password) VALUES (?, ?)",
                                 (username, hashed_pw))
         conn.commit(); c.close(); conn.close()
-        print(f"[DEBUG] [register] Registration successful for '{username}'. Time taken: {time.time() - t_reg:.4f}s")
+        if _DEBUG_LOGS:
+            print(f"[DEBUG] [register] Registration successful. Time taken: {time.time() - t_reg:.4f}s")
         flash("Registration successful!")
         return redirect(url_for('login'))
     return render_template('register.html')
 
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit('10 per minute', methods=['POST'])
 def login():
     t_login = time.time()
-    print(f"[DEBUG] [login] Method: {request.method}")
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        print(f"[DEBUG] [login] Attempting login for username: '{username}'")
         conn, c  = chDB_perf.get_db_connection()
         chDB_perf.execute_query(c, "SELECT password FROM users WHERE username=?", (username,))
         user = c.fetchone()
         c.close(); conn.close()
         if user and check_password_hash(user[0], password):
-            print(f"[DEBUG] [login] Password match for '{username}'. Setting session.")
             session['user'] = username
-            print(f"[DEBUG] [login] Login operation took {time.time() - t_login:.4f}s")
+            if _DEBUG_LOGS:
+                print(f"[DEBUG] [login] Login successful. Time taken: {time.time() - t_login:.4f}s")
             return redirect(url_for('home'))
-        print(f"[DEBUG] [login] Invalid username or password for '{username}'.")
         flash("Invalid username or password.")
         return redirect(url_for('login'))
     return render_template('login.html')
@@ -965,7 +981,6 @@ def login():
 
 @app.route('/logout')
 def logout():
-    print(f"[DEBUG] [logout] User logging out: {session.get('user')}")
     session.pop('user', None)
     return redirect(url_for('login'))
 

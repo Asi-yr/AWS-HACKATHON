@@ -1,10 +1,28 @@
-"""Run this once to create the test account for Ligtas app testing."""
+"""Run this once to create the test account for Ligtas app testing.
+
+WARNING: Never run this script in production. It is for LOCAL DEVELOPMENT only.
+Set TEST_USERNAME / TEST_PASSWORD / TEST_EMAIL in your .env to override defaults.
+"""
+import os
+import sys
+from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash
 import sqlite3
 
-username = 'testuser'
-password = 'test1234'
-email = 'test@ligtas.app'
+load_dotenv()
+
+# Safety guard — refuse to run if FLASK_ENV is set to production
+if os.environ.get('FLASK_ENV', '').lower() == 'production':
+    print('ERROR: Refusing to create test account in production environment.')
+    sys.exit(1)
+
+username = os.environ.get('TEST_USERNAME', 'testuser')
+password = os.environ.get('TEST_PASSWORD', '')
+email    = os.environ.get('TEST_EMAIL',    'test@ligtas.app')
+
+if not password:
+    print('ERROR: TEST_PASSWORD is not set in .env. Refusing to create account with a blank password.')
+    sys.exit(1)
 
 hashed = generate_password_hash(password)
 conn = sqlite3.connect('users.db')

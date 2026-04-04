@@ -410,7 +410,6 @@ except ImportError:
     result("python-dotenv importable", False, "Run: pip install python-dotenv")
 except Exception as e:
     result("LLM module check", False, str(e))
-
 # Check DDGS (web search for LLM context)
 try:
     from ddgs import DDGS

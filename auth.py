@@ -1,16 +1,21 @@
-import random
+import os
+import secrets
 import jwt
 import bcrypt
 import sqlite3
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 from flask import Blueprint, request, jsonify, current_app
+
+load_dotenv()
 
 auth_bp = Blueprint('auth', __name__)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 # JWT_SECRET must match app.secret_key in main.py so token-based user lookups
 # remain consistent with the existing session-based auth used by the HTML UI.
-JWT_SECRET      = 'saferoute_super_secret_key'
+# Set JWT_SECRET and FLASK_SECRET_KEY as environment variables (see .env).
+JWT_SECRET      = os.environ.get('JWT_SECRET') or 'CHANGE_ME_IN_PRODUCTION'
 JWT_EXPIRY_H    = 24          # real session token: 24 hours
 TEMP_EXPIRY_MIN = 5           # temp token (2FA pending): 5 minutes
 OTP_EXPIRY_MIN  = 2           # OTP code validity: 2 minutes
@@ -28,9 +33,9 @@ OTP_MAX_TRIES   = 3           # lock account after this many wrong OTP attempts
 #
 SMTP_HOST = 'smtp.gmail.com'
 SMTP_PORT = 587
-SMTP_USER = 'wrye.lyth9.ohm@gmail.com'   # ← paste your Gmail address here  e.g. 'youremail@gmail.com'
-SMTP_PASS = 'tdau qiup yygz wkwt'   # ← paste your Gmail App Password here  e.g. 'abcd efgh ijkl mnop'
-MAIL_FROM = SMTP_USER
+SMTP_USER = os.environ.get('SMTP_USER', '')   # Set SMTP_USER in your .env file
+SMTP_PASS = os.environ.get('SMTP_PASS', '')   # Set SMTP_PASS in your .env file
+MAIL_FROM = os.environ.get('MAIL_FROM', SMTP_USER)
 
 
 # ── DB helper ──────────────────────────────────────────────────────────────────
@@ -169,15 +174,16 @@ def login():
 
     # ── 2FA path ───────────────────────────────────────────────────────────────
     if user['totp_enabled']:
-        otp    = str(random.randint(100000, 999999))
-        expiry = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MIN)
+        otp        = str(secrets.randbelow(900000) + 100000)  # cryptographically secure 6-digit OTP
+        otp_hash   = bcrypt.hashpw(otp.encode(), bcrypt.gensalt()).decode()
+        expiry     = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MIN)
 
         db = get_db()
         db.execute(
             '''UPDATE users
                SET otp = ?, otp_expiry = ?, otp_attempts = 0
                WHERE username = ?''',
-            (otp, expiry.strftime('%Y-%m-%d %H:%M:%S'), user['username'])
+            (otp_hash, expiry.strftime('%Y-%m-%d %H:%M:%S'), user['username'])
         )
         db.commit()
         db.close()
@@ -251,7 +257,14 @@ def verify_2fa():
             'message': 'OTP has expired. Please log in again to request a new code.',
         }), 401
 
-    if otp_code != user['otp']:
+    stored_otp_hash = user['otp'] or ''
+    otp_valid = False
+    try:
+        otp_valid = bcrypt.checkpw(otp_code.encode(), stored_otp_hash.encode())
+    except Exception:
+        otp_valid = False
+
+    if not otp_valid:
         db.execute(
             'UPDATE users SET otp_attempts = otp_attempts + 1 WHERE username = ?',
             (username,)
@@ -308,8 +321,8 @@ def register():
     if not username or not password or not email:
         return jsonify({'ok': False, 'message': 'All fields are required'}), 400
 
-    if len(password) < 6:
-        return jsonify({'ok': False, 'message': 'Password must be at least 6 characters'}), 400
+    if len(password) < 8:
+        return jsonify({'ok': False, 'message': 'Password must be at least 8 characters'}), 400
 
     db = get_db()
     existing = db.execute(

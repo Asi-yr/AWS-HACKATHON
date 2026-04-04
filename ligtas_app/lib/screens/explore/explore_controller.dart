@@ -27,6 +27,7 @@ class PoiModel {
   final double lat, lng;
   final String name;
   final String label;
+  final String type; // 'hospital', 'police', 'pharmacy', etc.
   final IconData icon;
   final Color color;
   const PoiModel({
@@ -34,6 +35,7 @@ class PoiModel {
     required this.lng,
     this.name = '',
     required this.label,
+    this.type = '',
     required this.icon,
     this.color = const Color(0xFF0D9E9E),
   });
@@ -77,6 +79,12 @@ class ExploreController extends ChangeNotifier {
   /// asynchronously (after the map widget already built with a fallback center).
   VoidCallback? onLocationResolved;
 
+  /// Optional callback fired when the user selects a search suggestion that
+  /// already has known coordinates (from the /api/suggest Nominatim response).
+  /// The map widget wires this to immediately pan the camera to [lat, lon]
+  /// and drop the preview pin — matching the web's immediate flyTo behaviour.
+  Function(double lat, double lon)? onMapPreview;
+
   /// Fetch saved survey prefs from backend and seed filters.
   /// Called on init and after login so prefs are always applied for the session.
   Future<void> loadUserPreferences() async {
@@ -102,6 +110,13 @@ class ExploreController extends ChangeNotifier {
   }
 
   Future<void> _initLocation() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      _locationPopupVisible = true;
+      notifyListeners();
+      return;
+    }
+
     final perm = await Geolocator.checkPermission();
 
     if (perm == LocationPermission.always ||
@@ -110,6 +125,7 @@ class ExploreController extends ChangeNotifier {
       try {
         final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 15),
         );
         _lat = pos.latitude;
         _lng = pos.longitude;
@@ -216,6 +232,7 @@ class ExploreController extends ChangeNotifier {
       }
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 15),
       );
       _lat = pos.latitude;
       _lng = pos.longitude;
@@ -271,10 +288,15 @@ class ExploreController extends ChangeNotifier {
       }
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 15),
       );
       _lat = pos.latitude;
       _lng = pos.longitude;
       _hasLocation = true;
+
+      // Place the origin A-pin on the map immediately (mirrors web setOrigin)
+      _resolvedOrigLat = _lat;
+      _resolvedOrigLon = _lng;
 
       try {
         final token = await SessionManager.instance.getAuthToken();
@@ -294,6 +316,10 @@ class ExploreController extends ChangeNotifier {
 
       showToast('Location set', 'green');
       notifyListeners();
+      // Pan the map to the origin pin (mirrors web setOrigin fly-to)
+      onLocationResolved?.call();
+      // Fetch nearby transit stops around the new GPS origin (web parity)
+      fetchNearbyStops(_lat!, _lng!);
     } catch (e) {
       showToast('Could not get location', 'red');
     }
@@ -328,7 +354,10 @@ class ExploreController extends ChangeNotifier {
 
   // ── Safety overlays ────────────────────────────────────────────
   List<HotspotModel> hotspots = [];
-  List<PoiModel> pois = [];
+  List<PoiModel> _allPois = []; // full unfiltered list
+  List<PoiModel> get pois => _allPois
+      .where((p) => p.type.isEmpty || _selectedSpotTypes.contains(p.type))
+      .toList();
   AdvisoryModel? advisory;
 
   void setHotspots(List<HotspotModel> data) {
@@ -337,7 +366,7 @@ class ExploreController extends ChangeNotifier {
   }
 
   void setPois(List<PoiModel> data) {
-    pois = data;
+    _allPois = data;
     notifyListeners();
   }
 
@@ -530,6 +559,7 @@ class ExploreController extends ChangeNotifier {
                   lng: (spot['lon'] as num?)?.toDouble() ?? 0.0,
                   name: spot['name'] as String? ?? '',
                   label: spot['label'] as String? ?? 'Safe Spot',
+                  type: spot['type'] as String? ?? '',
                   icon: _iconForSpotType(spot['type'] as String? ?? ''),
                   color: _colorForSpotType(spot['type'] as String? ?? ''),
                 ));
@@ -650,6 +680,80 @@ class ExploreController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Transit sub-toggles (web parity) ──────────────────────────
+  // When _activeMode == 'transit', these three flags determine which
+  // transit modes are requested from the backend — matching the web's
+  // Train / Jeepney / Bus ON/OFF tiles under the Transit selector.
+  bool _transitTrainOn   = true;
+  bool _transitJeepneyOn = true;
+  bool _transitBusOn     = true;
+  bool get transitTrainOn   => _transitTrainOn;
+  bool get transitJeepneyOn => _transitJeepneyOn;
+  bool get transitBusOn     => _transitBusOn;
+
+  /// Computes the backend `mode` string from the three sub-toggle flags.
+  /// Mirrors resolvedTransitMode() in the web frontend.
+  String get resolvedTransitMode {
+    final t = _transitTrainOn, j = _transitJeepneyOn, b = _transitBusOn;
+    if (t && j && b) return 'transit';
+    if (t && j)      return 'train_jeepney';
+    if (t && b)      return 'train_bus';
+    if (j && b)      return 'jeepney_bus';
+    if (t)           return 'train';
+    if (j)           return 'jeepney';
+    if (b)           return 'bus';
+    return 'transit'; // fallback: all on
+  }
+
+  void toggleTransitSub(String key) {
+    final onCount = [_transitTrainOn, _transitJeepneyOn, _transitBusOn]
+        .where((v) => v)
+        .length;
+    switch (key) {
+      case 'train':
+        if (_transitTrainOn && onCount == 1) return; // keep at least one on
+        _transitTrainOn = !_transitTrainOn;
+        break;
+      case 'jeepney':
+        if (_transitJeepneyOn && onCount == 1) return;
+        _transitJeepneyOn = !_transitJeepneyOn;
+        break;
+      case 'bus':
+        if (_transitBusOn && onCount == 1) return;
+        _transitBusOn = !_transitBusOn;
+        break;
+    }
+    notifyListeners();
+  }
+
+  // ── Safe spot type filter (web parity) ─────────────────────────
+  // The web shows 10 per-type checkboxes when "Include Safe Spots" is on.
+  // Flutter mirrors this: pois getter filters _allPois by these types.
+  static const Set<String> _kDefaultSpotTypes = {
+    'police', 'hospital', 'fire_station', 'clinic', 'pharmacy',
+    'barangay_hall', 'evacuation_centre',
+  };
+  Set<String> _selectedSpotTypes = {..._kDefaultSpotTypes};
+  Set<String> get selectedSpotTypes => Set.unmodifiable(_selectedSpotTypes);
+
+  void toggleSpotType(String type) {
+    if (_selectedSpotTypes.contains(type)) {
+      _selectedSpotTypes = {..._selectedSpotTypes}..remove(type);
+    } else {
+      _selectedSpotTypes = {..._selectedSpotTypes, type};
+    }
+    notifyListeners(); // pois getter re-filters automatically
+  }
+
+  // ── Plate digit (MMDA coding check, web parity) ────────────────
+  String _plateDigit = '';
+  String get plateDigit => _plateDigit;
+
+  void setPlateDigit(String v) {
+    _plateDigit = v.trim();
+    notifyListeners();
+  }
+
   // ── Resolved geocoded coordinates from last route search ──────
   // Populated from orig_lat/orig_lon/dest_lat/dest_lon in API response.
   // Used by _MapLayer to place the A and B pins accurately.
@@ -659,6 +763,22 @@ class ExploreController extends ChangeNotifier {
   double? get resolvedOrigLon => _resolvedOrigLon;
   double? get resolvedDestLat => _resolvedDestLat;
   double? get resolvedDestLon => _resolvedDestLon;
+
+  // ── Nearby transit stops (web parity: fetchAndDrawNearby) ──────
+  // Populated from /api/nearby when origin is set.
+  // Shown as coloured dot markers on the map (J/B/T icons, 800m radius).
+  List<Map<String, dynamic>> _nearbyStops = [];
+  List<Map<String, dynamic>> get nearbyStops => List.unmodifiable(_nearbyStops);
+
+  Future<void> fetchNearbyStops(double lat, double lon) async {
+    try {
+      final stops = await ApiClient.instance.getNearby(lat: lat, lon: lon);
+      _nearbyStops = stops;
+      notifyListeners();
+    } catch (_) {
+      // Nearby stops are optional — silently degrade
+    }
+  }
 
   // ── Search inputs ──────────────────────────────────────────────
   String _currentLocationText = '';
@@ -691,6 +811,30 @@ class ExploreController extends ChangeNotifier {
 
   void setDestText(String v) {
     _destinationText = v;
+    notifyListeners();
+  }
+
+  /// Called when the user taps a suggestion that already has lat/lon from
+  /// the backend Nominatim proxy. Pre-seeds the resolved coordinates so
+  /// the map can show the pin immediately without waiting for searchRoutes().
+  void previewLocation({
+    required bool isOrigin,
+    required double lat,
+    required double lon,
+    required String label,
+  }) {
+    if (isOrigin) {
+      _currentLocationText = label;
+      _resolvedOrigLat = lat;
+      _resolvedOrigLon = lon;
+      // Fetch nearby transit stops around the new origin (web parity)
+      fetchNearbyStops(lat, lon);
+    } else {
+      _destinationText = label;
+      _resolvedDestLat = lat;
+      _resolvedDestLon = lon;
+    }
+    onMapPreview?.call(lat, lon);
     notifyListeners();
   }
 
@@ -818,11 +962,20 @@ class ExploreController extends ChangeNotifier {
           'lon': _resolvedDestLon,
         };
       }
+      // Plate digit → MMDA number coding check (web parity)
+      final parsedPlate = int.tryParse(_plateDigit);
+      if (parsedPlate != null) {
+        extraParams['plate_last_digit'] = parsedPlate;
+      }
+
+      // Resolve transit mode from sub-toggles (web parity)
+      final effectiveMode =
+          _activeMode == 'transit' ? resolvedTransitMode : _activeMode;
 
       final response = await ApiClient.instance.searchRoutesWithAlerts(
         origin: _currentLocationText,
         destination: _destinationText,
-        mode: _activeMode,
+        mode: effectiveMode,
         extraParams: extraParams,
       );
 
@@ -1016,17 +1169,29 @@ class ExploreController extends ChangeNotifier {
   }
 
   void clearSearch() {
-    _currentLocationText = '';
+    // If GPS location was already obtained, keep the origin address so that
+    // the next search pre-fills "Your Location" automatically (mirrors web).
+    if (!(_hasLocation && _lat != null)) {
+      _currentLocationText = '';
+    }
+    // Always clear destination and route state
     _destinationText = '';
     _state = AppState.state1;
     _activeRoute = null;
     _isLoadingRoutes = false;
     _filteredRoutes = List.from(_allRoutes);
     advisory = null;
-    _resolvedOrigLat = null;
-    _resolvedOrigLon = null;
+    // Keep origin pin on map if GPS is available, otherwise clear it
+    if (_hasLocation && _lat != null) {
+      _resolvedOrigLat = _lat;
+      _resolvedOrigLon = _lng;
+    } else {
+      _resolvedOrigLat = null;
+      _resolvedOrigLon = null;
+    }
     _resolvedDestLat = null;
     _resolvedDestLon = null;
+    _nearbyStops = [];
     showToast('Search cleared', 'teal');
     notifyListeners();
   }
@@ -1048,9 +1213,21 @@ class ExploreController extends ChangeNotifier {
     List<String> transport = const [],
     List<String> safety = const [],
   }) {
-    commuterFilters = List.of(commuterTypes);
-    transportFilters = List.of(transport);
-    ligtasFilters = List.of(safety);
+    // Seed active routing mode from survey transport preference so the first
+    // automatic search uses the correct mode.  Do NOT seed transportFilters
+    // as a post-filter — see _applyFilters() comment above.
+    if (transport.isNotEmpty) {
+      const valid = {
+        'transit', 'walk', 'car', 'motorcycle', 'train', 'jeepney', 'bus',
+      };
+      final first = transport.first.toLowerCase();
+      if (valid.contains(first)) {
+        _activeMode = first;
+        transportFilters = [first]; // UI chip only — not a route post-filter
+      }
+    }
+    commuterFilters = List.of(commuterTypes); // UI chips only
+    ligtasFilters = List.of(safety);          // UI chips only
     _applyFilters();
     notifyListeners();
   }
@@ -1060,7 +1237,24 @@ class ExploreController extends ChangeNotifier {
     if (group == 'commuter') {
       list = commuterFilters;
     } else if (group == 'transport') {
-      list = transportFilters;
+      // Radio-style: one transport mode active at a time.
+      // Selecting a mode also updates the active routing mode so routes
+      // re-search immediately with the correct backend mode param.
+      if (transportFilters.contains(key)) {
+        transportFilters.remove(key);
+        _activeMode = 'transit'; // revert to default when deselected
+      } else {
+        transportFilters.clear(); // clear any previous selection
+        transportFilters.add(key);
+        _activeMode = key; // sync routing mode
+      }
+      _applyFilters();
+      notifyListeners();
+      // Re-search with new mode if route endpoints are already set
+      if (_currentLocationText.isNotEmpty && _destinationText.isNotEmpty) {
+        searchRoutes();
+      }
+      return;
     } else if (group == 'ligtas') {
       list = ligtasFilters;
     } else {
@@ -1090,6 +1284,7 @@ class ExploreController extends ChangeNotifier {
       commuterFilters.remove(key);
     } else if (group == 'transport') {
       transportFilters.remove(key);
+      _activeMode = 'transit'; // reset routing mode to default on chip removal
     } else if (group == 'ligtas') {
       ligtasFilters.remove(key);
     } else {
@@ -1107,7 +1302,13 @@ class ExploreController extends ChangeNotifier {
         preferenceFilters.length;
     showToast(total > 0 ? 'Filters applied' : 'No filters active', 'teal');
     _applyFilters();
-    notifyListeners();
+    // Re-search so backend-level changes (plate digit, profile) take effect
+    // immediately when the user taps "Apply Filters".
+    if (_currentLocationText.isNotEmpty && _destinationText.isNotEmpty) {
+      searchRoutes(); // async — searchRoutes() calls notifyListeners() itself
+    } else {
+      notifyListeners();
+    }
   }
 
   void clearAllFilters() {
@@ -1227,30 +1428,25 @@ class ExploreController extends ChangeNotifier {
   void _applyFilters() {
     List<RouteModel> result = List.from(_allRoutes);
 
-    if (commuterFilters.isNotEmpty) {
-      result = result
-          .where((r) => commuterFilters.any((f) => r.commuterTags.contains(f)))
-          .toList();
-    }
-
-    if (transportFilters.isNotEmpty) {
-      result = result.where((r) {
-        final modesLower = r.modes.toLowerCase();
-        return transportFilters.any(
-          (f) => modesLower.contains(f.toLowerCase()),
-        );
-      }).toList();
-    }
-
-    if (_ligtasModeOn && ligtasFilters.isNotEmpty) {
-      result = result
-          .where((r) => ligtasFilters.any((f) => r.ligtasTags.contains(f)))
-          .toList();
-    }
+    // Transport mode, commuter type, and ligtas features are applied at the
+    // backend level (mode=, vulnerable_profile=). Post-filtering by route label
+    // or tag lists here would silently hide valid routes because:
+    //   • route.modes is a display string ("Route 1", "Jeepney via EDSA")
+    //     that never matches filter keys like "transit"
+    //   • route.commuterTags and route.ligtasTags are always [] from the API
+    // These filters are kept as chip UI state only — not used to cull results.
 
     if (preferenceFilters.isNotEmpty) {
       final pref = preferenceFilters.first;
-      if (pref == 'safest') {
+      if (pref == 'avoid_flood') {
+        // Push flooded routes to the bottom; prefer routes with no flood warning
+        result.sort((a, b) {
+          final aFlooded = (a.floodWarning != null && a.floodWarning!.isNotEmpty) ? 1 : 0;
+          final bFlooded = (b.floodWarning != null && b.floodWarning!.isNotEmpty) ? 1 : 0;
+          if (aFlooded != bFlooded) return aFlooded.compareTo(bFlooded);
+          return b.safetyScore.compareTo(a.safetyScore); // secondary: safest first
+        });
+      } else if (pref == 'safest') {
         result.sort((a, b) => b.safetyScore.compareTo(a.safetyScore));
       } else if (pref == 'fastest') {
         result.sort((a, b) => a.minutes.compareTo(b.minutes));

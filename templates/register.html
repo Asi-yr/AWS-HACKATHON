@@ -20,6 +20,7 @@
         {% endwith %}
 
         <form action="/register" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="text" name="username" placeholder="Choose a Username" required>
             <input type="password" name="password" placeholder="Create a Password" required>
             <button type="submit" class="btn-primary" style="background: #27ae60;">Register Account</button>

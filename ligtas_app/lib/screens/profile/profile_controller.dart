@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -53,6 +54,10 @@ class ProfileController extends ChangeNotifier {
       preferences: user.preferences.copyWith(aiSafety: aiSafetyEnabled),
     );
     _twoFactorEnabled = tfa;
+    final avatarB64 = prefs.getString('avatar_bytes_b64');
+    if (avatarB64 != null && avatarB64.isNotEmpty) {
+      avatarBytes = base64Decode(avatarB64);
+    }
     notifyListeners();
   }
 
@@ -122,9 +127,6 @@ class ProfileController extends ChangeNotifier {
             transport: List<String>.from(userData['preferences']?['transport'] ?? ['jeep', 'walk']),
           ),
         );
-        // Backend gave us a fresh user — clear any locally picked bytes
-        // so the backend avatar is shown instead.
-        avatarBytes = null;
         notifyListeners();
       }
     } catch (e) {
@@ -213,6 +215,9 @@ class ProfileController extends ChangeNotifier {
       // Image.file() crashes on Flutter Web so we never use it for preview.
       final bytes = await image.readAsBytes();
       avatarBytes = bytes;
+      // Persist the picked image so it survives app restarts
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('avatar_bytes_b64', base64Encode(bytes));
 
       if (!kIsWeb) {
         // On native, also store the file path for potential backend upload.

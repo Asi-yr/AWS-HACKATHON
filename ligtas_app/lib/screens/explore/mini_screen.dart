@@ -483,6 +483,16 @@ class _SearchOverlayState extends State<_SearchOverlay> {
     _destCtrl.text = ctrl.destText;
     _filteredStatic = List.from(miniItems);
 
+    // If origin is empty but GPS coordinates are already available,
+    // silently re-fill origin from the device location (mirrors web behaviour
+    // where "My Location" sticks as the default origin).
+    if (_currentCtrl.text.isEmpty && ctrl.hasLocation && ctrl.lat != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        await _useCurrentLocation();
+      });
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_currentCtrl.text.isEmpty) {
         _currentFocus.requestFocus();
@@ -634,7 +644,15 @@ class _SearchOverlayState extends State<_SearchOverlay> {
     }
   }
 
-  void _onApiItemTap(String placeName) {
+  void _onApiItemTap(String placeName, double lat, double lon) {
+    final ctrl = context.read<ExploreController>();
+    // Pre-seed resolved coordinates and pan the map immediately (web parity).
+    ctrl.previewLocation(
+      isOrigin: _isOriginFocused,
+      lat: lat,
+      lon: lon,
+      label: placeName,
+    );
     if (_isOriginFocused) {
       _currentCtrl.text = placeName;
       _destFocus.requestFocus();
@@ -945,6 +963,60 @@ class _InputHeader extends StatelessWidget {
               fontWeight: FontWeight.w500,
             ),
           ),
+          // ── Find Routes button — visible when both fields are filled ──
+          ListenableBuilder(
+            listenable: Listenable.merge([currentCtrl, destCtrl]),
+            builder: (_, child) {
+              final bothFilled =
+                  currentCtrl.text.isNotEmpty && destCtrl.text.isNotEmpty;
+              return AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                child: bothFilled
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: GestureDetector(
+                          onTap: onSearch,
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            decoration: BoxDecoration(
+                              color: AppColors.teal,
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.teal.withValues(alpha: 0.40),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.route_rounded,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Find Safe Routes',
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -1064,7 +1136,7 @@ class _SuggestionList extends StatelessWidget {
   final bool isLoadingApi;
   final String query;
   final void Function(MiniItem) onSelectStatic;
-  final void Function(String) onSelectApi;
+  final void Function(String name, double lat, double lon) onSelectApi;
 
   const _SuggestionList({
     required this.staticItems,
@@ -1182,7 +1254,11 @@ class _SuggestionList extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     )
                   : null,
-              onTap: () => onSelectApi(shortName.isNotEmpty ? shortName : name),
+              onTap: () {
+                final lat = double.tryParse(place['lat']?.toString() ?? '') ?? 0;
+                final lon = double.tryParse(place['lon']?.toString() ?? '') ?? 0;
+                onSelectApi(shortName.isNotEmpty ? shortName : name, lat, lon);
+              },
             );
           }),
         ],
