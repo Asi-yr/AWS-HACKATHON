@@ -538,7 +538,7 @@ document.querySelectorAll('.mode-tile').forEach(tile => {
 document.getElementById('transit-subtoggle').classList.add('visible');
 updateSubToggles();
 
-// ── Locate-me (origin) ────────────────────────────────────────────────────────
+// ── Locate-me (origin) *** ────────────────────────────────────────────────────────
 document.getElementById('locate-origin-btn').addEventListener('click', () => {
   if (!navigator.geolocation) return;
   navigator.geolocation.getCurrentPosition(pos => {
@@ -2284,7 +2284,7 @@ map.on('zoomend', function () {
   var prefillMode   = pd ? (pd.dataset.mode   || '') : '';
   var prefillOrigin = pd ? (pd.dataset.origin || '') : '';
   var prefillDest   = pd ? (pd.dataset.dest   || '') : '';
-  var autoSearch    = pd ? pd.dataset.autoSearch === 'true' : false;
+  var autoSearch    = pd ? pd.dataset.autoSearch === 'true' : false;r
 
   // Populate input fields from prefill values and geocode to place markers
   if (prefillOrigin) {

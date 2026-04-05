@@ -392,6 +392,45 @@ class ProfileController extends ChangeNotifier {
   }
   void closeTravelHistory() { travelHistoryOpen = false; notifyListeners(); }
 
+  /// Save a route from the explore screen into Saved Routes.
+  void addSavedRoute({
+    required String origin,
+    required String destination,
+    required String modes,
+    required int minutes,
+    required int fare,
+    required int safetyScore,
+    required String safetyNote,
+  }) {
+    // Avoid exact duplicate (same origin + destination already saved)
+    final alreadySaved = history.saved.any(
+      (r) => r.origin == origin && r.destination == destination,
+    );
+    if (alreadySaved) {
+      showToast('Already in Saved Routes', 'teal');
+      return;
+    }
+    final newRoute = TravelRoute(
+      id: 'saved_${DateTime.now().millisecondsSinceEpoch}',
+      origin: origin,
+      destination: destination,
+      modes: modes,
+      minutes: minutes,
+      fare: fare,
+      safetyScore: safetyScore,
+      safetyNote: safetyNote,
+      date: 'Saved route',
+      saved: true,
+      steps: const [],
+    );
+    history = TravelHistory(
+      saved: [newRoute, ...history.saved],
+      history: history.history,
+    );
+    showToast('Route saved!', 'teal');
+    notifyListeners();
+  }
+
   /// Clear travel history on the backend then wipe local state.
   Future<void> clearTravelHistory() async {
     try {

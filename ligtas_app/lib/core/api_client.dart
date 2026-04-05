@@ -444,6 +444,12 @@ class ApiClient {
       seismicWarning: r['seismic_warning'] as String?,
       floodWarning: floodWarning,
       crimeWarning: crimeWarning,
+      nightWarning: () {
+        final raw = r['night_warning'] as String?;
+        if (raw == null || raw.trim().isEmpty) return null;
+        final cleaned = _cleanWarningText(raw.trim());
+        return cleaned.isEmpty ? null : cleaned;
+      }(),
       profileWarnings: r['profile_warnings'] as List<dynamic>?,
       routeCrimeZones: (r['route_crime_zones'] is List)
           ? (r['route_crime_zones'] as List)
@@ -673,9 +679,11 @@ class ApiClient {
         .replaceAll(RegExp(r'[\u{1F000}-\u{1FFFF}]', unicode: true), '')
         .trim();
     s = s.replaceAll(RegExp(r'[\u{2600}-\u{27BF}]', unicode: true), '').trim();
-    // Strip location prefix "AreaName: warning" → keep only the warning
+    // Strip location prefix "AreaName: warning" → keep only the warning.
+    // No length limit: long reverse-geocoded addresses (street, barangay, city,
+    // region, country, postcode) must also be stripped.
     final colonIdx = s.indexOf(': ');
-    if (colonIdx > 0 && colonIdx < 60) {
+    if (colonIdx > 0) {
       final prefix = s.substring(0, colonIdx);
       if (!prefix.toLowerCase().contains('risk') &&
           !prefix.toLowerCase().contains('crime')) {
@@ -1496,11 +1504,18 @@ class ApiClient {
     return list.cast<Map<String, dynamic>>();
   }
 
-  /// GET /api/mmda
+  /// GET /api/mmda[?plate=<digit>]
   /// Returns { coding, closures, closures_count, mmda_banner }
-  Future<Map<String, dynamic>> getMmda({String? token}) async {
+  /// Pass [plateDigit] (0–9) to get number-coding status specific to that plate.
+  Future<Map<String, dynamic>> getMmda({String? token, int? plateDigit}) async {
+    final base = await getBaseUrl();
+    final uri = plateDigit != null
+        ? Uri.parse('$base/api/mmda').replace(
+            queryParameters: {'plate': '$plateDigit'},
+          )
+        : Uri.parse('$base/api/mmda');
     final resp = await http
-      .get(Uri.parse('${await getBaseUrl()}/api/mmda'), headers: _headers(token))
+        .get(uri, headers: _headers(token))
         .timeout(const Duration(seconds: 8));
     _checkStatus(resp);
     return jsonDecode(resp.body) as Map<String, dynamic>;

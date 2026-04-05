@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -148,6 +150,12 @@ class ExploreController extends ChangeNotifier {
         }
         // Re-center the map now that we have a real GPS fix
         onLocationResolved?.call();
+        // ── Silently warm up the map on first open ────────────────────────
+        // Mirrors web: loadSafetyOverlay() + fetchAndDrawNearby() are called
+        // immediately after GPS is obtained on page load, so the map shows
+        // transit stops and safety circles without the user doing anything.
+        unawaited(fetchNearbyStops(_lat!, _lng!));
+        unawaited(fetchSafetyOverlays(lat: _lat!, lon: _lng!));
       } catch (_) {
         // Couldn't get position even with permission — leave popup hidden,
         // user can still type manually
@@ -275,6 +283,13 @@ class ExploreController extends ChangeNotifier {
   /// Called by the teal GPS icon inside the search pill/overlay.
   /// Gets GPS position, reverse-geocodes it, fills the origin field,
   /// then returns so the caller can open the search screen.
+  ///
+  /// Mirrors web setOrigin(): shows "My Location" immediately, drops the
+  /// A-pin, flies to the position, then async-updates the label with the
+  /// real geocoded address (GET /api/reverse) and kicks off nearby-stop
+  /// and safety-overlay fetches (GET /api/nearby, GET /api/safety,
+  /// GET /api/safe-spots/flutter) — matching every side-effect of the
+  /// Flask locate-origin-btn click.
   Future<void> useCurrentLocationAsOrigin() async {
     showToast('Getting your location…', 'teal');
     try {
@@ -294,32 +309,47 @@ class ExploreController extends ChangeNotifier {
       _lng = pos.longitude;
       _hasLocation = true;
 
-      // Place the origin A-pin on the map immediately (mirrors web setOrigin)
+      // ── Immediate feedback (mirrors web: input.value = 'My Location') ──
+      // Drop the A-pin and show "My Location" right away so the UI
+      // feels responsive — the label will be overwritten once /api/reverse
+      // comes back with the real address, exactly as the web does.
       _resolvedOrigLat = _lat;
       _resolvedOrigLon = _lng;
+      _currentLocationText = 'My Location';
+      notifyListeners();
+      // Pan/zoom the map to the GPS fix immediately (mirrors map.setView zoom 15)
+      onLocationResolved?.call();
 
-      try {
-        final token = await SessionManager.instance.getAuthToken();
-        final rev = await ApiClient.instance.reverseGeocode(
-          lat: _lat!,
-          lon: _lng!,
-          token: token,
-        );
-        final address = rev['address'] as String? ?? '';
-        _currentLocationText = address.isNotEmpty
-            ? address
-            : '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
-      } catch (_) {
-        _currentLocationText =
-            '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
-      }
+      // ── Kick off all three backend calls in parallel ──────────────────
+      // 1. Reverse-geocode → update origin label with real address
+      // 2. Nearby transit stops → coloured dot markers near origin
+      // 3. Safety overlays → community-report circles + safe-spot POIs
+      final token = await SessionManager.instance.getAuthToken();
+
+      unawaited(
+        ApiClient.instance
+            .reverseGeocode(lat: _lat!, lon: _lng!, token: token)
+            .then((rev) {
+          final address = (rev['address'] as String?) ?? '';
+          _currentLocationText = address.isNotEmpty
+              ? address
+              : '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
+          notifyListeners();
+        }).catchError((_) {
+          _currentLocationText =
+              '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}';
+          notifyListeners();
+        }),
+      );
+
+      unawaited(fetchNearbyStops(_lat!, _lng!));
+
+      unawaited(
+        fetchSafetyOverlays(lat: _lat!, lon: _lng!),
+      );
 
       showToast('Location set', 'green');
       notifyListeners();
-      // Pan the map to the origin pin (mirrors web setOrigin fly-to)
-      onLocationResolved?.call();
-      // Fetch nearby transit stops around the new GPS origin (web parity)
-      fetchNearbyStops(_lat!, _lng!);
     } catch (e) {
       showToast('Could not get location', 'red');
     }
@@ -385,7 +415,10 @@ class ExploreController extends ChangeNotifier {
   Future<void> fetchMmdaStatus() async {
     try {
       final token = await SessionManager.instance.getAuthToken();
-      final data = await ApiClient.instance.getMmda(token: token);
+      // Pass stored plate digit so the backend can check number-coding status
+      // for the user's specific plate (matches web ?plate= query param).
+      final plate = _plateDigit.isNotEmpty ? int.tryParse(_plateDigit) : null;
+      final data = await ApiClient.instance.getMmda(token: token, plateDigit: plate);
       final coding = data['coding'] as Map?;
       final closures = (data['closures'] as List?)?.length ?? 0;
       if (coding != null && coding['is_coded'] == true) {
@@ -678,6 +711,12 @@ class ExploreController extends ChangeNotifier {
   void setMode(String mode) {
     _activeMode = mode;
     notifyListeners();
+    // Re-run route search with the new mode so the user sees updated results
+    // immediately — mirrors the web's behaviour when the Transit/Walk/Car
+    // selector is clicked while a destination is already set.
+    if (_currentLocationText.isNotEmpty && _destinationText.isNotEmpty) {
+      searchRoutes();
+    }
   }
 
   // ── Transit sub-toggles (web parity) ──────────────────────────
@@ -724,6 +763,14 @@ class ExploreController extends ChangeNotifier {
         break;
     }
     notifyListeners();
+    // Re-search when the user flips a transit sub-toggle while a destination
+    // is already set — resolvedTransitMode has changed so the backend needs
+    // to re-run with the new mode string (mirrors web sub-toggle behaviour).
+    if (_activeMode == 'transit' &&
+        _currentLocationText.isNotEmpty &&
+        _destinationText.isNotEmpty) {
+      searchRoutes();
+    }
   }
 
   // ── Safe spot type filter (web parity) ─────────────────────────
@@ -752,6 +799,24 @@ class ExploreController extends ChangeNotifier {
   void setPlateDigit(String v) {
     _plateDigit = v.trim();
     notifyListeners();
+  }
+
+  // ── Map pinpoint-destination mode (web parity: 📌 locate-dest-btn) ──────────
+  // When true, the next single tap on the map sets the destination.
+  // Activated by the 📌 button in the filter row; auto-cancelled on set or dismiss.
+  bool _pinpointDestMode = false;
+  bool get pinpointDestMode => _pinpointDestMode;
+
+  void togglePinpointDestMode() {
+    _pinpointDestMode = !_pinpointDestMode;
+    notifyListeners();
+  }
+
+  void cancelPinpointDestMode() {
+    if (_pinpointDestMode) {
+      _pinpointDestMode = false;
+      notifyListeners();
+    }
   }
 
   // ── Resolved geocoded coordinates from last route search ──────
@@ -829,6 +894,10 @@ class ExploreController extends ChangeNotifier {
       _resolvedOrigLon = lon;
       // Fetch nearby transit stops around the new origin (web parity)
       fetchNearbyStops(lat, lon);
+      // Refresh safety overlays for the new origin — mirrors web setOrigin()
+      // which calls loadSafetyOverlay() every time origin is set so hotspot
+      // circles and safe-spot POIs always reflect the current area.
+      unawaited(fetchSafetyOverlays(lat: lat, lon: lon));
     } else {
       _destinationText = label;
       _resolvedDestLat = lat;
@@ -966,6 +1035,10 @@ class ExploreController extends ChangeNotifier {
       final parsedPlate = int.tryParse(_plateDigit);
       if (parsedPlate != null) {
         extraParams['plate_last_digit'] = parsedPlate;
+      }
+      // Preference filter → send to backend so it can factor it into route scoring
+      if (preferenceFilters.isNotEmpty) {
+        extraParams['prefer'] = preferenceFilters.first;
       }
 
       // Resolve transit mode from sub-toggles (web parity)
@@ -1801,7 +1874,80 @@ class ExploreController extends ChangeNotifier {
                 ),
                 textAlign: TextAlign.center,
               ),
+              // ── Share link (backend provides a public emergency URL) ──────
+              // Shown only when the server returned a non-empty share_link.
+              // Tapping "Copy Link" copies the URL to the clipboard so the
+              // user can paste it into a message to helpers nearby.
+              if (shareLink.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.bg(isDark),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.border(isDark)),
+                  ),
+                  child: Text(
+                    shareLink,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      color: AppColors.text2(isDark),
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
+              if (shareLink.isNotEmpty)
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.teal,
+                          side: const BorderSide(color: AppColors.teal),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: shareLink));
+                          showToast('Link copied!', 'teal');
+                        },
+                        child: Text(
+                          'Copy Link',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.teal,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        child: Text(
+                          'OK',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              else
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(

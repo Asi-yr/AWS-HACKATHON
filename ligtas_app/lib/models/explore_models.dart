@@ -68,6 +68,7 @@ class RouteModel {
   /// Raw segment list for per-segment map coloring
   final List<Map<String, dynamic>>? rawSegments;
 
+  final String? nightWarning;
   final String? seismicWarning;
   final String? floodWarning;
   final String? crimeWarning;
@@ -99,6 +100,7 @@ class RouteModel {
     this.commuterTags = const [],
     this.ligtasTags = const [],
     // Warning fields — null by default so all existing mock data is unaffected.
+    this.nightWarning,
     this.seismicWarning,
     this.floodWarning,
     this.crimeWarning,
@@ -195,7 +197,11 @@ class MiniItem {
   final MiniItemType type;
   final String name;
   final String sub;
-  const MiniItem({required this.type, required this.name, required this.sub});
+  /// Cached coordinates from the Nominatim response that created this item.
+  /// Present on API-sourced items; null for manually typed searches.
+  final double? lat;
+  final double? lon;
+  const MiniItem({required this.type, required this.name, required this.sub, this.lat, this.lon});
 
   IconData get icon {
     switch (type) {

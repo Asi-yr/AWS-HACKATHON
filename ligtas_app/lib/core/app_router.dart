@@ -26,12 +26,23 @@ class AppRouter {
       case explore:    return _fade(const RootShell());
       case profile:    return _fade(const ProfileView());
       case community:  return _fade(const CommunityView());
-      case miniSearch: return _fade(const MiniScreen());
+      case miniSearch: return _fadeTransparent(const MiniScreen());
       default:         return _fade(const SplashView());
     }
   }
 
   static PageRoute _fade(Widget page) => PageRouteBuilder(
+    pageBuilder: (_, _, _) => page,
+    transitionsBuilder: (_, anim, _, child) => FadeTransition(
+      opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
+      child: child),
+    transitionDuration: const Duration(milliseconds: 220),
+  );
+
+  /// Same as [_fade] but keeps the route non-opaque so backgrounds beneath
+  /// (e.g. the map in ExploreView) remain visible.
+  static PageRoute _fadeTransparent(Widget page) => PageRouteBuilder(
+    opaque: false,
     pageBuilder: (_, _, _) => page,
     transitionsBuilder: (_, anim, _, child) => FadeTransition(
       opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),

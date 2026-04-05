@@ -190,17 +190,3 @@ const ligtasFeatures = [
   FilterOption(key: 'flooding', label: 'Flood-Prone',    icon: Icons.water_rounded),
   FilterOption(key: 'traffic',  label: 'Heavy Traffic',  icon: Icons.traffic_rounded),
 ];
-
-// ── Mini State Items ─────────────────────────────────────────────
-const miniItems = [
-  MiniItem(type: MiniItemType.clock, name: '6014, Del Mundo Street, Ugong',  sub: '3.05km · Valenzuela City'),
-  MiniItem(type: MiniItemType.clock, name: 'Starbucks, Greenhills 1',        sub: '9.67km · Ortigas Ave, San Juan'),
-  MiniItem(type: MiniItemType.clock, name: 'Jollibee, MCU EDSA',             sub: '2.33km · N. Loreto St, Caloocan'),
-  MiniItem(type: MiniItemType.clock, name: 'Careline Drug Store',             sub: '2.62km · L. Bustamante St, Caloocan'),
-  MiniItem(type: MiniItemType.clock, name: 'SM City North EDSA',             sub: '3.45km · EDSA, Quezon City'),
-  MiniItem(type: MiniItemType.pin,   name: 'UP Town Center, Katipunan Ave',   sub: 'Shopping Mall'),
-  MiniItem(type: MiniItemType.pin,   name: 'Ateneo de Manila University',     sub: 'University'),
-  MiniItem(type: MiniItemType.pin,   name: 'Miriam College, Quezon City',     sub: 'School'),
-  MiniItem(type: MiniItemType.pin,   name: 'SM City Fairview, Quezon City',   sub: 'Shopping Mall'),
-  MiniItem(type: MiniItemType.pin,   name: 'Trinoma Mall, Quezon City',       sub: 'Shopping Mall'),
-];

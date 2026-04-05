@@ -13,6 +13,7 @@ import '../../core/app_colors.dart';
 import '../../core/api_client.dart';
 import '../../core/session_manager.dart';
 import '../../core/theme_controller.dart';
+import '../profile/profile_controller.dart';
 
 // ── Transport Mode Filter Options ─────────────────────────────────────────
 final transportModeOptions = [
@@ -322,6 +323,57 @@ class _ExploreScaffoldState extends State<_ExploreScaffold> {
               const _LocationPopup(),
             // ── SOS button — always visible on the map, top-right ───────────
             if (isState2 || isState3 || isNavigating) const _SosButton(),
+            // ── Pinpoint-destination mode overlay banner ─────────────────
+            if (isState2)
+              Selector<ExploreController, bool>(
+                selector: (_, c) => c.pinpointDestMode,
+                builder: (ctx, active, _) {
+                  if (!active) return const SizedBox.shrink();
+                  return Positioned(
+                    top: 70,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: GestureDetector(
+                        onTap: () => ctx
+                            .read<ExploreController>()
+                            .cancelPinpointDestMode(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF6c5ce7),
+                            borderRadius: BorderRadius.circular(50),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.3),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.push_pin_rounded,
+                                  color: Colors.white, size: 14),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Tap map to set destination  ✕',
+                                style: GoogleFonts.plusJakartaSans(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
             // ── MMDA banner (shown when road closures / coding active) ──
             const _MmdaBanner(),
             // ── Advisory banner (weather / seismic / crime) ─────────────
@@ -929,26 +981,78 @@ class _DetailsPanelState extends State<_DetailsPanel> {
             final bottomPadding = bottomInset > 20 ? bottomInset : 12.0;
             return Padding(
               padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.teal,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+              child: Row(
+                children: [
+                  // ── Bookmark / Save button ──────────────────────
+                  Builder(builder: (ctx) {
+                    final profCtrl = ctx.watch<ProfileController>();
+                    final route = ctrl.activeRoute;
+                    final origin = ctrl.originText;
+                    final dest = ctrl.destText;
+                    final isSaved = route != null &&
+                        profCtrl.history.saved.any((r) =>
+                            r.origin == origin &&
+                            r.destination == dest);
+                    return GestureDetector(
+                      onTap: () {
+                        if (route == null) return;
+                        ctx.read<ProfileController>().addSavedRoute(
+                          origin: origin,
+                          destination: dest,
+                          modes: route.modes,
+                          minutes: route.minutes,
+                          fare: route.fare,
+                          safetyScore: route.safetyScore,
+                          safetyNote: route.safetyNote,
+                        );
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 50,
+                        height: 50,
+                        margin: const EdgeInsets.only(right: 10),
+                        decoration: BoxDecoration(
+                          color: isSaved
+                              ? AppColors.yellow.withValues(alpha: 0.15)
+                              : AppColors.card2(isDark),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSaved
+                                ? AppColors.yellow
+                                : AppColors.border(isDark),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Icon(
+                          isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                          color: isSaved ? AppColors.yellow : AppColors.text2(isDark),
+                          size: 22,
+                        ),
+                      ),
+                    );
+                  }),
+                  // ── Start Route button ──────────────────────────
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.teal,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: ctrl.startNavigation,
+                      child: Text(
+                        'Start Route',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
                     ),
                   ),
-                  onPressed: ctrl.startNavigation,
-                  child: Text(
-                    'Start Route',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                    ),
-                  ),
-                ),
+                ],
               ),
             );
           },
@@ -1109,6 +1213,18 @@ class _DetailsPanelState extends State<_DetailsPanel> {
 
   List<Widget> _buildRouteWarnings(RouteModel route, bool isDark) {
     final entries = <_RiskWarning>[];
+
+    final night = route.nightWarning;
+    if (night != null && night.isNotEmpty) {
+      entries.add(
+        _RiskWarning(
+          icon: Icons.nightlight_round,
+          color: const Color(0xFF6366F1),
+          bg: const Color(0x226366F1),
+          text: night,
+        ),
+      );
+    }
 
     final seismic = route.seismicWarning;
     if (seismic != null && seismic.isNotEmpty) {
@@ -1379,6 +1495,41 @@ class _FilterChipsRow extends StatelessWidget {
               ),
             ),
           ],
+          const SizedBox(width: 8),
+          // ── 📌 Pinpoint-destination button (web parity: locate-dest-btn) ──
+          GestureDetector(
+            onTap: () => ctrl.togglePinpointDestMode(),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: ctrl.pinpointDestMode
+                    ? const Color(0xFF6c5ce7)
+                    : AppColors.card2(isDark),
+                border: Border.all(
+                  color: ctrl.pinpointDestMode
+                      ? const Color(0xFF6c5ce7)
+                      : AppColors.border(isDark),
+                  width: 1.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.2),
+                    blurRadius: 4,
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.push_pin_rounded,
+                size: 16,
+                color: ctrl.pinpointDestMode
+                    ? Colors.white
+                    : AppColors.text2(isDark),
+              ),
+            ),
+          ),
           const SizedBox(width: 12),
         ],
       ),
@@ -2222,11 +2373,13 @@ class _RouteCard extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      // Stats row: ⏱ time  📏 distance
+                      // Stats row: time  distance
                       Row(
                         children: [
+                          Icon(Icons.access_time_rounded, size: 13, color: AppColors.text2(isDark)),
+                          const SizedBox(width: 3),
                           Text(
-                            '⏱ ${route.minutes} min',
+                            '${route.minutes} min',
                             style: GoogleFonts.plusJakartaSans(
                               color: AppColors.text2(isDark),
                               fontSize: 12,
@@ -2235,8 +2388,10 @@ class _RouteCard extends StatelessWidget {
                           ),
                           if (route.distance.isNotEmpty) ...[
                             const SizedBox(width: 14),
+                            Icon(Icons.straighten_rounded, size: 13, color: AppColors.text2(isDark)),
+                            const SizedBox(width: 3),
                             Text(
-                              '📏 ${route.distance}',
+                              route.distance,
                               style: GoogleFonts.plusJakartaSans(
                                 color: AppColors.text2(isDark),
                                 fontSize: 12,
@@ -2250,8 +2405,10 @@ class _RouteCard extends StatelessWidget {
                       // Safety score + fare badge
                       Row(
                         children: [
+                          Icon(Icons.verified_user_rounded, size: 13, color: safetyColor),
+                          const SizedBox(width: 3),
                           Text(
-                            '🛡️ Safety Score: ${route.safetyScore}/100',
+                            'Safety Score: ${route.safetyScore}/100',
                             style: GoogleFonts.plusJakartaSans(
                               color: safetyColor,
                               fontSize: 12,
@@ -2267,13 +2424,20 @@ class _RouteCard extends StatelessWidget {
                                 color: AppColors.teal.withValues(alpha: 0.13),
                                 borderRadius: BorderRadius.circular(6),
                               ),
-                              child: Text(
-                                '💸 $fareStr',
-                                style: GoogleFonts.plusJakartaSans(
-                                  color: AppColors.teal,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.payments_rounded, size: 11, color: AppColors.teal),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    fareStr,
+                                    style: GoogleFonts.plusJakartaSans(
+                                      color: AppColors.teal,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
@@ -2300,7 +2464,8 @@ class _RouteCard extends StatelessWidget {
 
     if (route.crimeWarning != null && route.crimeWarning!.isNotEmpty) {
       boxes.add(_warningBox(
-        '⚠️ ${route.crimeWarning!}',
+        Icons.warning_amber_rounded,
+        route.crimeWarning!,
         const Color(0xFFFFF3E0),
         const Color(0xFFF59E0B),
         const Color(0xFF78350F),
@@ -2312,7 +2477,8 @@ class _RouteCard extends StatelessWidget {
         (ctrl.isRaining || ctrl.preferenceFilters.contains('avoid_flood'));
     if (showFlood) {
       boxes.add(_warningBox(
-        '🌊 ${route.floodWarning!}',
+        Icons.water_rounded,
+        route.floodWarning!,
         const Color(0xFFE3F2FD),
         const Color(0xFF1565C0),
         const Color(0xFF0D47A1),
@@ -2321,7 +2487,8 @@ class _RouteCard extends StatelessWidget {
 
     if (route.seismicWarning != null && route.seismicWarning!.isNotEmpty) {
       boxes.add(_warningBox(
-        '🌍 ${route.seismicWarning!}',
+        Icons.public_rounded,
+        route.seismicWarning!,
         const Color(0xFFFFEBEE),
         const Color(0xFFE74C3C),
         const Color(0xFF7B241C),
@@ -2333,7 +2500,8 @@ class _RouteCard extends StatelessWidget {
         final text = w?.toString() ?? '';
         if (text.isNotEmpty) {
           boxes.add(_warningBox(
-            '⚠️ $text',
+            Icons.warning_amber_rounded,
+            text,
             const Color(0xFFF3E5F5),
             const Color(0xFF9C27B0),
             const Color(0xFF4A148C),
@@ -2345,7 +2513,7 @@ class _RouteCard extends StatelessWidget {
     return boxes;
   }
 
-  Widget _warningBox(String text, Color bg, Color borderColor, Color textColor) {
+  Widget _warningBox(IconData icon, String text, Color bg, Color borderColor, Color textColor) {
     return Container(
       margin: const EdgeInsets.only(top: 7),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
@@ -2354,13 +2522,22 @@ class _RouteCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(5),
         border: Border(left: BorderSide(color: borderColor, width: 3)),
       ),
-      child: Text(
-        text,
-        style: GoogleFonts.plusJakartaSans(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: textColor,
-        ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 13, color: textColor),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3331,6 +3508,33 @@ class _MapLayerState extends State<_MapLayer> {
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all,
         ),
+        // ── Tap → pinpoint destination when 📌 mode is active (web parity) ───
+        onTap: (tapPosition, latlng) async {
+          if (!ctrl.pinpointDestMode) return;
+          ctrl.cancelPinpointDestMode();
+          ctrl.showToast('Setting destination…', 'teal');
+          try {
+            final rev = await ApiClient.instance.reverseGeocode(
+              lat: latlng.latitude,
+              lon: latlng.longitude,
+            );
+            final address = rev['address'] as String? ?? '';
+            final label = address.isNotEmpty
+                ? address
+                : '${latlng.latitude.toStringAsFixed(5)}, ${latlng.longitude.toStringAsFixed(5)}';
+            ctrl.previewLocation(
+              isOrigin: false,
+              lat: latlng.latitude,
+              lon: latlng.longitude,
+              label: label,
+            );
+            if (ctrl.originText.isNotEmpty) {
+              ctrl.searchRoutes();
+            }
+          } catch (_) {
+            ctrl.showToast('Could not resolve location', 'red');
+          }
+        },
         // ── Long-press → pinpoint destination (web parity: 📌 pin mode) ──────
         // Reverse-geocodes the tapped point and sets it as the destination,
         // then re-searches routes — mirrors the web's map-click pin flow.

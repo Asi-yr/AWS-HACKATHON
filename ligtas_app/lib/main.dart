@@ -12,6 +12,7 @@ import 'screens/explore/explore_view.dart';
 import 'screens/explore/explore_controller.dart';
 import 'screens/community/community_view.dart';
 import 'screens/profile/profile_view.dart';
+import 'screens/profile/profile_controller.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +31,7 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeController()),
         ChangeNotifierProvider(create: (_) => ExploreController()),
+        ChangeNotifierProvider(create: (_) => ProfileController()),
         ChangeNotifierProvider(create: (_) => AppTabController()),
       ],
       child: const LigtasApp(),

@@ -217,15 +217,15 @@ class _StatsRow extends StatelessWidget {
 
     // Emoji icons matching the Flaticon assets:
     // 🕯️ candle/2136679  🏮 lantern/384412  🗼 lighthouse/4971987
-    final emoji = rank == TrustRank.lighthouse ? '🗼'
-                : rank == TrustRank.lantern    ? '🏮'
-                : '🕯️';
+    final IconData icon = rank == TrustRank.lighthouse ? Icons.lightbulb_rounded
+                        : rank == TrustRank.lantern    ? Icons.emoji_objects_rounded
+                        : Icons.wb_incandescent_rounded;
 
     return Expanded(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 14),
         child: Column(children: [
-          // Coloured glow ring behind the emoji
+          // Coloured glow ring behind the icon
           Container(
             width: 44, height: 44,
             decoration: BoxDecoration(
@@ -234,10 +234,7 @@ class _StatsRow extends StatelessWidget {
               border: Border.all(color: color.withValues(alpha: 0.35), width: 1.5),
             ),
             child: Center(
-              child: Text(emoji,
-                style: const TextStyle(fontSize: 22),
-                textAlign: TextAlign.center,
-              ),
+              child: Icon(icon, size: 22, color: color),
             ),
           ),
           const SizedBox(height: 4),

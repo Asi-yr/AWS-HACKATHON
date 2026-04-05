@@ -1518,8 +1518,7 @@ class _WeatherCard extends StatelessWidget {
                 ],
               ),
             ),
-            Flexible(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
               Text('${tempC.toStringAsFixed(0)}°C',
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 28,
@@ -1532,7 +1531,6 @@ class _WeatherCard extends StatelessWidget {
                     color: Colors.white.withValues(alpha: 0.85),
                   )),
             ]),
-            ),
           ]),
           const SizedBox(height: 12),
           Row(children: [
