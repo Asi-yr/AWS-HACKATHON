@@ -10,6 +10,7 @@
 # development use. lock only if it runs good and reached stable release
 # ---
 flask
+flask-cors
 requests
 shapely
 numpy
@@ -18,6 +19,10 @@ folium
 python-dotenv
 ddgs
 beautifulsoup4
+google-genai
+bcrypt
+PyJWT
+flask-wtf
+flask-limiter
 
 # briefcase
-# google-genai

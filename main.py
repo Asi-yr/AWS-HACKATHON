@@ -1,10 +1,18 @@
 import time
 import logging
+import os
+from datetime import datetime, timezone
+from dotenv import load_dotenv
+
+load_dotenv()
 
 print("[DEBUG] [INIT] Starting application initialization...")
 t_init_start = time.time()
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
 from navigation import geocode_location, get_navigation_data
 from branca.element import Element
@@ -23,7 +31,7 @@ from risk_monitor.features         import (
     get_night_banner_html, enrich_routes_with_scores,
     attach_fares, apply_night_safety,
 )
-from risk_monitor.weather          import get_weather_risk, get_weather_banner_html
+from risk_monitor.weather          import get_weather_risk, get_weather_banner_html, get_forecast
 from risk_monitor.noah             import get_flood_risk_at, get_flood_warning_html, add_noah_flood_layer
 from risk_monitor.community_reports import (
     init_report_tables, submit_report, confirm_report,
@@ -58,9 +66,15 @@ from risk_monitor.sos import (
     log_sos_event, get_sos_panel_html,
     get_trusted_contacts_settings_html,
 )
+from llm import get_commuter_advice
+from auth import auth_bp
+from flask_wtf.csrf import CSRFProtect
 
 USE_MYSQL = False
-print(f"[DEBUG] [INIT] USE_MYSQL is set to: {USE_MYSQL}")
+# Gate verbose debug output — set DEBUG_LOGS=false in .env to suppress in staging/production
+_DEBUG_LOGS = os.environ.get('DEBUG_LOGS', 'true').lower() == 'true'
+if _DEBUG_LOGS:
+    print(f"[DEBUG] [INIT] USE_MYSQL is set to: {USE_MYSQL}")
 
 if USE_MYSQL:
     print("[DEBUG] [INIT] Importing msql from db_opt...")
@@ -77,10 +91,77 @@ chDB_perf.init_db()
 init_user_tables(chDB_perf)
 init_report_tables(chDB_perf)
 init_sos_tables(chDB_perf)
+
+# ── 2FA: add otp columns to users table if not present ────────────────────────
+def _init_2fa_columns():
+    try:
+        conn, c = chDB_perf.get_db_connection()
+        for stmt in [
+            "ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN otp TEXT DEFAULT NULL",
+            "ALTER TABLE users ADD COLUMN otp_expiry TEXT DEFAULT NULL",
+            "ALTER TABLE users ADD COLUMN otp_attempts INTEGER DEFAULT 0",
+        ]:
+            try:
+                c.execute(stmt)
+            except Exception:
+                pass
+        try:
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS login_logs (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    identifier   TEXT,
+                    attempt_type TEXT,
+                    ip_address   TEXT,
+                    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )''')
+        except Exception:
+            pass
+        conn.commit()
+        c.close(); conn.close()
+        print("\U0001f7e2 2FA columns ready")
+    except Exception as e:
+        print(f"\U0001f534 2FA column init error: {e}")
+
+_init_2fa_columns()
 print(f"[DEBUG] [INIT] Database initialization took {time.time() - t_db_init:.4f}s")
 
 app = Flask(__name__)
-app.secret_key = 'saferoute_super_secret_key'
+app.secret_key = os.environ.get('FLASK_SECRET_KEY') or 'CHANGE_ME_IN_PRODUCTION'
+app.config['WTF_CSRF_CHECK_DEFAULT'] = False  # We register our own selective handler below
+CSRF = CSRFProtect(app)
+# Apply CSRF only to non-API routes. /api/* uses JWT Bearer tokens — CSRF doesn't apply.
+@app.before_request
+def _selective_csrf_protect():
+    if not request.path.startswith('/api/'):
+        return CSRF.protect()
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri='memory://',
+)
+CORS(app, resources={r"/api/*": {"origins": os.environ.get('CORS_ORIGINS', '*').split(',')}}, supports_credentials=False)
+app.register_blueprint(auth_bp)
+
+
+def _jwt_username(raw_token: str):
+    """Extract username from a JWT Bearer token.
+    Only accepts valid JWTs (eyJ...). Returns None for anything else
+    to prevent plain-username tokens from being accepted.
+    """
+    if not raw_token:
+        return None
+    if raw_token.startswith('eyJ'):
+        try:
+            import jwt as _jwt
+            payload = _jwt.decode(raw_token, app.secret_key, algorithms=['HS256'])
+            return payload.get('sub')
+        except Exception:
+            return None   # expired or invalid — treat as unauthorized
+    return None  # reject non-JWT tokens
+
 
 print(f"[DEBUG] [INIT] Application setup complete in {time.time() - t_init_start:.4f}s")
 
@@ -857,48 +938,42 @@ def home():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     t_reg = time.time()
-    print(f"[DEBUG] [register] Method: {request.method}")
     if request.method == 'POST':
         username  = request.form.get('username')
         password  = request.form.get('password')
-        print(f"[DEBUG] [register] Attempting registration for username: '{username}'")
         conn, c   = chDB_perf.get_db_connection()
         chDB_perf.execute_query(c, "SELECT * FROM users WHERE username=?", (username,))
         if c.fetchone():
-            print(f"[DEBUG] [register] Username '{username}' already exists. Failing registration.")
             flash("Username already exists.")
             c.close(); conn.close()
             return redirect(url_for('register'))
-        
-        print(f"[DEBUG] [register] Username available. Hashing password...")
         hashed_pw = generate_password_hash(password)
         chDB_perf.execute_query(c, "INSERT INTO users (username, password) VALUES (?, ?)",
                                 (username, hashed_pw))
         conn.commit(); c.close(); conn.close()
-        print(f"[DEBUG] [register] Registration successful for '{username}'. Time taken: {time.time() - t_reg:.4f}s")
+        if _DEBUG_LOGS:
+            print(f"[DEBUG] [register] Registration successful. Time taken: {time.time() - t_reg:.4f}s")
         flash("Registration successful!")
         return redirect(url_for('login'))
     return render_template('register.html')
 
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit('10 per minute', methods=['POST'])
 def login():
     t_login = time.time()
-    print(f"[DEBUG] [login] Method: {request.method}")
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        print(f"[DEBUG] [login] Attempting login for username: '{username}'")
         conn, c  = chDB_perf.get_db_connection()
         chDB_perf.execute_query(c, "SELECT password FROM users WHERE username=?", (username,))
         user = c.fetchone()
         c.close(); conn.close()
         if user and check_password_hash(user[0], password):
-            print(f"[DEBUG] [login] Password match for '{username}'. Setting session.")
             session['user'] = username
-            print(f"[DEBUG] [login] Login operation took {time.time() - t_login:.4f}s")
+            if _DEBUG_LOGS:
+                print(f"[DEBUG] [login] Login successful. Time taken: {time.time() - t_login:.4f}s")
             return redirect(url_for('home'))
-        print(f"[DEBUG] [login] Invalid username or password for '{username}'.")
         flash("Invalid username or password.")
         return redirect(url_for('login'))
     return render_template('login.html')
@@ -906,9 +981,296 @@ def login():
 
 @app.route('/logout')
 def logout():
-    print(f"[DEBUG] [logout] User logging out: {session.get('user')}")
     session.pop('user', None)
     return redirect(url_for('login'))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JSON API AUTH ENDPOINTS (for Flutter app)
+#  login · register · verify-2fa · logout · setup-2fa  →  auth.py Blueprint
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@app.route('/api/user/current', methods=['GET'])
+def api_user_current():
+    """JSON API endpoint to get current user profile and settings."""
+    print("[DEBUG] [api_user_current] GET /api/user/current hit")
+    
+    # Check if user is authenticated by looking for token in headers or session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]  # Extract token after 'Bearer '
+    
+    username = _jwt_username(token) if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_user_current] Unauthorized (no user)")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        print(f"[DEBUG] [api_user_current] Fetching profile for '{username}'")
+        user_settings = get_user_settings(chDB_perf, username)
+        user_profile = get_user_profile(chDB_perf, username)
+        
+        # Build comprehensive user response for Flutter
+        user_data = {
+            'ok': True,
+            'id': username,
+            'name': user_profile.get('display_name', username),
+            'username': username,
+            'email': user_profile.get('email', ''),
+            'role': 'Commuter',
+            'avatarUrl': None,
+            'stats': {
+                'trips': user_profile.get('trips_count', 0),
+                'reports': user_profile.get('reports_count', 0),
+                'upvotedReports': user_profile.get('upvotes_count', 0),
+            },
+            'commuterType': user_settings.get('default_commuter_type', 'commute'),
+            'preferences': {
+                'aiSafety': user_settings.get('show_weather_banner', True),
+                'nightMode': False,  # Controlled by ThemeController on the client
+                'transport': user_settings.get('transport_preference', ['jeep', 'walk']),
+            },
+            'survey': {
+                'completed': user_settings.get('survey_completed', False),
+                'commuter_types': user_settings.get('commuter_types', []),
+                'transport_modes': user_settings.get('transport_modes', []),
+                'safety_concerns': user_settings.get('safety_concerns', []),
+            },
+        }
+        print(f"[DEBUG] [api_user_current] Returning user data for '{username}'")
+        return jsonify(user_data), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_user_current] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/settings', methods=['GET'])
+def api_get_settings():
+    """JSON API endpoint to retrieve user settings for Flutter."""
+    print("[DEBUG] [api_get_settings] GET /api/settings hit")
+    
+    # Extract token from Authorization header or use session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = _jwt_username(token) if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_get_settings] Unauthorized (no user)")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        print(f"[DEBUG] [api_get_settings] Fetching settings for '{username}'")
+        user_settings = get_user_settings(chDB_perf, username)
+        
+        # Return settings with expected field names for Flutter
+        return jsonify({
+            'ok': True,
+            'settings': {
+                'default_commuter_type': user_settings.get('default_commuter_type', 'commute'),
+                'transport_preference': user_settings.get('transport_preference', ['jeep', 'walk']),
+                'show_weather_banner': user_settings.get('show_weather_banner', True),
+                'show_crime_banner': user_settings.get('show_crime_banner', True),
+                'show_flood_banner': user_settings.get('show_flood_banner', True),
+                'show_night_warnings': user_settings.get('show_night_warnings', True),
+                'preferred_name': user_settings.get('preferred_name', ''),
+                'home_address': user_settings.get('home_address', ''),
+                'work_address': user_settings.get('work_address', ''),
+                'commuter_types': user_settings.get('commuter_types', []),
+                'transport_modes': user_settings.get('transport_modes', []),
+                'safety_concerns': user_settings.get('safety_concerns', []),
+                'survey_completed': user_settings.get('survey_completed', False),
+            }
+        }), 200
+    except Exception as e:
+        print(f"[DEBUG] [api_get_settings] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/settings', methods=['POST'])
+def api_save_settings():
+    """JSON API endpoint to save user settings from Flutter."""
+    print("[DEBUG] [api_save_settings] POST /api/settings hit")
+    
+    # Extract token from Authorization header or use session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = _jwt_username(token) if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_save_settings] Unauthorized (no user)")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        data = request.get_json() or {}
+        print(f"[DEBUG] [api_save_settings] Received settings data: {data}")
+        
+        # Load current settings first to preserve survey data and other fields
+        current_settings = get_user_settings(chDB_perf, username)
+        
+        # Apply only the non-survey settings fields provided in this request
+        updatable_keys = [
+            'default_commuter_type', 'transport_preference', 'show_weather_banner',
+            'show_crime_banner', 'show_flood_banner', 'show_night_warnings',
+            'preferred_name', 'home_address', 'work_address',
+        ]
+        for key in updatable_keys:
+            if key in data:
+                current_settings[key] = data[key]
+        
+        # Save merged settings (survey data preserved)
+        success = save_user_settings(chDB_perf, username, current_settings)
+        
+        if not success:
+            print(f"[DEBUG] [api_save_settings] Failed to save settings for '{username}'")
+            return jsonify({'ok': False, 'message': 'Failed to save settings'}), 500
+        
+        # Also update user profile if display_name or email provided
+        if data.get('display_name') or data.get('email'):
+            print(f"[DEBUG] [api_save_settings] Updating user profile")
+            save_user_profile(
+                chDB_perf, username,
+                data.get('display_name', ''),
+                data.get('email', '')
+            )
+        
+        print(f"[DEBUG] [api_save_settings] Settings saved successfully for '{username}'")
+        return jsonify({'ok': True, 'message': 'Settings saved'}), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_save_settings] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/user/survey', methods=['POST'])
+def api_save_survey():
+    """JSON API endpoint to save user onboarding survey responses from Flutter."""
+    print("[DEBUG] [api_save_survey] POST /api/user/survey hit")
+    
+    # Extract token from Authorization header or use session
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = _jwt_username(token) if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_save_survey] Unauthorized (no user)")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        data = request.get_json() or {}
+        print(f"[DEBUG] [api_save_survey] Received survey data: {data}")
+        
+        # Build settings dict with survey data
+        survey_settings = {
+            'commuter_types': data.get('commuterTypes', []),
+            'transport_modes': data.get('transport', []),
+            'safety_concerns': data.get('safety', []),
+            'survey_completed': True,
+            'survey_completed_at': datetime.now(tz=timezone.utc).isoformat(),
+        }
+        
+        # Get current settings and merge with survey data
+        current_settings = get_user_settings(chDB_perf, username)
+        current_settings.update(survey_settings)
+        
+        # Save merged settings to database
+        success = save_user_settings(chDB_perf, username, current_settings)
+        
+        if not success:
+            print(f"[DEBUG] [api_save_survey] Failed to save survey for '{username}'")
+            return jsonify({'ok': False, 'message': 'Failed to save survey'}), 500
+        
+        print(f"[DEBUG] [api_save_survey] Survey saved successfully for '{username}'")
+        return jsonify({'ok': True, 'message': 'Survey saved'}), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_save_survey] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# History, and other user endpoints
+# (change-password and change-email are handled by the auth Blueprint in auth.py)
+# ────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/history', methods=['GET'])
+def api_history():
+    """JSON API endpoint for Flutter to fetch route history."""
+    print("[DEBUG] [api_history] GET /api/history hit")
+    
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = _jwt_username(token) if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_history] Unauthorized")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        # Use existing backend function
+        hist = get_route_history(chDB_perf, username, limit=20)
+        
+        # Transform to API response format
+        history_data = [
+            {
+                'origin': item.get('origin', ''),
+                'destination': item.get('destination', ''),
+                'commuterType': item.get('commuter_type', 'commute'),
+                'routeCount': item.get('route_count', 0),
+                'searchedAt': item.get('searched_at', ''),
+            }
+            for item in hist
+        ]
+        
+        print(f"[DEBUG] [api_history] Returned {len(history_data)} history items for {username}")
+        return jsonify({'ok': True, 'history': history_data}), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_history] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/history/clear', methods=['POST'])
+def api_history_clear():
+    """JSON API endpoint for Flutter to clear route history."""
+    print("[DEBUG] [api_history_clear] POST /api/history/clear hit")
+    
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    
+    username = _jwt_username(token) if token else session.get('user')
+    
+    if not username:
+        print("[DEBUG] [api_history_clear] Unauthorized")
+        return jsonify({'ok': False, 'message': 'Unauthorized'}), 401
+    
+    try:
+        # Use existing backend function
+        clear_route_history(chDB_perf, username)
+        
+        print(f"[DEBUG] [api_history_clear] History cleared for {username}")
+        return jsonify({'ok': True, 'message': 'History cleared'}), 200
+        
+    except Exception as e:
+        print(f"[DEBUG] [api_history_clear] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 500
 
 
 @app.route('/api/suggest', methods=['GET'])
@@ -1007,9 +1369,20 @@ def get_routes():
     print(f"[DEBUG] [get_routes] Geocode resolution took {time.time() - t_geo:.4f}s")
     print(f"[DEBUG] [get_routes] Final coordinates -> Orig: ({orig_lat}, {orig_lon}), Dest: ({dest_lat}, {dest_lon})")
 
-    if not orig_lon or not dest_lon:
-        print("[DEBUG][get_routes] Missing locations. Returning error 400.")
-        return jsonify({"error": "Location not found."}), 400
+    if not orig_lon or not orig_lat:
+        print("[DEBUG][get_routes] Missing origin. Returning error 400.")
+        return jsonify({"error": "Could not find your origin location. Try a more specific address."}), 400
+
+    if not dest_lon or not dest_lat:
+        # Destination not found — return a friendly error that tells the app
+        # to show a "location not found" message rather than a generic failure.
+        print(f"[DEBUG][get_routes] Destination '{dest_text}' could not be geocoded.")
+        return jsonify({
+            "error": f"Could not find '{dest_text}'. Try a more specific address, landmark, or neighbourhood name.",
+            "error_type": "dest_not_found",
+            "origin_lat": orig_lat,
+            "origin_lon": orig_lon,
+        }), 400
 
     # Calculate the route
     print("[DEBUG] [get_routes] Calling get_navigation_data()...")
@@ -1162,9 +1535,18 @@ def get_routes():
             nav_response["seismic_banner"] = get_seismic_banner_html(earthquakes)
             nav_response["epicenter_js"]   = get_epicenter_map_js(earthquakes)
             nav_response["earthquakes"]    =[
-                {"magnitude": e["magnitude"], "place": e["place"],
-                 "severity": e["severity"], "time_pht": e["time_pht"],
-                 "tsunami": e["tsunami"]}
+                {
+                    "magnitude": e["magnitude"],
+                    "place":     e["place"],
+                    "severity":  e["severity"],
+                    "time_pht":  e["time_pht"],
+                    "tsunami":   e["tsunami"],
+                    # ── Flutter needs these to build HotspotModel circles ──
+                    "lat":       e["lat"],
+                    "lon":       e["lon"],
+                    "radius_km": e["radius_km"],
+                    "color":     e["color"],
+                }
                 for e in earthquakes
             ]
         except Exception as _pe:
@@ -1245,6 +1627,68 @@ def get_routes():
     return jsonify(nav_response)
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  AI COMMUTER HELPER
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/ai-commuter', methods=['POST'])
+def ai_commuter():
+    """AI-powered commuter advice built on top of the routing engine.
+    POST /api/ai-commuter
+    Body: { origin, destination, mode (optional), question (optional) }
+    Returns: AI recommendation with ranked route options.
+    """
+    t_start = time.time()
+    print("[DEBUG][ai_commuter] /api/ai-commuter endpoint hit.")
+    data = request.json or {}
+
+    origin_text = data.get('origin', '')
+    dest_text = data.get('destination', '')
+    commuter_type = data.get('mode') or 'transit'
+    user_question = data.get('question', '')
+
+    if not origin_text or not dest_text:
+        return jsonify({'ok': False, 'error': 'Origin and destination are required.'}), 400
+
+    # Step 1: Geocode
+    print(f"[DEBUG][ai_commuter] Geocoding origin='{origin_text}', dest='{dest_text}'")
+    orig_lon, orig_lat = geocode_location(origin_text)
+    dest_lon, dest_lat = geocode_location(dest_text)
+
+    if not orig_lon or not orig_lat:
+        return jsonify({'ok': False, 'error': f"Could not find '{origin_text}'."}), 400
+    if not dest_lon or not dest_lat:
+        return jsonify({'ok': False, 'error': f"Could not find '{dest_text}'."}), 400
+
+    # Step 2: Get routes from the routing engine
+    print("[DEBUG][ai_commuter] Calling get_navigation_data with mode='transit'...")
+    nav = get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, 'transit', [])
+    routes = nav.get('routes', [])
+    print(f"[DEBUG][ai_commuter] Got {len(routes)} transit routes.")
+
+    # Also try the user's requested mode if different
+    if commuter_type != 'transit':
+        print(f"[DEBUG][ai_commuter] Also fetching mode='{commuter_type}'...")
+        nav2 = get_navigation_data(orig_lon, orig_lat, dest_lon, dest_lat, commuter_type, [])
+        extra = nav2.get('routes', [])
+        # Merge, avoiding duplicates by name
+        seen = {r.get('name') for r in routes}
+        for r in extra:
+            if r.get('name') not in seen:
+                routes.append(r)
+                seen.add(r.get('name'))
+        print(f"[DEBUG][ai_commuter] After merge: {len(routes)} total routes.")
+
+    # Step 3: Get weather context
+    weather = get_weather_risk(orig_lat, orig_lon)
+
+    # Step 4: Ask AI for advice
+    print("[DEBUG][ai_commuter] Calling get_commuter_advice()...")
+    advice = get_commuter_advice(origin_text, dest_text, routes, weather, user_question)
+
+    print(f"[DEBUG][ai_commuter] Done in {time.time() - t_start:.4f}s")
+    return jsonify(advice)
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  COMMUNITY REPORTS
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1307,16 +1751,45 @@ def api_reports():
 def api_confirm_report():
     t_start = time.time()
     print("[DEBUG] [api_confirm_report] Hit /api/reports/confirm endpoint.")
-    if 'user' not in session:
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = _jwt_username(token) if token else session.get('user')
+    if not username:
         print("[DEBUG] [api_confirm_report] Unauthorized. Rejecting.")
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     
     report_id = request.json.get('report_id')
-    print(f"[DEBUG] [api_confirm_report] User '{session['user']}' confirming report_id {report_id}")
+    print(f"[DEBUG] [api_confirm_report] User '{username}' confirming report_id {report_id}")
     
-    result = confirm_report(chDB_perf, int(report_id), session['user'])
+    result = confirm_report(chDB_perf, int(report_id), username)
     print(f"[DEBUG] [api_confirm_report] confirm_report result: {result}. Took {time.time() - t_start:.4f}s")
     return jsonify(result)
+
+
+@app.route('/api/report', methods=['POST'])
+def api_report_json():
+    """JSON API endpoint for Flutter community report submission."""
+    t_start = time.time()
+    print("[DEBUG] [api_report_json] Receiving JSON community report POST...")
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = _jwt_username(token) if token else session.get('user')
+    if not username:
+        print("[DEBUG] [api_report_json] Unauthorized. Rejecting.")
+        return jsonify({'ok': False, 'message': 'Login required'}), 401
+    try:
+        data = request.get_json() or {}
+        rtype = data.get('report_type', '')
+        lat   = float(data.get('lat', 0))
+        lon   = float(data.get('lon', 0))
+        desc  = data.get('description', '')
+        print(f"[DEBUG] [api_report_json] Data -> user: {username}, rtype: {rtype}, lat: {lat}, lon: {lon}, desc: '{desc}'")
+        result = submit_report(chDB_perf, username, rtype, lat, lon, desc)
+        print(f"[DEBUG] [api_report_json] submit_report result: {result}. Took {time.time() - t_start:.4f}s")
+        return jsonify(result)
+    except Exception as e:
+        print(f"[DEBUG] [api_report_json] Exception: {e}")
+        return jsonify({'ok': False, 'message': str(e)}), 400
 
 
 @app.route('/api/report-types', methods=['GET'])
@@ -1485,13 +1958,16 @@ def api_safety():
 
     print(f"[DEBUG] [api_safety] Finalizing JSON response payload. Total time: {time.time() - t_start:.4f}s")
     return jsonify({
+        'ok': True,   # ── Flutter checks this in fetchSafetyOverlays()
         'weather': {
-            'risk_level':  weather.get('risk_level'),
-            'description': weather.get('description'),
-            'temp_c':      weather.get('temp_c'),
-            'wind_kph':    weather.get('wind_kph'),
-            'rain_mm':     weather.get('rain_mm'),
-            'color':       weather.get('color'),
+            'risk_level':   weather.get('risk_level'),
+            'description':  weather.get('description'),
+            'temp_c':       weather.get('temp_c'),
+            'feels_like_c': weather.get('feels_like_c'),
+            'humidity_pct': weather.get('humidity_pct'),
+            'wind_kph':     weather.get('wind_kph'),
+            'rain_mm':      weather.get('rain_mm'),
+            'color':        weather.get('color'),
         },
         'flood': {
             'risk_level': flood.get('risk_level'),
@@ -1512,8 +1988,17 @@ def api_safety():
         'seismic': {
             'count':      len(quakes),
             'earthquakes': [
-                {'magnitude': e['magnitude'], 'place': e['place'],
-                 'severity': e['severity'], 'tsunami': e['tsunami']}
+                {
+                    'magnitude': e['magnitude'],
+                    'place':     e['place'],
+                    'severity':  e['severity'],
+                    'tsunami':   e['tsunami'],
+                    # Flutter HotspotModel needs these for map circles
+                    'lat':       e['lat'],
+                    'lon':       e['lon'],
+                    'radius_km': e['radius_km'],
+                    'color':     e['color'],
+                }
                 for e in quakes[:3]
             ],
         },
@@ -1538,6 +2023,292 @@ def api_safety():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  COMMUNITY SCREEN — Weather + News endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/community/weather', methods=['GET'])
+def api_community_weather():
+    """Current weather + 5-day forecast + flood status for the community screen.
+    GET /api/community/weather?lat=&lon=
+    """
+    try:
+        lat = float(request.args.get('lat', 14.5995))
+        lon = float(request.args.get('lon', 120.9842))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'Invalid coordinates'}), 400
+
+    weather  = get_weather_risk(lat, lon)
+    flood    = get_flood_risk_at(lat, lon)
+    forecast = get_forecast(lat, lon, days=5)
+
+    flood_active = flood.get('risk_level', 'none') not in ('none', 'low')
+
+    return jsonify({
+        'ok': True,
+        'current': {
+            'description':  weather.get('description', 'Clear sky'),
+            'risk_level':   weather.get('risk_level', 'clear'),
+            'temp_c':       weather.get('temp_c', 0),
+            'feels_like_c': weather.get('feels_like_c', 0),
+            'humidity_pct': weather.get('humidity_pct', 0),
+            'wind_kph':     weather.get('wind_kph', 0),
+            'rain_mm':      weather.get('rain_mm', 0),
+            'color':        weather.get('color', '#7f8c8d'),
+            'fetched_at':   weather.get('fetched_at', ''),
+        },
+        'flood': {
+            'active':     flood_active,
+            'risk_level': flood.get('risk_level', 'none'),
+            'label':      flood.get('label', ''),
+            'color':      flood.get('color', '#7f8c8d'),
+        },
+        'forecast': forecast,
+    })
+
+
+@app.route('/api/community/news', methods=['GET'])
+def api_community_news():
+    """Official-source news items for the community screen.
+    Aggregates: typhoon signals (PAGASA), MMDA road closures,
+    and real-time incidents (GDACS/USGS/PHIVOLCS).
+    GET /api/community/news
+    Returns: { ok, items: [ {source, headline, summary, url, published_at, severity} ] }
+    """
+    from datetime import timezone, timedelta
+    _PHT = timezone(timedelta(hours=8))
+    now_str = datetime.now(_PHT).strftime('%Y-%m-%d %H:%M PHT')
+
+    items = []
+
+    # 1. PAGASA typhoon signal
+    try:
+        typhoon = get_typhoon_signal()
+        if typhoon and typhoon.get('signal', 0) > 0:
+            items.append({
+                'source':       'PAGASA',
+                'headline':     f"Typhoon Signal #{typhoon.get('signal')} — {typhoon.get('name', 'Active')}",
+                'summary':      typhoon.get('description', 'Tropical Cyclone Wind Signal raised.'),
+                'url':          'https://www.pagasa.dost.gov.ph/',
+                'published_at': typhoon.get('issued_at', now_str),
+                'severity':     'high' if typhoon.get('signal', 0) >= 2 else 'moderate',
+            })
+    except Exception as _e:
+        print(f'[api_community_news] typhoon error: {_e}')
+
+    # 2. MMDA road closures
+    try:
+        closures = get_road_closures()
+        for c in closures[:3]:
+            items.append({
+                'source':       'MMDA',
+                'headline':     c.get('title', 'Road closure advisory'),
+                'summary':      c.get('description', ''),
+                'url':          'https://www.mmda.gov.ph/',
+                'published_at': c.get('date', now_str),
+                'severity':     'moderate',
+            })
+    except Exception as _e:
+        print(f'[api_community_news] mmda error: {_e}')
+
+    # 3. Real-time incidents (GDACS / USGS / PHIVOLCS)
+    try:
+        incidents = get_active_incidents(ph_only=True)
+        _src_map = {
+            'gdacs':    'NDRRMC',
+            'usgs':     'PHIVOLCS',
+            'phivolcs': 'PHIVOLCS',
+            'mmda':     'MMDA',
+            'pagasa':   'PAGASA',
+        }
+        for inc in incidents[:6]:
+            raw_src   = inc.get('source', 'NDRRMC').lower()
+            src_label = _src_map.get(raw_src, inc.get('source', 'NDRRMC'))
+            items.append({
+                'source':       src_label,
+                'headline':     inc.get('title', 'Hazard alert'),
+                'summary':      inc.get('description', ''),
+                'url':          inc.get('source_url', ''),
+                'published_at': inc.get('reported_at', now_str),
+                'severity':     inc.get('severity', 'moderate'),
+            })
+    except Exception as _e:
+        print(f'[api_community_news] incidents error: {_e}')
+
+    return jsonify({'ok': True, 'items': items})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  NOTIFICATIONS  (polled every ~30 s by the Flutter app)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/notifications', methods=['GET'])
+def api_notifications():
+    """Aggregate real-time notifications for the Flutter community screen.
+
+    GET /api/notifications?since=<unix_epoch_seconds>
+
+    Returns:
+      { ok: true, notifications: [ {id, body, type, created_at, created_epoch} ] }
+
+    ``since`` is optional.  When provided only notifications whose
+    ``created_epoch`` is strictly greater than ``since`` are returned, so the
+    app can do efficient incremental polls.
+
+    Notification types (map to icons on the client):
+      flood | typhoon | seismic | fire | crime | verify | info
+    """
+    from datetime import datetime, timezone, timedelta
+    _PHT = timezone(timedelta(hours=8))
+
+    try:
+        since_epoch = float(request.args.get('since', 0))
+    except (TypeError, ValueError):
+        since_epoch = 0.0
+
+    notifications = []
+
+    def _epoch(dt_str: str) -> float:
+        """Parse an ISO/PHT date string to a UTC epoch float, or return now."""
+        try:
+            for fmt in ('%Y-%m-%d %H:%M PHT', '%Y-%m-%dT%H:%M:%S',
+                        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+                try:
+                    dt = datetime.strptime(dt_str, fmt)
+                    if fmt.endswith('PHT'):
+                        dt = dt.replace(tzinfo=_PHT)
+                    else:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt.timestamp()
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+        return datetime.now(timezone.utc).timestamp()
+
+    now_epoch = datetime.now(timezone.utc).timestamp()
+
+    # ── 1. Typhoon signal ────────────────────────────────────────────────────
+    try:
+        typhoon = get_typhoon_signal()
+        if typhoon and typhoon.get('signal', 0) > 0:
+            sig = typhoon.get('signal', 1)
+            name = typhoon.get('name', 'Active Typhoon')
+            ep = _epoch(typhoon.get('issued_at', ''))
+            notifications.append({
+                'id':            f"typhoon_{sig}_{name.replace(' ', '_')}",
+                'body':          f"Typhoon Signal #{sig} raised — {name}",
+                'type':          'typhoon',
+                'created_at':    typhoon.get('issued_at', ''),
+                'created_epoch': ep,
+            })
+    except Exception as _e:
+        print(f'[api_notifications] typhoon error: {_e}')
+
+    # ── 2. Flood / Weather alert ─────────────────────────────────────────────
+    try:
+        flood = get_flood_risk_at(14.5995, 120.9842)
+        risk = flood.get('risk_level', 'none')
+        if risk not in ('none', 'low'):
+            label = flood.get('label', 'Flood risk elevated')
+            ep = now_epoch - 300  # treat as 5-min-old alert
+            notifications.append({
+                'id':            f"flood_{risk}",
+                'body':          f"High flood risk detected — {label}",
+                'type':          'flood',
+                'created_at':    datetime.fromtimestamp(ep, _PHT).strftime('%Y-%m-%d %H:%M PHT'),
+                'created_epoch': ep,
+            })
+    except Exception as _e:
+        print(f'[api_notifications] flood error: {_e}')
+
+    # ── 3. MMDA road closures ────────────────────────────────────────────────
+    try:
+        closures = get_road_closures()
+        for c in closures[:2]:
+            title = c.get('title', 'Road closure advisory')
+            ep = _epoch(c.get('date', ''))
+            notifications.append({
+                'id':            f"mmda_{abs(hash(title)) % 100000}",
+                'body':          title,
+                'type':          'info',
+                'created_at':    c.get('date', ''),
+                'created_epoch': ep,
+            })
+    except Exception as _e:
+        print(f'[api_notifications] mmda error: {_e}')
+
+    # ── 4. Seismic alerts ────────────────────────────────────────────────────
+    try:
+        quakes = get_recent_earthquakes(hours_back=12)
+        for q in quakes[:2]:
+            mag = q.get('magnitude', 0)
+            place = q.get('place', 'Philippines')
+            ep = _epoch(q.get('time', ''))
+            tsunami = ' — TSUNAMI WARNING' if q.get('tsunami') else ''
+            notifications.append({
+                'id':            f"quake_M{mag}_{abs(hash(place)) % 100000}",
+                'body':          f"M{mag} earthquake near {place}{tsunami}",
+                'type':          'seismic',
+                'created_at':    q.get('time', ''),
+                'created_epoch': ep,
+            })
+    except Exception as _e:
+        print(f'[api_notifications] seismic error: {_e}')
+
+    # ── 5. Active incidents (GDACS / NDRRMC) ────────────────────────────────
+    try:
+        incidents = get_active_incidents(ph_only=True)
+        for inc in incidents[:3]:
+            itype = inc.get('type', 'fire').lower()
+            ntype = 'fire' if 'fire' in itype else \
+                    'flood' if 'flood' in itype else \
+                    'crime' if 'crime' in itype else 'info'
+            title = inc.get('title', 'Hazard alert')
+            ep = _epoch(inc.get('reported_at', ''))
+            notifications.append({
+                'id':            f"incident_{abs(hash(title)) % 100000}",
+                'body':          title,
+                'type':          ntype,
+                'created_at':    inc.get('reported_at', ''),
+                'created_epoch': ep,
+            })
+    except Exception as _e:
+        print(f'[api_notifications] incidents error: {_e}')
+
+    # ── 6. Highly-confirmed community reports ───────────────────────────────
+    try:
+        reports = get_all_active_reports(chDB_perf, limit=20)
+        for r in reports:
+            confs = r.get('confirmations', 0)
+            if confs >= 5:
+                ep = _epoch(r.get('reported_at', ''))
+                rtype = r.get('report_type', 'report').lower()
+                ntype = 'flood' if 'flood' in rtype else \
+                        'fire'  if 'fire'  in rtype else \
+                        'crime' if 'crime' in rtype else 'verify'
+                body = f"Community report verified by {confs} people — {r.get('description', '')[:60]}"
+                notifications.append({
+                    'id':            f"report_{r.get('id', 0)}",
+                    'body':          body,
+                    'type':          ntype,
+                    'created_at':    r.get('reported_at', ''),
+                    'created_epoch': ep,
+                })
+    except Exception as _e:
+        print(f'[api_notifications] reports error: {_e}')
+
+    # ── Sort newest first, apply ``since`` filter ────────────────────────────
+    notifications.sort(key=lambda n: n['created_epoch'], reverse=True)
+    if since_epoch > 0:
+        notifications = [n for n in notifications if n['created_epoch'] > since_epoch]
+
+    # Cap at 20 to keep response light
+    notifications = notifications[:20]
+
+    return jsonify({'ok': True, 'notifications': notifications})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  SOS / EMERGENCY
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1546,7 +2317,10 @@ def api_sos():
     """Trigger SOS: log event, return share link + contact count."""
     t_start = time.time()
     print("[DEBUG] [api_sos] Processing SOS request...")
-    if 'user' not in session:
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = _jwt_username(token) if token else session.get('user')
+    if not username:
         print("[DEBUG][api_sos] Unauthorized user.")
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     try:
@@ -1556,8 +2330,8 @@ def api_sos():
         message = body.get('message', 'SOS from SafeRoute user')
         route_summary = body.get('route_summary', '')
         
-        print(f"[DEBUG] [api_sos] SOS Data -> User: {session['user']}, Lat: {lat}, Lon: {lon}, Message: '{message}', Route Summary: '{route_summary}'")
-        result  = log_sos_event(chDB_perf, session['user'], lat, lon, route_summary, message)
+        print(f"[DEBUG] [api_sos] SOS Data -> User: {username}, Lat: {lat}, Lon: {lon}, Message: '{message}', Route Summary: '{route_summary}'")
+        result  = log_sos_event(chDB_perf, username, lat, lon, route_summary, message)
         
         print(f"[DEBUG][api_sos] SOS log event result: {result}. Took {time.time() - t_start:.4f}s")
         return jsonify(result)
@@ -1570,9 +2344,12 @@ def api_sos():
 def api_sos_contacts_get():
     t_start = time.time()
     print("[DEBUG] [api_sos_contacts_get] Requesting SOS contacts.")
-    if 'user' not in session:
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = _jwt_username(token) if token else session.get('user')
+    if not username:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
-    contacts = get_trusted_contacts(chDB_perf, session['user'])
+    contacts = get_trusted_contacts(chDB_perf, username)
     print(f"[DEBUG][api_sos_contacts_get] Fetched {len(contacts)} contacts for user in {time.time() - t_start:.4f}s")
     return jsonify({'ok': True, 'contacts': contacts})
 
@@ -1581,7 +2358,10 @@ def api_sos_contacts_get():
 def api_sos_contacts_add():
     t_start = time.time()
     print("[DEBUG][api_sos_contacts_add] Adding SOS contact.")
-    if 'user' not in session:
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = _jwt_username(token) if token else session.get('user')
+    if not username:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
     try:
         body = request.json or {}
@@ -1591,7 +2371,7 @@ def api_sos_contacts_add():
         
         print(f"[DEBUG] [api_sos_contacts_add] Contact payload -> name: '{name}', type: '{c_type}', value: '{c_val}'")
         result = add_trusted_contact(
-            chDB_perf, session['user'],
+            chDB_perf, username,
             name, c_type, c_val
         )
         print(f"[DEBUG] [api_sos_contacts_add] Added contact. Result: {result}. Took {time.time() - t_start:.4f}s")
@@ -1605,10 +2385,13 @@ def api_sos_contacts_add():
 def api_sos_contacts_delete(contact_id):
     t_start = time.time()
     print(f"[DEBUG] [api_sos_contacts_delete] Deleting contact ID {contact_id}.")
-    if 'user' not in session:
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else None
+    username = _jwt_username(token) if token else session.get('user')
+    if not username:
         return jsonify({'ok': False, 'message': 'Login required'}), 401
         
-    result = remove_trusted_contact(chDB_perf, session['user'], contact_id)
+    result = remove_trusted_contact(chDB_perf, username, contact_id)
     print(f"[DEBUG] [api_sos_contacts_delete] Deletion result: {result}. Took {time.time() - t_start:.4f}s")
     return jsonify(result)
 
@@ -1663,6 +2446,54 @@ def api_phivolcs():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/safe-spots/flutter', methods=['GET'])
+def api_safe_spots_flutter():
+    """
+    Safe spots for Flutter app — returns plain JSON, NOT Leaflet JS.
+    Flutter calls this from fetchSafetyOverlays() and maps results to PoiModel.
+
+    Query params:
+        lat    (float)  — latitude
+        lon    (float)  — longitude
+        radius (int)    — search radius in metres (default 1500)
+
+    Response:
+        {
+          "ok": true,
+          "spots": [
+            {
+              "id":       "...",
+              "name":     "Philippine General Hospital",
+              "type":     "hospital",
+              "label":    "Hospital",
+              "icon":     "🏥",
+              "color":    "#e74c3c",
+              "lat":      14.5794,
+              "lon":      120.9822,
+              "address":  "...",
+              "priority": 1,
+              "dist_m":   340,
+              "open_24h": false
+            }, ...
+          ]
+        }
+    """
+    t_start = time.time()
+    print("[DEBUG][api_safe_spots_flutter] Flutter safe-spots request received.")
+    try:
+        lat    = float(request.args.get('lat',    14.5995))
+        lon    = float(request.args.get('lon',   120.9842))
+        radius = int(request.args.get('radius',    1500))
+        print(f"[DEBUG][api_safe_spots_flutter] lat={lat}, lon={lon}, radius={radius}")
+
+        spots = get_safe_spots_near(lat, lon, radius_m=radius)
+        print(f"[DEBUG][api_safe_spots_flutter] Returning {len(spots)} spots in {time.time()-t_start:.4f}s")
+        return jsonify({'ok': True, 'spots': spots, 'count': len(spots)})
+    except Exception as e:
+        print(f"[DEBUG][api_safe_spots_flutter] Exception: {e}")
+        return jsonify({'ok': False, 'error': str(e), 'spots': []}), 500
+
+
 @app.route('/api/safe-spots', methods=['GET'])
 def api_safe_spots():
     """Safe spots (police, hospitals, fire stations, etc.) near a coordinate."""
@@ -1673,7 +2504,6 @@ def api_safe_spots():
         lon    = float(request.args.get('lon', 120.9842))
         radius = int(request.args.get('radius', 1500))
         print(f"[DEBUG] [api_safe_spots] Parameters -> lat: {lat}, lon: {lon}, radius: {radius}")
-        
         spots  = get_safe_spots_near(lat, lon, radius_m=radius)
         print(f"[DEBUG][api_safe_spots] Retrieved {len(spots)} spots in {time.time() - t_start:.4f}s")
         return jsonify({'spots': spots, 'count': len(spots)})
@@ -1776,6 +2606,32 @@ def rss_feed():
     print(f"[DEBUG] [rss_feed] Generated XML output size: {len(xml_str)} chars in {time.time() - t_start:.4f}s")
     return Response(xml_str, mimetype='application/rss+xml; charset=utf-8')
 
+@app.route('/ping', methods=['GET'])
+def ping():
+    """Health-check used by the Flutter app to discover this server on the LAN."""
+    return jsonify({'ok': True}), 200
+
+
 if __name__ == '__main__':
+    import socket
     print("[DEBUG] [MAIN] Starting Flask app loop via main block...")
-    app.run(debug=True)
+
+    # Print every LAN IP so you know exactly what to use on the phone.
+    print("\n" + "="*55)
+    print("  LIGTAS BACKEND — reachable at:")
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None):
+            ip = info[4][0]
+            if ':' not in ip and not ip.startswith('127.'):
+                print(f"    http://{ip}:5000")
+    except Exception:
+        pass
+    print("    http://127.0.0.1:5000  (emulator / same machine)")
+    print("  If the phone can't connect, call:")
+    print("    ApiClient.setManualUrl('http://<IP above>:5000')")
+    print("="*55 + "\n")
+
+    # host='0.0.0.0' = accept connections on ALL interfaces (Wi-Fi, USB, etc.)
+    # Without this Flask only listens on loopback and physical phones can't connect.
+    app.run(host='0.0.0.0', port=5000, debug=True)

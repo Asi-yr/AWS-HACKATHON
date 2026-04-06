@@ -1,9 +1,11 @@
+import os
+
 class msql:
     def __init__(self):
-        self.DB_HOST = "localhost"
-        self.DB_USER = "root"
-        self.DB_PASSWORD = ""
-        self.DB_NAME = "saferoute_db"
+        self.DB_HOST     = os.environ.get('MYSQL_HOST',     'localhost')
+        self.DB_USER     = os.environ.get('MYSQL_USER',     'root')
+        self.DB_PASSWORD = os.environ.get('MYSQL_PASSWORD', '')
+        self.DB_NAME     = os.environ.get('MYSQL_DB',       'saferoute_db')
 
     def get_db_connection(self):
         try:

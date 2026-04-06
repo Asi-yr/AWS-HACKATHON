@@ -599,7 +599,9 @@ def _try_parse_pagasa_response(data: dict) -> dict | None:
     name   = (active.get("name") or active.get("international_name")
               or active.get("typhoon_name") or "Tropical Cyclone")
     signal = int(active.get("signal") or active.get("max_signal")
-                 or active.get("psws") or 1)
+                 or active.get("psws") or 0)
+    if signal == 0:
+        return None  # Active cyclone but no signal number — treat as inactive
 
     return {
         "active":   True,
@@ -780,18 +782,19 @@ _NIGHT_END   = 6    # 6 AM
 # to ensure that nighttime travel is clearly flagged as higher risk even
 # in clear weather — which is accurate for Metro Manila conditions.
 _NIGHT_PENALTY = {
-    "walk":       14,
-    "walking":    14,
-    "bike":       11,
-    "bicycle":    11,
-    "motorcycle": 10,
-    "motorbike":  10,
-    "tricycle":   10,   # open cabin, short hops = exposed like motorcycle
-    "jeepney":    12,   # waiting at stops = on foot exposure
-    "bus":        12,
-    "commute":    12,
-    "car":         4,
-    "automobile":  4,
+    "walk":       12,   # physically exposed: −12 (was 14, slightly reduced)
+    "walking":    12,
+    "bike":        9,   # exposed but faster: −9
+    "bicycle":     9,
+    "motorcycle":  8,   # enclosed more, speed risk: −8
+    "motorbike":   8,
+    "tricycle":    8,
+    "jeepney":    10,   # waiting at stops = on-foot exposure: −10
+    "bus":        10,
+    "commute":    10,
+    "transit":    10,   # generic transit alias
+    "car":         3,   # enclosed, minimal extra risk at night: −3
+    "automobile":  3,
 }
 
 _NIGHT_WARNINGS = {

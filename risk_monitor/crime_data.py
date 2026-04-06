@@ -136,9 +136,21 @@ _CRIME_COLORS = {
 
 _CRIME_PENALTY = {
     "none":     0,
-    "low":      3,    # endpoint in low-crime area: −3 pts
-    "moderate": 6,    # endpoint in moderate area: −6 pts
-    "high":     10,   # endpoint in high-crime area: −10 pts
+    "low":      2,    # endpoint in low-crime area: −2 pts (was 3)
+    "moderate": 5,    # endpoint in moderate area: −5 pts (was 6)
+    "high":     8,    # endpoint in high-crime area: −8 pts (was 10)
+}
+
+# Mode multiplier for crime penalties: car is most protected, walk is most exposed.
+# Applied to both endpoint and zone penalties so scores differ meaningfully by mode.
+_CRIME_MODE_MULTIPLIER = {
+    "walk":       1.20,   # fully exposed on foot
+    "bike":       1.10,
+    "motorcycle": 1.05,
+    "commute":    1.00,   # baseline (inside vehicle, some exposure at stops)
+    "transit":    1.00,
+    "car":        0.70,   # enclosed, much lower personal crime risk
+    "automobile": 0.70,
 }
 
 _CRIME_WARNINGS = {
@@ -683,6 +695,82 @@ def get_worst_route_risk(route_zones: list[dict]) -> str:
     return levels.get(worst, "none")
 
 
+def annotate_segments_with_crime(route: dict) -> None:
+    """
+    For each segment in route['segments'], check whether its coords overlap
+    any crime zone bounding box and attach 'crime_risk' + 'crime_note'.
+
+    Mutates the segment dicts in-place. Safe to call when segments is missing
+    or empty. Called once per route, right after scan_route_crime_zones().
+
+    Each segment gets:
+        crime_risk: str  — 'high' | 'moderate' | 'low' | 'none'
+        crime_note: str  — short summary from crime_zones.json, or ''
+    """
+    segments = route.get("segments", [])
+    if not segments:
+        return
+
+    zones = _load_crime_zones()
+    coord_zones = [z for z in zones if z.get("coords") and len(z["coords"]) == 4]
+
+    for seg in segments:
+        raw = seg.get("coords", [])
+
+        # Flatten nested train-style coords: [[[lat,lon],...], ...]
+        flat: list[tuple[float, float]] = []
+        if raw and isinstance(raw[0], list) and raw[0] and isinstance(raw[0][0], list):
+            for sub in raw:
+                flat.extend((p[0], p[1]) for p in sub if len(p) >= 2)
+        else:
+            flat = [(p[0], p[1]) for p in raw if len(p) >= 2]
+
+        if not flat:
+            seg["crime_risk"] = "none"
+            seg["crime_note"] = ""
+            continue
+
+        # Segments are short — 20 samples is plenty
+        samples = _sample_waypoints(flat, max_samples=20)
+
+        worst_risk = "none"
+        worst_zone = None
+        worst_area = float("inf")
+
+        # Cache city lookups so we don't repeat for every zone per point
+        coord_city_cache: dict[tuple, str | None] = {}
+
+        for lat, lon in samples:
+            cc_key = (round(lat, 3), round(lon, 3))
+            if cc_key not in coord_city_cache:
+                coord_city_cache[cc_key] = _get_city_for_coords(lat, lon)
+            coord_city = coord_city_cache[cc_key]
+
+            for zone in coord_zones:
+                lat_min, lat_max, lon_min, lon_max = zone["coords"]
+                if not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
+                    continue
+
+                # City-awareness gate — same logic as scan_route_crime_zones
+                zone_city = _zone_city_keyword(zone.get("name", ""))
+                if zone_city and coord_city and zone_city != coord_city:
+                    continue
+
+                z_risk = zone.get("risk", "none")
+                box_area = (lat_max - lat_min) * (lon_max - lon_min)
+
+                # Keep worst risk; break ties by smaller (more specific) zone
+                if (_RISK_ORDER.get(z_risk, 0) > _RISK_ORDER.get(worst_risk, 0)
+                        or (_RISK_ORDER.get(z_risk, 0) == _RISK_ORDER.get(worst_risk, 0)
+                            and box_area < worst_area)):
+                    worst_risk = z_risk
+                    worst_zone = zone
+                    worst_area = box_area
+
+        seg["crime_risk"] = worst_risk
+        seg["crime_note"] = worst_zone.get("summary", "") if worst_zone else ""
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # MAIN PUBLIC FUNCTIONS
 # ═════════════════════════════════════════════════════════════════════════════
@@ -872,6 +960,14 @@ def apply_crime_both_ends(
 
     primary      = dest_crime if dest_level >= orig_level else orig_crime
     base_penalty = primary.get("penalty", 0)
+
+    # Apply mode multiplier: car users are far less personally exposed than walkers
+    _ct_key = commuter_type.lower().strip()
+    _mode_mult = _CRIME_MODE_MULTIPLIER.get(_ct_key, 1.0)
+    # Resolve transit aliases
+    if _ct_key in ('transit', 'jeepney', 'bus', 'train', 'commute', 'puj'):
+        _mode_mult = _CRIME_MODE_MULTIPLIER.get('transit', 1.0)
+    base_penalty = round(base_penalty * _mode_mult, 1)
     
     _debug_log(f"Applying two-end penalty. Orig: {orig_crime.get('risk_level')}, Dest: {dest_crime.get('risk_level')}. Selected: {primary.get('risk_level')} ({base_penalty} pts)")
 
@@ -974,7 +1070,17 @@ def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
         notable             = []
         applied_zone_names  = set()
 
-        _PER_ZONE_PENALTY = {"high": 2.0, "moderate": 1.0, "low": 0.4}
+        # Reduced per-zone penalties — zones are geographic facts, not active threats.
+        # A route passing through 6 zones shouldn't tank the score by 12+ pts.
+        # Cap ensures crime zones don't dominate over actual trip characteristics.
+        _PER_ZONE_PENALTY = {"high": 1.5, "moderate": 0.7, "low": 0.2}
+        _MAX_ZONE_PENALTY = 8.0   # Cap: no matter how many zones, max −8 from path crime
+
+        # Mode multiplier — car users face less personal crime risk than pedestrians
+        _ct_key_z = commuter_type.lower().strip()
+        _zone_mode_mult = _CRIME_MODE_MULTIPLIER.get(_ct_key_z, 1.0)
+        if _ct_key_z in ('transit', 'jeepney', 'bus', 'train', 'commute', 'puj'):
+            _zone_mode_mult = _CRIME_MODE_MULTIPLIER.get('transit', 1.0)
 
         for zone in deduped_route_zones:
             z_name = zone["name"].lower()
@@ -988,10 +1094,13 @@ def apply_route_crime_to_routes(routes: list, commuter_type: str) -> list:
                 incremental = _PER_ZONE_PENALTY.get(z_risk, 0.5)
 
             if incremental > 0 and z_name not in applied_zone_names:
-                extra_penalty_total += incremental
+                extra_penalty_total += incremental * _zone_mode_mult
                 applied_zone_names.add(z_name)
                 if z_risk in ("high", "moderate"):
                     notable.append(zone)
+
+        # Cap total zone penalty so it doesn't dominate the score
+        extra_penalty_total = min(extra_penalty_total, _MAX_ZONE_PENALTY)
 
         if extra_penalty_total > 0:
             _debug_log(f"Route '{r.get('name', 'unknown')}': Applying {extra_penalty_total:.1f} extra penalty for {len(notable)} zones.")

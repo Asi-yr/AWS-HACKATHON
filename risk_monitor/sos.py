@@ -22,21 +22,31 @@ Integration:
   - get_sos_panel_html()         — injects SOS button + panel into index.html
   - get_share_link(lat, lon, route_summary) → URL string
 
+FIX: All db calls now use the nsql wrapper pattern:
+  conn, c = db.get_db_connection()
+  db.execute_query(c, "SQL", (params,))
+  rows = c.fetchall() / c.fetchone()
+  conn.commit()
+  c.close(); conn.close()
+
+The original used db.connect() which does not exist on nsql, causing:
+  'nsql' object has no attribute 'connect'
+
 Nothing runs on import.
 """
 
 from datetime import datetime, timezone, timedelta
-import json
+import re
 
 _PHT = timezone(timedelta(hours=8))
 
 # ── Philippine Emergency Numbers ─────────────────────────────────────────────
 PH_EMERGENCY_NUMBERS = [
-    {"label": "PNP Emergency",        "number": "911",      "icon": "🚔"},
-    {"label": "BFP Fire",             "number": "160",      "icon": "🚒"},
-    {"label": "Red Cross PH",         "number": "143",      "icon": "🏥"},
+    {"label": "PNP Emergency",        "number": "911",          "icon": "🚔"},
+    {"label": "BFP Fire",             "number": "160",          "icon": "🚒"},
+    {"label": "Red Cross PH",         "number": "143",          "icon": "🏥"},
     {"label": "NDRRMC Hotline",       "number": "02-8911-5061", "icon": "🆘"},
-    {"label": "MMDA Traffic",         "number": "136",      "icon": "🚧"},
+    {"label": "MMDA Traffic",         "number": "136",          "icon": "🚧"},
     {"label": "LRT/MRT Operations",   "number": "02-8359-4219", "icon": "🚇"},
 ]
 
@@ -48,10 +58,12 @@ def init_sos_tables(db) -> None:
     Create SOS-related tables if they don't exist.
     Call this alongside init_user_tables() in app startup.
     """
+    # FIX: Use get_db_connection() instead of db.connect().
+    # FIX: nsql has no executescript() — run each CREATE TABLE separately
+    #      using db.execute_query().
+    conn, c = db.get_db_connection()
     try:
-        conn = db.connect()
-        c    = conn.cursor()
-        c.executescript("""
+        db.execute_query(c, """
             CREATE TABLE IF NOT EXISTS trusted_contacts (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 username      TEXT    NOT NULL,
@@ -60,29 +72,39 @@ def init_sos_tables(db) -> None:
                 contact_value TEXT    NOT NULL,
                 active        INTEGER NOT NULL DEFAULT 1,
                 created_at    TEXT    NOT NULL
-            );
+            )
+        """, ())
 
+        db.execute_query(c, """
             CREATE TABLE IF NOT EXISTS sos_events (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                username            TEXT    NOT NULL,
-                lat                 REAL,
-                lon                 REAL,
-                route_summary       TEXT,
-                message             TEXT,
-                contacts_notified   INTEGER DEFAULT 0,
-                sent_at             TEXT    NOT NULL
-            );
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                username          TEXT    NOT NULL,
+                lat               REAL,
+                lon               REAL,
+                route_summary     TEXT,
+                message           TEXT,
+                contacts_notified INTEGER DEFAULT 0,
+                sent_at           TEXT    NOT NULL
+            )
+        """, ())
 
+        db.execute_query(c, """
             CREATE INDEX IF NOT EXISTS idx_contacts_username
-                ON trusted_contacts(username);
+                ON trusted_contacts(username)
+        """, ())
+
+        db.execute_query(c, """
             CREATE INDEX IF NOT EXISTS idx_sos_username
-                ON sos_events(username);
-        """)
+                ON sos_events(username)
+        """, ())
+
         conn.commit()
-    except Exception:
-        pass
+        print("🟢 SOS tables ready.")
+    except Exception as e:
+        print(f"[SOS] init_sos_tables error: {e}")
     finally:
         try:
+            c.close()
             conn.close()
         except Exception:
             pass
@@ -95,145 +117,245 @@ def get_trusted_contacts(db, username: str) -> list:
     Returns list of active trusted contacts for a user.
     [{id, name, contact_type, contact_value, created_at}]
     """
+    # FIX: db.connect() → db.get_db_connection()
+    # FIX: c.execute()  → db.execute_query(c, ...)
+    conn, c = db.get_db_connection()
     try:
-        conn = db.connect()
-        c    = conn.cursor()
-        rows = c.execute(
+        db.execute_query(
+            c,
             "SELECT id, name, contact_type, contact_value, created_at "
             "FROM trusted_contacts WHERE username=? AND active=1 ORDER BY id",
             (username,)
-        ).fetchall()
-        conn.close()
-        return [{"id": r[0], "name": r[1], "contact_type": r[2],
-                 "contact_value": r[3], "created_at": r[4]} for r in rows]
-    except Exception:
+        )
+        rows = c.fetchall()
+        return [
+            {
+                "id":            row[0],
+                "name":          row[1],
+                "contact_type":  row[2],
+                "contact_value": row[3],
+                "created_at":    row[4],
+            }
+            for row in rows
+        ]
+    except Exception as e:
+        print(f"[SOS] get_trusted_contacts error: {e}")
         return []
+    finally:
+        try:
+            c.close()
+            conn.close()
+        except Exception:
+            pass
+
+
+def _validate_contact_value(contact_type: str, value: str) -> tuple:
+    """
+    Validate a phone number or email address.
+    Returns (is_valid: bool, error_message: str).
+
+    Phone rules:
+      - Optional leading + (for international format e.g. +63)
+      - 7 to 15 digits after the optional +
+      - Spaces, dashes, and parentheses are stripped before checking
+      - PH local format 09XXXXXXXXX (11 digits) and
+        international +639XXXXXXXXX are both accepted
+
+    Email rules:
+      - Standard format: localpart@domain.tld
+      - TLD must be at least 2 characters
+    """
+    value = value.strip()
+
+    if contact_type == "phone":
+        # Strip common formatting characters before validating
+        digits_only = re.sub(r'[\s\-\(\)]', '', value)
+        # Must be + followed by 7-15 digits, or just 7-15 digits
+        if not re.fullmatch(r'\+?\d{7,15}', digits_only):
+            return (
+                False,
+                "Invalid phone number. Use a valid format like 09171234567 "
+                "or +639171234567 (7–15 digits)."
+            )
+        return (True, "")
+
+    if contact_type == "email":
+        # RFC-5321 simplified — covers all real-world email addresses
+        if not re.fullmatch(r'[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}', value):
+            return (
+                False,
+                "Invalid email address. Use a real email like name@example.com."
+            )
+        return (True, "")
+
+    return (False, "Unknown contact type.")
 
 
 def add_trusted_contact(db, username: str, name: str,
-                         contact_type: str, contact_value: str) -> dict:
+                        contact_type: str, contact_value: str) -> dict:
     """
     Add a trusted contact (max 5 per user).
     contact_type: 'phone' or 'email'
-
     Returns {"ok": bool, "message": str, "id": int or None}
     """
-    # Validate
     if not name.strip() or not contact_value.strip():
         return {"ok": False, "message": "Name and contact value are required.", "id": None}
     if contact_type not in ("phone", "email"):
         return {"ok": False, "message": "contact_type must be 'phone' or 'email'.", "id": None}
 
-    try:
-        conn = db.connect()
-        c    = conn.cursor()
+    # ── Validate the phone number or email before saving ─────────────────────
+    is_valid, error_msg = _validate_contact_value(contact_type, contact_value)
+    if not is_valid:
+        return {"ok": False, "message": error_msg, "id": None}
 
-        # Enforce limit
-        count = c.execute(
+    # FIX: db.connect() → db.get_db_connection()
+    # FIX: c.execute()  → db.execute_query(c, ...)
+    conn, c = db.get_db_connection()
+    try:
+        # Enforce 5-contact limit
+        db.execute_query(
+            c,
             "SELECT COUNT(*) FROM trusted_contacts WHERE username=? AND active=1",
             (username,)
-        ).fetchone()[0]
+        )
+        row = c.fetchone()
+        count = row[0] if row else 0
         if count >= 5:
-            conn.close()
             return {"ok": False, "message": "Maximum 5 trusted contacts allowed.", "id": None}
 
         now = datetime.now(_PHT).strftime("%Y-%m-%d %H:%M PHT")
-        c.execute(
-            "INSERT INTO trusted_contacts (username, name, contact_type, contact_value, active, created_at) "
+        db.execute_query(
+            c,
+            "INSERT INTO trusted_contacts "
+            "(username, name, contact_type, contact_value, active, created_at) "
             "VALUES (?, ?, ?, ?, 1, ?)",
             (username, name.strip(), contact_type, contact_value.strip(), now)
         )
         conn.commit()
         new_id = c.lastrowid
-        conn.close()
         return {"ok": True, "message": f"Contact '{name}' added.", "id": new_id}
     except Exception as e:
+        print(f"[SOS] add_trusted_contact error: {e}")
         return {"ok": False, "message": str(e), "id": None}
+    finally:
+        try:
+            c.close()
+            conn.close()
+        except Exception:
+            pass
 
 
 def remove_trusted_contact(db, username: str, contact_id: int) -> dict:
-    """Soft-delete a trusted contact."""
+    """Soft-delete a trusted contact (sets active=0)."""
+    # FIX: db.connect() → db.get_db_connection()
+    # FIX: c.execute()  → db.execute_query(c, ...)
+    conn, c = db.get_db_connection()
     try:
-        conn = db.connect()
-        c    = conn.cursor()
-        c.execute(
+        db.execute_query(
+            c,
             "UPDATE trusted_contacts SET active=0 WHERE id=? AND username=?",
             (contact_id, username)
         )
         conn.commit()
-        conn.close()
         return {"ok": True, "message": "Contact removed."}
     except Exception as e:
+        print(f"[SOS] remove_trusted_contact error: {e}")
         return {"ok": False, "message": str(e)}
+    finally:
+        try:
+            c.close()
+            conn.close()
+        except Exception:
+            pass
 
 
 # ── SOS Event Logging ─────────────────────────────────────────────────────────
 
 def log_sos_event(db, username: str, lat: float, lon: float,
-                   route_summary: str = "", message: str = "") -> dict:
+                  route_summary: str = "", message: str = "") -> dict:
     """
-    Log an SOS event to the database.
-    In a production system this would also trigger SMS/email via Twilio/SendGrid.
-    For now it logs the event and returns the share link.
-
+    Log an SOS event. In production this would also fire SMS/email via
+    Twilio/SendGrid. For now it logs and returns the share link.
     Returns {"ok": bool, "share_link": str, "contacts_count": int}
     """
-    contacts = get_trusted_contacts(db, username)
+    contacts   = get_trusted_contacts(db, username)
     n_contacts = len(contacts)
 
+    # FIX: db.connect() → db.get_db_connection()
+    # FIX: c.execute()  → db.execute_query(c, ...)
+    conn, c = db.get_db_connection()
     try:
-        conn = db.connect()
-        c    = conn.cursor()
-        now  = datetime.now(_PHT).strftime("%Y-%m-%d %H:%M PHT")
-        c.execute(
-            "INSERT INTO sos_events (username, lat, lon, route_summary, message, "
-            "contacts_notified, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        now = datetime.now(_PHT).strftime("%Y-%m-%d %H:%M PHT")
+        db.execute_query(
+            c,
+            "INSERT INTO sos_events "
+            "(username, lat, lon, route_summary, message, contacts_notified, sent_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (username, lat, lon, route_summary, message, n_contacts, now)
         )
         conn.commit()
-        conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[SOS] log_sos_event error: {e}")
+    finally:
+        try:
+            c.close()
+            conn.close()
+        except Exception:
+            pass
 
     share_link = get_share_link(lat, lon, route_summary, username)
-
     return {
-        "ok":            True,
-        "share_link":    share_link,
+        "ok":             True,
+        "share_link":     share_link,
         "contacts_count": n_contacts,
-        "message":       (f"SOS logged. {n_contacts} contact(s) would be notified. "
-                          f"Share this link: {share_link}"),
+        "message": (
+            f"SOS logged. {n_contacts} contact(s) would be notified. "
+            f"Share this link: {share_link}"
+        ),
     }
 
 
 def get_share_link(lat: float, lon: float,
-                    route_summary: str = "", username: str = "") -> str:
-    """
-    Generate a shareable Google Maps link with the user's current position.
-    In a full deployment this would be a short link to your own tracking endpoint.
-    """
+                   route_summary: str = "", username: str = "") -> str:
+    """Generate a shareable Google Maps link for the user's position."""
     if lat and lon:
-        return (f"https://maps.google.com/?q={round(lat,5)},{round(lon,5)}"
-                f"&z=16&t=m")
+        return f"https://maps.google.com/?q={round(lat, 5)},{round(lon, 5)}&z=16&t=m"
     return "https://maps.google.com/"
 
 
 def get_sos_history(db, username: str, limit: int = 10) -> list:
     """Returns recent SOS events for a user."""
+    # FIX: db.connect() → db.get_db_connection()
+    # FIX: c.execute()  → db.execute_query(c, ...)
+    conn, c = db.get_db_connection()
     try:
-        conn = db.connect()
-        c    = conn.cursor()
-        rows = c.execute(
+        db.execute_query(
+            c,
             "SELECT lat, lon, route_summary, message, contacts_notified, sent_at "
             "FROM sos_events WHERE username=? ORDER BY id DESC LIMIT ?",
             (username, limit)
-        ).fetchall()
-        conn.close()
-        return [{"lat": r[0], "lon": r[1], "route_summary": r[2],
-                 "message": r[3], "contacts_notified": r[4], "sent_at": r[5]}
-                for r in rows]
-    except Exception:
+        )
+        rows = c.fetchall()
+        return [
+            {
+                "lat":               row[0],
+                "lon":               row[1],
+                "route_summary":     row[2],
+                "message":           row[3],
+                "contacts_notified": row[4],
+                "sent_at":           row[5],
+            }
+            for row in rows
+        ]
+    except Exception as e:
+        print(f"[SOS] get_sos_history error: {e}")
         return []
+    finally:
+        try:
+            c.close()
+            conn.close()
+        except Exception:
+            pass
 
 
 # ── HTML UI ───────────────────────────────────────────────────────────────────
@@ -242,12 +364,6 @@ def get_sos_panel_html(contacts: list) -> str:
     """
     Returns the SOS panel HTML — a floating panic button + slide-up drawer.
     Injected into index.html via Jinja: {{ sos_panel | safe }}
-
-    The panel contains:
-      - Panic button (red, fixed bottom-right)
-      - Emergency numbers quick-dial
-      - Trusted contacts list
-      - "Share my location" button
     """
     contact_rows = ""
     for ct in contacts:
@@ -264,20 +380,19 @@ def get_sos_panel_html(contacts: list) -> str:
             f'</div>'
         )
     if not contact_rows:
-        contact_rows = ('<div style="color:#999;font-size:12px;padding:8px 0;">'
-                        'No trusted contacts yet. Add one in Settings.</div>')
+        contact_rows = (
+            '<div style="color:#999;font-size:12px;padding:8px 0;">'
+            'No trusted contacts yet. Add one in Settings.</div>'
+        )
 
     emergency_rows = ""
     for e in PH_EMERGENCY_NUMBERS:
-        e_number = e["number"]
-        e_icon   = e["icon"]
-        e_label  = e["label"]
         emergency_rows += (
-            f'<a href="tel:{e_number}" style="display:flex;align-items:center;gap:8px;'
+            f'<a href="tel:{e["number"]}" style="display:flex;align-items:center;gap:8px;'
             f'padding:7px 10px;background:#f8f9fa;border-radius:6px;text-decoration:none;color:#2c3e50;">'
-            f'<span style="font-size:18px;">{e_icon}</span>'
-            f'<div><div style="font-weight:bold;font-size:13px;">{e_label}</div>'
-            f'<div style="color:#e74c3c;font-size:12px;font-weight:bold;">{e_number}</div></div>'
+            f'<span style="font-size:18px;">{e["icon"]}</span>'
+            f'<div><div style="font-weight:bold;font-size:13px;">{e["label"]}</div>'
+            f'<div style="color:#e74c3c;font-size:12px;font-weight:bold;">{e["number"]}</div></div>'
             f'</a>'
         )
 
@@ -309,7 +424,6 @@ def get_sos_panel_html(contacts: list) -> str:
     <button onclick="toggleSosPanel()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">✕</button>
   </div>
 
-  <!-- Share location -->
   <button onclick="sendSOS()" style="
     width:100%;padding:13px;background:#c0392b;color:#fff;
     border:none;border-radius:10px;font-size:15px;font-weight:800;
@@ -319,13 +433,11 @@ def get_sos_panel_html(contacts: list) -> str:
 
   <div id="sos-feedback" style="font-size:12px;color:#27ae60;margin-bottom:10px;min-height:16px;"></div>
 
-  <!-- Emergency numbers -->
   <div style="font-weight:700;font-size:13px;color:#2c3e50;margin-bottom:8px;">📞 Emergency Numbers</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:16px;">
     {emergency_rows}
   </div>
 
-  <!-- Trusted contacts -->
   <div style="font-weight:700;font-size:13px;color:#2c3e50;margin-bottom:8px;">
     👥 My Trusted Contacts
     <span style="font-weight:normal;font-size:11px;color:#888;">(managed in Settings)</span>
@@ -334,7 +446,6 @@ def get_sos_panel_html(contacts: list) -> str:
     {contact_rows}
   </div>
 
-  <!-- Share link -->
   <button onclick="shareLocation()" style="
     width:100%;padding:10px;background:#2980b9;color:#fff;
     border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
@@ -366,18 +477,19 @@ async function sendSOS() {{
         ? navigator.geolocation.getCurrentPosition(res, rej, {{timeout:6000}})
         : rej(new Error('Geolocation not available'))
     );
-    const lat = pos.coords.latitude;
-    const lon = pos.coords.longitude;
     const resp = await fetch('/api/sos', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{lat, lon, message: 'SOS from SafeRoute user'}})
+      body: JSON.stringify({{
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+        message: 'SOS from SafeRoute user'
+      }})
     }});
     const data = await resp.json();
     if (data.ok) {{
       fb.style.color = '#27ae60';
       fb.textContent = '✅ ' + data.message;
-      // Copy share link automatically
       if (data.share_link) {{
         try {{ await navigator.clipboard.writeText(data.share_link); }} catch(e) {{}}
       }}
@@ -397,9 +509,7 @@ async function shareLocation() {{
     const pos = await new Promise((res, rej) =>
       navigator.geolocation.getCurrentPosition(res, rej, {{timeout:6000}})
     );
-    const lat = pos.coords.latitude;
-    const lon = pos.coords.longitude;
-    const link = `https://maps.google.com/?q=${{lat}},${{lon}}&z=16`;
+    const link = `https://maps.google.com/?q=${{pos.coords.latitude}},${{pos.coords.longitude}}&z=16`;
     await navigator.clipboard.writeText(link);
     fb.textContent = '✅ Link copied: ' + link;
     fb.style.color = '#27ae60';
@@ -420,9 +530,7 @@ async function removeTrustedContact(id) {{
 
 
 def get_trusted_contacts_settings_html(contacts: list) -> str:
-    """
-    Returns HTML for the trusted contacts section on the Settings page.
-    """
+    """Returns HTML for the trusted contacts section on the Settings page."""
     rows = ""
     for ct in contacts:
         icon     = "📞" if ct["contact_type"] == "phone" else "✉️"

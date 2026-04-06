@@ -13,6 +13,13 @@
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 </head>
 <body>
+<!-- Prefill data from Flask — read by JS below; no Jinja2 in <script> blocks -->
+<div id="__prefill__"
+  data-mode="{{ prefill_mode | default('') }}"
+  data-origin="{{ prefill_origin | default('') }}"
+  data-dest="{{ prefill_destination | default('') }}"
+  data-auto-search="{{ 'true' if auto_search_history else 'false' }}"
+  style="display:none"></div>
 <!-- ── Corner Alert Panel — modern notification cards instead of top banners ── -->
 <!-- Server-side alerts injected as data; JS renders them as corner cards        -->
 <div id="alert-panel" style="position:fixed;top:16px;right:16px;z-index:100000;pointer-events:none;
@@ -531,7 +538,7 @@ document.querySelectorAll('.mode-tile').forEach(tile => {
 document.getElementById('transit-subtoggle').classList.add('visible');
 updateSubToggles();
 
-// ── Locate-me (origin) ────────────────────────────────────────────────────────
+// ── Locate-me (origin) *** ────────────────────────────────────────────────────────
 document.getElementById('locate-origin-btn').addEventListener('click', () => {
   if (!navigator.geolocation) return;
   navigator.geolocation.getCurrentPosition(pos => {
@@ -2269,11 +2276,15 @@ map.on('zoomend', function () {
     applyZoneLOD();
 });
 
+</script>
+<script>
 // ── History prefill: set active mode tile from URL params ─────────────────
 (function() {
-  var prefillMode   = {{ (prefill_mode | default("")) | tojson }};
-  var prefillOrigin = {{ (prefill_origin | default("")) | tojson }};
-  var prefillDest   = {{ (prefill_destination | default("")) | tojson }};
+  var pd            = document.getElementById('__prefill__');
+  var prefillMode   = pd ? (pd.dataset.mode   || '') : '';
+  var prefillOrigin = pd ? (pd.dataset.origin || '') : '';
+  var prefillDest   = pd ? (pd.dataset.dest   || '') : '';
+  var autoSearch    = pd ? pd.dataset.autoSearch === 'true' : false;r
 
   // Populate input fields from prefill values and geocode to place markers
   if (prefillOrigin) {
@@ -2349,7 +2360,7 @@ map.on('zoomend', function () {
   checkEnableButton();
 
   // Auto-trigger the search if both origin and destination are set AND user has enabled auto-search
-  if (prefillOrigin && prefillDest && {{ 'true' if auto_search_history else 'false' }}) {
+  if (prefillOrigin && prefillDest && autoSearch) {
     // Short delay to let map finish initialising
     setTimeout(function() {
       document.getElementById('find-routes-btn').disabled = false;
@@ -2358,6 +2369,8 @@ map.on('zoomend', function () {
   }
 })();
 
+</script>
+<script>
 // ── Poll incident status on page load ────────────────────────────────────────
 (function pollIncidentStatus() {
     const statusEl = document.getElementById('incident-status');
