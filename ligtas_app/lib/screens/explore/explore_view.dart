@@ -101,8 +101,9 @@ class _ExploreScaffold extends StatefulWidget {
 class _ExploreScaffoldState extends State<_ExploreScaffold> {
   final MapController _mapCtrl = MapController();
 
-  static const double _panelMin = 0.40;
-  static const double _panelMax = 0.58;
+  static const double _panelHidden = 0.08; // collapsed — only handle + filter bar
+  static const double _panelMin  = 0.40;   // default open
+  static const double _panelMax  = 0.58;   // fully expanded
   double _panelHeight = -1;
 
   @override
@@ -146,23 +147,26 @@ class _ExploreScaffoldState extends State<_ExploreScaffold> {
   void _onPanelDragUpdate(DragUpdateDetails d, double screenH) {
     setState(() {
       _panelHeight = (_panelHeight - d.primaryDelta!).clamp(
-        screenH * _panelMin,
+        screenH * _panelHidden,
         screenH * _panelMax,
       );
     });
   }
 
   void _onPanelDragEnd(DragEndDetails d, double screenH) {
-    final min = screenH * _panelMin;
-    final max = screenH * _panelMax;
-    final vel = d.primaryVelocity ?? 0;
+    final hidden = screenH * _panelHidden;
+    final min    = screenH * _panelMin;
+    final max    = screenH * _panelMax;
+    final vel    = d.primaryVelocity ?? 0;
     double target;
     if (vel < -400) {
-      target = max;
+      // fast swipe up → expand
+      target = _panelHeight < min ? min : max;
     } else if (vel > 400) {
-      target = min;
+      // fast swipe down → collapse or hide
+      target = _panelHeight > min ? min : hidden;
     } else {
-      final snaps = [min, max];
+      final snaps = [hidden, min, max];
       target = snaps.reduce(
         (a, b) => (a - _panelHeight).abs() < (b - _panelHeight).abs() ? a : b,
       );
@@ -531,17 +535,26 @@ class _SuggestionDrawer extends StatelessWidget {
           onVerticalDragEnd: onDragEnd,
           child: Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 12),
+            padding: const EdgeInsets.symmetric(vertical: 10),
             color: Colors.transparent,
-            child: Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.border(isDark),
-                  borderRadius: BorderRadius.circular(2),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.border(isDark),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 4),
+                Icon(
+                  Icons.keyboard_arrow_up_rounded,
+                  size: 16,
+                  color: AppColors.text3(isDark),
+                ),
+              ],
             ),
           ),
         ),

@@ -1204,12 +1204,34 @@ class _InputHeader extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Text(
-            'Tap 📡 for GPS location · Tap 📌 to pin dest on map',
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 11,
-              color: AppColors.text3(isDark),
-              fontWeight: FontWeight.w500,
+          RichText(
+            text: TextSpan(
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                color: AppColors.text3(isDark),
+                fontWeight: FontWeight.w500,
+              ),
+              children: [
+                const TextSpan(text: 'Tap '),
+                WidgetSpan(
+                  alignment: PlaceholderAlignment.middle,
+                  child: Icon(
+                    Icons.my_location_rounded,
+                    size: 13,
+                    color: AppColors.text3(isDark),
+                  ),
+                ),
+                const TextSpan(text: ' for GPS location · Tap '),
+                WidgetSpan(
+                  alignment: PlaceholderAlignment.middle,
+                  child: Icon(
+                    Icons.push_pin_rounded,
+                    size: 13,
+                    color: AppColors.text3(isDark),
+                  ),
+                ),
+                const TextSpan(text: ' to pin dest on map'),
+              ],
             ),
           ),
           // ── Find Routes button — visible when both fields are filled ──
