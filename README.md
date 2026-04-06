@@ -1,4 +1,11 @@
 ### START HERE
+
+to begin running the web for testing, please follow these instructions:
+1. run in terminal: source .venv/bin/activate
+2. run in terminal: python main.py
+3. run  in terminal: open -a Simulator        
+4. run in terminal: flutter run
+
 to begin running the web for testing, please follow these instructions:
 1. change directory to the folder of the cloned repository.
 2. run: py -m venv <name> | py -m venv .venv
